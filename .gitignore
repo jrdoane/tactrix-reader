@@ -1,0 +1,47 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+out/
+
+# Clojure / JVM
+.cpcache/
+target/
+classes/
+*.class
+*.jar
+*.war
+*.ear
+pom.xml
+pom.xml.asc
+*.pom
+
+# Test and coverage output
+.nyc_output/
+coverage/
+lcov.info
+
+# Logs
+*.log
+logs/
+
+# Environment and local machine config
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
