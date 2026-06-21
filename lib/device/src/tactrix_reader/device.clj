@@ -8,6 +8,7 @@
             [clojure.string :as str]))
 
 (def default-open-timeout-ms 2000)
+(def default-observe-ms 2000)
 
 (defn usbmodem-path?
   "Returns true when `path` looks like a macOS USB modem serial device."
@@ -172,3 +173,106 @@
                  :path path
                  :error :timeout
                  :timeout-ms timeout-ms}))))))
+
+(defn classify-vbat
+  "Classifies an adapter-reported battery voltage.
+
+  This is ready for a future backend that can read Vbat. The current macOS
+  serial backend does not know how to ask the OpenPort for this value."
+  [volts]
+  (cond
+    (nil? volts) :unknown
+    (>= volts 9.0) :present
+    (< volts 3.0) :absent
+    :else :unknown))
+
+(defn vehicle-status
+  "Returns host and vehicle connection status for the first detected device or
+  a supplied device/path.
+
+  On the current macOS serial backend this reports real host presence/openability
+  and explicit unsupported vehicle states. It does not guess proprietary
+  OpenPort commands or send protocol traffic."
+  ([]
+   (vehicle-status (first (scan-devices))))
+  ([device-or-path]
+   (let [device (when (map? device-or-path) device-or-path)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         device-present? (boolean (or device path))
+         open-result (when path (open-device! path))
+         openable? (true? (:ok? open-result))
+         reasons (cond-> []
+                   (not device-present?)
+                   (conj :device-not-detected)
+
+                   (and device-present? (not path))
+                   (conj :device-path-not-detected)
+
+                   (and path (not openable?))
+                   (conj (or (:error open-result) :device-open-failed))
+
+                   openable?
+                   (conj :host-device-openable)
+
+                   :always
+                   (conj :mac-serial-vehicle-protocol-unsupported))]
+     {:backend :mac-serial
+      :device (when device
+                (select-keys device [:vendor :product :serial :vendor-id :product-id :path :paths :source]))
+      :path path
+      :host/device-present? device-present?
+      :host/openable? openable?
+      :host/open-result open-result
+      :vehicle/power {:state :unsupported
+                      :volts nil}
+      :vehicle/ecu {:state :unsupported}
+      :confidence (if openable? :medium :low)
+      :reasons reasons})))
+
+(defn- byte->hex [b]
+  (format "%02X" (bit-and b 0xFF)))
+
+(defn observe-device
+  "Passively opens a serial device and records bytes that are already emitted.
+
+  This is a protocol-discovery helper. It never writes to the device."
+  ([device-or-path]
+   (observe-device device-or-path {}))
+  ([device-or-path {:keys [duration-ms]
+                    :or {duration-ms default-observe-ms}}]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
+     (if-not (seq path)
+       {:ok? false
+        :error :missing-path}
+       (let [deadline (+ (System/currentTimeMillis) duration-ms)]
+         (try
+           (with-open [input (java.io.BufferedInputStream.
+                              (java.io.FileInputStream. path))]
+             (loop [bytes []]
+               (if (>= (System/currentTimeMillis) deadline)
+                 {:ok? true
+                  :path path
+                  :duration-ms duration-ms
+                  :byte-count (count bytes)
+                  :bytes bytes
+                  :hex (mapv byte->hex bytes)}
+                 (let [available (.available input)]
+                   (if (pos? available)
+                     (let [buffer (byte-array (min available 256))
+                           read-count (.read input buffer)]
+                       (recur (into bytes
+                                    (map #(bit-and % 0xFF))
+                                    (take read-count buffer))))
+                     (do
+                       (Thread/sleep 25)
+                       (recur bytes)))))))
+           (catch java.io.FileNotFoundException e
+             {:ok? false
+              :path path
+              :error :not-found-or-permission-denied
+              :message (.getMessage e)})
+           (catch Throwable e
+             {:ok? false
+              :path path
+              :error :observe-failed
+              :message (.getMessage e)})))))))

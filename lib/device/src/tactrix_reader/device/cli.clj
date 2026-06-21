@@ -9,9 +9,14 @@
 (defn- usage []
   {:usage ["clojure -M:run scan"
            "clojure -M:run open"
-           "clojure -M:run open /dev/cu.usbmodemTAlgJ3P81"]
+           "clojure -M:run open /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run status"
+           "clojure -M:run observe"
+           "clojure -M:run observe /dev/cu.usbmodemTAlgJ3P81"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
-              :open "Open and close the first detected device, or the given path."}})
+              :open "Open and close the first detected device, or the given path."
+              :status "Report host/device status and conservative vehicle status."
+              :observe "Passively read bytes from the device for protocol discovery."}})
 
 (defn- first-detected-path []
   (some :path (device/scan-devices)))
@@ -25,6 +30,12 @@
 
         "open"
         (print-edn (device/open-device! (or arg (first-detected-path))))
+
+        "status"
+        (print-edn (device/vehicle-status (or arg (first (device/scan-devices)))))
+
+        "observe"
+        (print-edn (device/observe-device (or arg (first-detected-path))))
 
         (print-edn (assoc (usage)
                           :error :unknown-command

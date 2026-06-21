@@ -34,3 +34,31 @@
 (deftest open-device-reports-missing-path
   (is (= {:ok? false :error :missing-path}
          (device/open-device! nil))))
+
+(deftest classifies-vbat-thresholds
+  (is (= :unknown (device/classify-vbat nil)))
+  (is (= :absent (device/classify-vbat 0.0)))
+  (is (= :absent (device/classify-vbat 2.99)))
+  (is (= :unknown (device/classify-vbat 3.0)))
+  (is (= :unknown (device/classify-vbat 8.99)))
+  (is (= :present (device/classify-vbat 9.0)))
+  (is (= :present (device/classify-vbat 12.4))))
+
+(deftest vehicle-status-reports-no-device
+  (is (= {:backend :mac-serial
+          :device nil
+          :path nil
+          :host/device-present? false
+          :host/openable? false
+          :host/open-result nil
+          :vehicle/power {:state :unsupported
+                          :volts nil}
+          :vehicle/ecu {:state :unsupported}
+          :confidence :low
+          :reasons [:device-not-detected
+                    :mac-serial-vehicle-protocol-unsupported]}
+         (device/vehicle-status nil))))
+
+(deftest observe-device-reports-missing-path
+  (is (= {:ok? false :error :missing-path}
+         (device/observe-device nil))))
