@@ -186,6 +186,34 @@
     (< volts 3.0) :absent
     :else :unknown))
 
+(defn read-vbat
+  "Reads adapter-reported vehicle battery voltage when the active backend
+  supports it.
+
+  The macOS serial device is visible as `/dev/cu.usbmodem...`, but the
+  OpenPort-local command for Vbat is not currently known. Return data instead
+  of throwing so callers can distinguish an unsupported backend from vehicle
+  absence."
+  ([device-or-path]
+   (read-vbat device-or-path {}))
+  ([device-or-path _opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
+     {:ok? false
+      :backend :mac-serial
+      :path path
+      :state :unsupported
+      :volts nil
+      :error :mac-serial-vbat-command-unknown
+      :message "OpenPort 2.0 direct serial Vbat command is not known; no bus traffic was sent."})))
+
+(defn- vehicle-power-status [vbat-result]
+  (if (:ok? vbat-result)
+    {:state (classify-vbat (:volts vbat-result))
+     :volts (:volts vbat-result)}
+    {:state (or (:state vbat-result) :unknown)
+     :volts (:volts vbat-result)
+     :error (:error vbat-result)}))
+
 (defn vehicle-status
   "Returns host and vehicle connection status for the first detected device or
   a supplied device/path.
@@ -201,6 +229,8 @@
          device-present? (boolean (or device path))
          open-result (when path (open-device! path))
          openable? (true? (:ok? open-result))
+         vbat-result (when openable? (read-vbat (or device path)))
+         vehicle-power (vehicle-power-status vbat-result)
          reasons (cond-> []
                    (not device-present?)
                    (conj :device-not-detected)
@@ -214,8 +244,8 @@
                    openable?
                    (conj :host-device-openable)
 
-                   :always
-                   (conj :mac-serial-vehicle-protocol-unsupported))]
+                   (= :unsupported (:state vehicle-power))
+                   (conj :mac-serial-vbat-command-unknown))]
      {:backend :mac-serial
       :device (when device
                 (select-keys device [:vendor :product :serial :vendor-id :product-id :path :paths :source]))
@@ -223,8 +253,8 @@
       :host/device-present? device-present?
       :host/openable? openable?
       :host/open-result open-result
-      :vehicle/power {:state :unsupported
-                      :volts nil}
+      :vehicle/power vehicle-power
+      :vehicle/vbat-result vbat-result
       :vehicle/ecu {:state :unsupported}
       :confidence (if openable? :medium :low)
       :reasons reasons})))

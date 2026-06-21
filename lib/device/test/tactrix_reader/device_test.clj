@@ -44,6 +44,16 @@
   (is (= :present (device/classify-vbat 9.0)))
   (is (= :present (device/classify-vbat 12.4))))
 
+(deftest read-vbat-reports-unsupported-mac-serial-backend
+  (is (= {:ok? false
+          :backend :mac-serial
+          :path "/dev/cu.usbmodemTAlgJ3P81"
+          :state :unsupported
+          :volts nil
+          :error :mac-serial-vbat-command-unknown
+          :message "OpenPort 2.0 direct serial Vbat command is not known; no bus traffic was sent."}
+         (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
+
 (deftest vehicle-status-reports-no-device
   (is (= {:backend :mac-serial
           :device nil
@@ -51,12 +61,13 @@
           :host/device-present? false
           :host/openable? false
           :host/open-result nil
-          :vehicle/power {:state :unsupported
-                          :volts nil}
+          :vehicle/power {:state :unknown
+                          :volts nil
+                          :error nil}
+          :vehicle/vbat-result nil
           :vehicle/ecu {:state :unsupported}
           :confidence :low
-          :reasons [:device-not-detected
-                    :mac-serial-vehicle-protocol-unsupported]}
+          :reasons [:device-not-detected]}
          (device/vehicle-status nil))))
 
 (deftest observe-device-reports-missing-path

@@ -78,6 +78,16 @@ The voltage policy for a future backend is:
 - `< 3.0V`: vehicle power absent
 - `3.0V` to `< 9.0V`: unknown
 
+You can call the voltage read boundary directly:
+
+```sh
+clojure -M:run vbat
+```
+
+On the current macOS direct-serial backend this returns `:unsupported`, because
+the OpenPort 2.0 command for reading Vbat over `/dev/cu.usbmodem...` is not yet
+known. That is different from proving vehicle power is absent.
+
 ## Passive observe
 
 For protocol discovery, the library can passively read bytes emitted by the
