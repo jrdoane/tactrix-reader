@@ -88,6 +88,60 @@ On the current macOS direct-serial backend this returns `:unsupported`, because
 the OpenPort 2.0 command for reading Vbat over `/dev/cu.usbmodem...` is not yet
 known. That is different from proving vehicle power is absent.
 
+## Direct adapter backend
+
+This project does not depend on a vendor J2534 library. The code we own talks to
+the adapter through the device path exposed by the operating system. The current
+direct backend can enumerate the adapter, open it, passively observe bytes, and
+run explicit request/response probes.
+
+```sh
+clojure -M:run direct-info
+```
+
+The J2534-shaped API will be built on top of this direct transport once the
+OpenPort command framing is identified. Until then, protocol discovery stays
+explicit and transcript-driven.
+
+## Framing discovery probes
+
+Use `probe` to give an explicit exchange a stable name and transcript shape:
+
+```sh
+clojure -M:run probe adapter-ping 01020304
+clojure -M:run probe adapter-ping 01020304 /dev/cu.usbmodemTAlgJ3P81
+```
+
+The command validates the probe name, request bytes, and device path before
+writing. It sends exactly one request, never runs sweeps, and marks the
+transcript with `:vehicle-bus-traffic? false`.
+
+Named probes are the starting point for our own J2534-shaped API. A request only
+becomes a known operation after we have repeatable captured transcripts for it.
+
+## Active adapter exchange
+
+When the adapter is connected to the computer but not a vehicle, it is safe to
+send explicit adapter-local discovery bytes. The exchange command writes only
+the hex request you provide and captures any bytes returned by the adapter:
+
+```sh
+clojure -M:run exchange 01020304
+clojure -M:run exchange 01020304 /dev/cu.usbmodemTAlgJ3P81
+```
+
+The response includes request, drained, and response bytes as EDN. This command
+does not guess commands or run a sweep.
+
+The active Vbat command is intentionally separate from `status`:
+
+```sh
+clojure -M:run active-vbat
+```
+
+Until the OpenPort 2.0 direct serial Vbat command is identified with
+`exchange`, `active-vbat` returns `:unsupported`.
+
 ## Passive observe
 
 For protocol discovery, the library can passively read bytes emitted by the

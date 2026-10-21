@@ -54,6 +54,159 @@
           :message "OpenPort 2.0 direct serial Vbat command is not known; no bus traffic was sent."}
          (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
 
+(deftest direct-backend-info-does-not-depend-on-external-libraries
+  (with-redefs [device/serial-device-paths (fn [] ["/dev/cu.usbmodemTAlgJ3P81"])]
+    (is (= {:backend :mac-serial
+            :external-libraries? false
+            :transport {:kind :macos-usbmodem
+                        :paths ["/dev/cu.usbmodemTAlgJ3P81"]}
+            :implemented [:scan-devices
+                          :open-device
+                          :vehicle-status-host-fields
+                          :observe-device
+                          :serial-exchange
+                          :run-probe
+                          :hex-request-parser]
+            :not-implemented [:openport-command-framing
+                              :adapter-vbat
+                              :j2534-pass-thru-api
+                              :can-session
+                              :k-line-session
+                              :ecu-messaging]
+            :discovery-policy {:writes :explicit-request-only
+                               :sweeps? false
+                               :vehicle-bus-traffic? false}}
+           (device/direct-backend-info)))))
+
+(deftest parses-hex-request-bytes
+  (is (= {:ok? true
+          :hex "0102FF0A"
+          :bytes [1 2 255 10]}
+         (device/hex->bytes "01 02 ff\n0a")))
+  (is (= {:ok? false
+          :error :empty-hex}
+         (device/hex->bytes "")))
+  (is (= {:ok? false
+          :error :odd-length-hex
+          :hex "ABC"}
+         (device/hex->bytes "AB C")))
+  (is (= {:ok? false
+          :error :invalid-hex
+          :hex "0x01"}
+         (device/hex->bytes "0x01"))))
+
+(deftest serial-exchange-validates-input-before-writing
+  (is (= {:ok? false
+          :error :missing-path}
+         (device/serial-exchange nil "0102")))
+  (is (= {:ok? false
+          :path "/dev/cu.usbmodemTAlgJ3P81"
+          :error :invalid-hex-request
+          :request {:ok? false
+                    :error :invalid-hex
+                    :hex "GG"}}
+         (device/serial-exchange "/dev/cu.usbmodemTAlgJ3P81" "GG"))))
+
+(deftest run-probe-validates-input-before-exchange
+  (let [called? (atom false)]
+    (with-redefs [device/serial-exchange (fn [& _]
+                                           (reset! called? true)
+                                           {:ok? true})]
+      (is (= {:ok? false
+              :backend :mac-serial
+              :error :missing-probe-name
+              :vehicle-bus-traffic? false}
+             (device/run-probe "/dev/cu.usbmodemTAlgJ3P81" "" "0102")))
+      (is (false? @called?))
+      (is (= {:ok? false
+              :backend :mac-serial
+              :probe/name "adapter-ping"
+              :error :invalid-hex-request
+              :request {:ok? false
+                        :error :invalid-hex
+                        :hex "GG"}
+              :vehicle-bus-traffic? false}
+             (device/run-probe "/dev/cu.usbmodemTAlgJ3P81" "adapter-ping" "GG")))
+      (is (false? @called?))
+      (is (= {:ok? false
+              :backend :mac-serial
+              :probe/name "adapter-ping"
+              :path nil
+              :error :missing-path
+              :request {:byte-count 2
+                        :bytes [1 2]
+                        :hex ["01" "02"]}
+              :vehicle-bus-traffic? false}
+             (device/run-probe nil "adapter-ping" "0102")))
+      (is (false? @called?)))))
+
+(deftest run-probe-wraps-exchange-as-transcript
+  (with-redefs [device/serial-exchange (fn [path request-hex]
+                                         (is (= "/dev/cu.usbmodemTAlgJ3P81" path))
+                                         (is (= "0102" request-hex))
+                                         {:ok? true
+                                          :backend :mac-serial
+                                          :path path
+                                          :request {:byte-count 2
+                                                    :bytes [1 2]
+                                                    :hex ["01" "02"]}
+                                          :drained {:byte-count 0
+                                                    :bytes []
+                                                    :hex []}
+                                          :response {:byte-count 1
+                                                     :bytes [127]
+                                                     :hex ["7F"]}
+                                          :timeout-ms 1000
+                                          :read-idle-ms 100
+                                          :max-response-bytes 256
+                                          :elapsed-ms 12
+                                          :timed-out? false
+                                          :idle? true
+                                          :truncated? false})]
+    (is (= {:ok? true
+            :backend :mac-serial
+            :probe/name "adapter-ping"
+            :path "/dev/cu.usbmodemTAlgJ3P81"
+            :operation/known? false
+            :vehicle-bus-traffic? false
+            :request {:byte-count 2
+                      :bytes [1 2]
+                      :hex ["01" "02"]}
+            :drained {:byte-count 0
+                      :bytes []
+                      :hex []}
+            :response {:byte-count 1
+                       :bytes [127]
+                       :hex ["7F"]}
+            :timeout-ms 1000
+            :read-idle-ms 100
+            :max-response-bytes 256
+            :elapsed-ms 12
+            :timed-out? false
+            :idle? true
+            :truncated? false}
+           (device/run-probe "/dev/cu.usbmodemTAlgJ3P81" " adapter-ping " "0102")))))
+
+(deftest unsupported-operation-reports-framing-boundary
+  (is (= {:ok? false
+          :backend :mac-serial
+          :operation/name :pass-thru-connect
+          :operation/known? false
+          :state :unsupported
+          :error :needs-openport-command-framing
+          :message "OpenPort command framing has not been discovered for this operation."}
+         (device/unsupported-operation :pass-thru-connect))))
+
+(deftest active-vbat-remains-explicitly-unsupported-until-command-is-known
+  (is (= {:ok? false
+          :backend :mac-serial
+          :path "/dev/cu.usbmodemTAlgJ3P81"
+          :state :unsupported
+          :volts nil
+          :error :mac-serial-vbat-command-unknown
+          :message "Use serial-exchange while disconnected from a vehicle to identify the OpenPort 2.0 direct serial Vbat command."}
+         (device/active-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
+
 (deftest vehicle-status-reports-no-device
   (is (= {:backend :mac-serial
           :device nil

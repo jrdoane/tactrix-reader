@@ -9,6 +9,9 @@
 
 (def default-open-timeout-ms 2000)
 (def default-observe-ms 2000)
+(def default-exchange-timeout-ms 1000)
+(def default-exchange-idle-ms 100)
+(def default-exchange-max-response-bytes 256)
 
 (defn usbmodem-path?
   "Returns true when `path` looks like a macOS USB modem serial device."
@@ -259,8 +262,260 @@
       :confidence (if openable? :medium :low)
       :reasons reasons})))
 
+(defn direct-backend-info
+  "Describes the in-house adapter backend and its current discovery surface."
+  []
+  {:backend :mac-serial
+   :external-libraries? false
+   :transport {:kind :macos-usbmodem
+               :paths (serial-device-paths)}
+   :implemented [:scan-devices
+                 :open-device
+                 :vehicle-status-host-fields
+                 :observe-device
+                 :serial-exchange
+                 :run-probe
+                 :hex-request-parser]
+   :not-implemented [:openport-command-framing
+                     :adapter-vbat
+                     :j2534-pass-thru-api
+                     :can-session
+                     :k-line-session
+                     :ecu-messaging]
+   :discovery-policy {:writes :explicit-request-only
+                      :sweeps? false
+                      :vehicle-bus-traffic? false}})
+
 (defn- byte->hex [b]
   (format "%02X" (bit-and b 0xFF)))
+
+(defn hex->bytes
+  "Parses a hex byte string into unsigned byte values.
+
+  Whitespace is ignored. Separators such as `0x`, commas, and dashes are not
+  accepted so discovery commands stay explicit and copy/paste friendly."
+  [s]
+  (let [hex (str/replace (str s) #"\s+" "")]
+    (cond
+      (empty? hex)
+      {:ok? false
+       :error :empty-hex}
+
+      (odd? (count hex))
+      {:ok? false
+       :error :odd-length-hex
+       :hex hex}
+
+      (not (re-matches #"[0-9A-Fa-f]+" hex))
+      {:ok? false
+       :error :invalid-hex
+       :hex hex}
+
+      :else
+      {:ok? true
+       :hex (str/upper-case hex)
+       :bytes (mapv (fn [pair]
+                      (Integer/parseInt pair 16))
+                    (map str/join (partition 2 hex)))})))
+
+(defn- byte-values->byte-array [values]
+  (byte-array (map unchecked-byte values)))
+
+(defn- read-available-bytes [^java.io.BufferedInputStream input max-count]
+  (loop [bytes []]
+    (let [remaining (- max-count (count bytes))
+          available (min (.available input) remaining)]
+      (if (pos? available)
+        (let [buffer (byte-array (min available 256))
+              read-count (.read input buffer)]
+          (if (pos? read-count)
+            (recur (into bytes
+                         (map #(bit-and % 0xFF))
+                         (take read-count buffer)))
+            bytes))
+        bytes))))
+
+(defn- read-response [input {:keys [timeout-ms read-idle-ms max-response-bytes]}]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop [bytes []
+           last-byte-at nil]
+      (let [now (System/currentTimeMillis)
+            idle? (and last-byte-at
+                       (>= (- now last-byte-at) read-idle-ms))
+            timed-out? (>= now deadline)
+            full? (>= (count bytes) max-response-bytes)]
+        (if (or idle? timed-out? full?)
+          {:bytes bytes
+           :timed-out? (and timed-out? (empty? bytes))
+           :idle? (boolean idle?)
+           :truncated? full?}
+          (let [chunk (read-available-bytes input (- max-response-bytes (count bytes)))]
+            (if (seq chunk)
+              (recur (into bytes chunk) (System/currentTimeMillis))
+              (do
+                (Thread/sleep 10)
+                (recur bytes last-byte-at)))))))))
+
+(defn serial-exchange
+  "Writes one explicit hex request to the adapter and captures response bytes.
+
+  This is an opt-in protocol-discovery helper for use with an adapter that is
+  not attached to a vehicle. It sends only the request supplied by the caller;
+  it does not sweep or guess commands."
+  ([device-or-path request-hex]
+   (serial-exchange device-or-path request-hex {}))
+  ([device-or-path request-hex {:keys [timeout-ms read-idle-ms max-response-bytes drain?]
+                                :or {timeout-ms default-exchange-timeout-ms
+                                     read-idle-ms default-exchange-idle-ms
+                                     max-response-bytes default-exchange-max-response-bytes
+                                     drain? true}}]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         request (hex->bytes request-hex)]
+     (cond
+       (not (seq path))
+       {:ok? false
+        :error :missing-path}
+
+       (not (:ok? request))
+       {:ok? false
+        :path path
+        :error :invalid-hex-request
+        :request request}
+
+       :else
+       (try
+         (with-open [input (java.io.BufferedInputStream.
+                            (java.io.FileInputStream. path))
+                     output (java.io.BufferedOutputStream.
+                             (java.io.FileOutputStream. path))]
+           (let [drained (if drain?
+                           (read-available-bytes input max-response-bytes)
+                           [])
+                 started-at (System/currentTimeMillis)]
+             (.write output (byte-values->byte-array (:bytes request)))
+             (.flush output)
+             (let [response (read-response input {:timeout-ms timeout-ms
+                                                  :read-idle-ms read-idle-ms
+                                                  :max-response-bytes max-response-bytes})
+                   elapsed-ms (- (System/currentTimeMillis) started-at)]
+               {:ok? true
+                :backend :mac-serial
+                :path path
+                :request {:byte-count (count (:bytes request))
+                          :bytes (:bytes request)
+                          :hex (mapv byte->hex (:bytes request))}
+                :drained {:byte-count (count drained)
+                          :bytes drained
+                          :hex (mapv byte->hex drained)}
+                :response {:byte-count (count (:bytes response))
+                           :bytes (:bytes response)
+                           :hex (mapv byte->hex (:bytes response))}
+                :timeout-ms timeout-ms
+                :read-idle-ms read-idle-ms
+                :max-response-bytes max-response-bytes
+                :elapsed-ms elapsed-ms
+                :timed-out? (:timed-out? response)
+                :idle? (:idle? response)
+                :truncated? (:truncated? response)})))
+         (catch java.io.FileNotFoundException e
+           {:ok? false
+            :path path
+            :error :not-found-or-permission-denied
+            :message (.getMessage e)})
+         (catch Throwable e
+           {:ok? false
+            :path path
+            :error :exchange-failed
+            :message (.getMessage e)}))))))
+
+(defn known-operation?
+  "Returns true when `operation-name` has a discovered direct adapter command."
+  [_operation-name]
+  false)
+
+(defn unsupported-operation
+  "Returns a standard unsupported result for J2534-shaped operations whose
+  OpenPort framing has not been discovered yet."
+  [operation-name]
+  {:ok? false
+   :backend :mac-serial
+   :operation/name operation-name
+   :operation/known? false
+   :state :unsupported
+   :error :needs-openport-command-framing
+   :message "OpenPort command framing has not been discovered for this operation."})
+
+(defn- probe-request-summary [request]
+  {:byte-count (count (:bytes request))
+   :bytes (:bytes request)
+   :hex (mapv byte->hex (:bytes request))})
+
+(defn probe-result
+  "Converts a low-level exchange result into a stable discovery transcript."
+  [probe-name exchange-result]
+  (merge
+   {:ok? (:ok? exchange-result)
+    :backend :mac-serial
+    :probe/name probe-name
+    :path (:path exchange-result)
+    :operation/known? (known-operation? probe-name)
+    :vehicle-bus-traffic? false}
+   (select-keys exchange-result
+                [:request :drained :response :timeout-ms :read-idle-ms
+                 :max-response-bytes :elapsed-ms :timed-out? :idle?
+                 :truncated? :error :message])))
+
+(defn run-probe
+  "Runs one named adapter-local probe and returns a transcript-shaped result.
+
+  This validates the name, request, and path before delegating to
+  `serial-exchange`; it never sweeps or generates request bytes."
+  ([probe-name request-hex]
+   (run-probe (some :path (scan-devices)) probe-name request-hex))
+  ([device-or-path probe-name request-hex]
+   (let [name (some-> probe-name str/trim not-empty)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         request (hex->bytes request-hex)]
+     (cond
+       (not name)
+       {:ok? false
+        :backend :mac-serial
+        :error :missing-probe-name
+        :vehicle-bus-traffic? false}
+
+       (not (:ok? request))
+       {:ok? false
+        :backend :mac-serial
+        :probe/name name
+        :error :invalid-hex-request
+        :request request
+        :vehicle-bus-traffic? false}
+
+       (not (seq path))
+       {:ok? false
+        :backend :mac-serial
+        :probe/name name
+        :path path
+        :error :missing-path
+        :request (probe-request-summary request)
+        :vehicle-bus-traffic? false}
+
+       :else
+       (probe-result name (serial-exchange path request-hex))))))
+
+(defn active-vbat
+  "Placeholder for adapter-local Vbat once the OpenPort serial command is known."
+  ([device-or-path]
+   (active-vbat device-or-path {}))
+  ([device-or-path _opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
+     {:ok? false
+      :backend :mac-serial
+      :path path
+      :state :unsupported
+      :volts nil
+      :error :mac-serial-vbat-command-unknown
+      :message "Use serial-exchange while disconnected from a vehicle to identify the OpenPort 2.0 direct serial Vbat command."})))
 
 (defn observe-device
   "Passively opens a serial device and records bytes that are already emitted.
