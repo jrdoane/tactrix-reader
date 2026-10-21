@@ -13,7 +13,6 @@
            "clojure -M:run status"
            "clojure -M:run direct-info"
            "clojure -M:run vbat"
-           "clojure -M:run active-vbat"
            "clojure -M:run observe"
            "clojure -M:run observe /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run exchange 01020304"
@@ -24,8 +23,7 @@
               :open "Open and close the first detected device, or the given path."
               :status "Report host/device status and conservative vehicle status."
               :direct-info "Report the in-house direct backend discovery surface."
-              :vbat "Read adapter-reported vehicle battery voltage when supported."
-              :active-vbat "Opt-in adapter-local Vbat probe once the serial command is known."
+              :vbat "Read adapter-reported vehicle battery voltage from OBD-II pin 16."
               :observe "Passively read bytes from the device for protocol discovery."
               :exchange "Write explicit hex bytes to a disconnected adapter and capture response bytes."
               :probe "Run one named adapter-local probe and return a transcript."}})
@@ -51,9 +49,6 @@
 
         "vbat"
         (print-edn (device/read-vbat (or arg (first (device/scan-devices)))))
-
-        "active-vbat"
-        (print-edn (device/active-vbat (or arg (first (device/scan-devices)))))
 
         "observe"
         (print-edn (device/observe-device (or arg (first-detected-path))))

@@ -177,11 +177,16 @@
                  :error :timeout
                  :timeout-ms timeout-ms}))))))
 
-(defn classify-vbat
-  "Classifies an adapter-reported battery voltage.
+(declare serial-exchange)
 
-  This is ready for a future backend that can read Vbat. The current macOS
-  serial backend does not know how to ask the OpenPort for this value."
+(def vbat-pin
+  "OBD-II pin 16 carries vehicle battery +12V."
+  16)
+
+(def vbat-command (str "atr " vbat-pin "\r\n"))
+
+(defn classify-vbat
+  "Classifies an adapter-reported battery voltage."
   [volts]
   (cond
     (nil? volts) :unknown
@@ -189,25 +194,71 @@
     (< volts 3.0) :absent
     :else :unknown))
 
-(defn read-vbat
-  "Reads adapter-reported vehicle battery voltage when the active backend
-  supports it.
+(defn parse-pin-voltage-response
+  "Parses an OpenPort reply to `atr <pin>`.
 
-  The macOS serial device is visible as `/dev/cu.usbmodem...`, but the
-  OpenPort-local command for Vbat is not currently known. Return data instead
-  of throwing so callers can distinguish an unsupported backend from vehicle
-  absence."
+  A successful read looks like `arr 16 12400`, where the value is assumed to be
+  millivolts. Errors look like `are 19`, where the code matches a J2534 status
+  code (19 is ERR_PIN_INVALID)."
+  [response]
+  (let [line (str/trim (str response))]
+    (if-let [[_ pin millivolts] (re-matches #"arr (\d+) (\d+)" line)]
+      {:ok? true
+       :pin (Integer/parseInt pin)
+       :millivolts (Integer/parseInt millivolts)}
+      (if-let [[_ code] (re-matches #"are (\d+)" line)]
+        {:ok? false
+         :error :adapter-error
+         :adapter/error-code (Integer/parseInt code)}
+        {:ok? false
+         :error :unexpected-response}))))
+
+(defn- ascii->hex [s]
+  (apply str (map #(format "%02X" (int %)) s)))
+
+(defn read-vbat
+  "Reads adapter-reported vehicle battery voltage from OBD-II pin 16.
+
+  Sends the adapter-local `atr 16` command; no vehicle bus traffic is sent.
+  Returns data instead of throwing so callers can distinguish a failed read
+  from vehicle absence."
   ([device-or-path]
    (read-vbat device-or-path {}))
-  ([device-or-path _opts]
-   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
-     {:ok? false
-      :backend :mac-serial
-      :path path
-      :state :unsupported
-      :volts nil
-      :error :mac-serial-vbat-command-unknown
-      :message "OpenPort 2.0 direct serial Vbat command is not known; no bus traffic was sent."})))
+  ([device-or-path opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         exchange (serial-exchange path (ascii->hex vbat-command) opts)
+         response (apply str (map char (get-in exchange [:response :bytes])))
+         parsed (when (:ok? exchange)
+                  (parse-pin-voltage-response response))
+         failure {:ok? false
+                  :backend :mac-serial
+                  :path path
+                  :state :unknown
+                  :volts nil}]
+     (cond
+       (not (:ok? exchange))
+       (merge failure (select-keys exchange [:error :message]))
+
+       (and (:ok? parsed) (= vbat-pin (:pin parsed)))
+       (let [volts (/ (:millivolts parsed) 1000.0)]
+         {:ok? true
+          :backend :mac-serial
+          :path path
+          :pin vbat-pin
+          :millivolts (:millivolts parsed)
+          :volts volts
+          :state (classify-vbat volts)
+          :response response})
+
+       (:ok? parsed)
+       (assoc failure
+              :error :unexpected-pin
+              :response response)
+
+       :else
+       (merge failure
+              (dissoc parsed :ok?)
+              {:response response})))))
 
 (defn- vehicle-power-status [vbat-result]
   (if (:ok? vbat-result)
@@ -222,8 +273,8 @@
   a supplied device/path.
 
   On the current macOS serial backend this reports real host presence/openability
-  and explicit unsupported vehicle states. It does not guess proprietary
-  OpenPort commands or send protocol traffic."
+  and vehicle power from the adapter's pin 16 voltage. It sends only the
+  adapter-local Vbat read and no vehicle bus traffic."
   ([]
    (vehicle-status (first (scan-devices))))
   ([device-or-path]
@@ -247,8 +298,8 @@
                    openable?
                    (conj :host-device-openable)
 
-                   (= :unsupported (:state vehicle-power))
-                   (conj :mac-serial-vbat-command-unknown))]
+                   (:error vehicle-power)
+                   (conj (:error vehicle-power)))]
      {:backend :mac-serial
       :device (when device
                 (select-keys device [:vendor :product :serial :vendor-id :product-id :path :paths :source]))
@@ -275,9 +326,9 @@
                  :observe-device
                  :serial-exchange
                  :run-probe
-                 :hex-request-parser]
+                 :hex-request-parser
+                 :read-vbat]
    :not-implemented [:openport-command-framing
-                     :adapter-vbat
                      :j2534-pass-thru-api
                      :can-session
                      :k-line-session
@@ -502,20 +553,6 @@
 
        :else
        (probe-result name (serial-exchange path request-hex))))))
-
-(defn active-vbat
-  "Placeholder for adapter-local Vbat once the OpenPort serial command is known."
-  ([device-or-path]
-   (active-vbat device-or-path {}))
-  ([device-or-path _opts]
-   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
-     {:ok? false
-      :backend :mac-serial
-      :path path
-      :state :unsupported
-      :volts nil
-      :error :mac-serial-vbat-command-unknown
-      :message "Use serial-exchange while disconnected from a vehicle to identify the OpenPort 2.0 direct serial Vbat command."})))
 
 (defn observe-device
   "Passively opens a serial device and records bytes that are already emitted.

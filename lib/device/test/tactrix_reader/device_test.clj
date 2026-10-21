@@ -44,15 +44,63 @@
   (is (= :present (device/classify-vbat 9.0)))
   (is (= :present (device/classify-vbat 12.4))))
 
-(deftest read-vbat-reports-unsupported-mac-serial-backend
+(defn- fake-exchange [response]
+  (fn [path request-hex _opts]
+    (is (= "/dev/cu.usbmodemTAlgJ3P81" path))
+    (is (= "6174722031360D0A" request-hex))
+    {:ok? true
+     :path path
+     :response {:bytes (mapv int response)}}))
+
+(deftest parses-pin-voltage-responses
+  (is (= {:ok? true :pin 16 :millivolts 12400}
+         (device/parse-pin-voltage-response "arr 16 12400\r\n")))
+  (is (= {:ok? false :error :adapter-error :adapter/error-code 19}
+         (device/parse-pin-voltage-response "are 19\r\n")))
+  (is (= {:ok? false :error :unexpected-response}
+         (device/parse-pin-voltage-response ""))))
+
+(deftest read-vbat-reports-vehicle-power-present
+  (with-redefs [device/serial-exchange (fake-exchange "arr 16 12400\r\n")]
+    (is (= {:ok? true
+            :backend :mac-serial
+            :path "/dev/cu.usbmodemTAlgJ3P81"
+            :pin 16
+            :millivolts 12400
+            :volts 12.4
+            :state :present
+            :response "arr 16 12400\r\n"}
+           (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81")))))
+
+(deftest read-vbat-reports-floating-pin-as-absent
+  (with-redefs [device/serial-exchange (fake-exchange "arr 16 152\r\n")]
+    (is (= {:state :absent :volts 0.152}
+           (select-keys (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81")
+                        [:state :volts])))))
+
+(deftest read-vbat-reports-adapter-errors
+  (with-redefs [device/serial-exchange (fake-exchange "are 19\r\n")]
+    (is (= {:ok? false
+            :backend :mac-serial
+            :path "/dev/cu.usbmodemTAlgJ3P81"
+            :state :unknown
+            :volts nil
+            :error :adapter-error
+            :adapter/error-code 19
+            :response "are 19\r\n"}
+           (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
+  (with-redefs [device/serial-exchange (fake-exchange "arr 12 0\r\n")]
+    (is (= :unexpected-pin
+           (:error (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81"))))))
+
+(deftest read-vbat-reports-exchange-failures
   (is (= {:ok? false
           :backend :mac-serial
-          :path "/dev/cu.usbmodemTAlgJ3P81"
-          :state :unsupported
+          :path nil
+          :state :unknown
           :volts nil
-          :error :mac-serial-vbat-command-unknown
-          :message "OpenPort 2.0 direct serial Vbat command is not known; no bus traffic was sent."}
-         (device/read-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
+          :error :missing-path}
+         (device/read-vbat nil))))
 
 (deftest direct-backend-info-does-not-depend-on-external-libraries
   (with-redefs [device/serial-device-paths (fn [] ["/dev/cu.usbmodemTAlgJ3P81"])]
@@ -66,9 +114,9 @@
                           :observe-device
                           :serial-exchange
                           :run-probe
-                          :hex-request-parser]
+                          :hex-request-parser
+                          :read-vbat]
             :not-implemented [:openport-command-framing
-                              :adapter-vbat
                               :j2534-pass-thru-api
                               :can-session
                               :k-line-session
@@ -196,16 +244,6 @@
           :error :needs-openport-command-framing
           :message "OpenPort command framing has not been discovered for this operation."}
          (device/unsupported-operation :pass-thru-connect))))
-
-(deftest active-vbat-remains-explicitly-unsupported-until-command-is-known
-  (is (= {:ok? false
-          :backend :mac-serial
-          :path "/dev/cu.usbmodemTAlgJ3P81"
-          :state :unsupported
-          :volts nil
-          :error :mac-serial-vbat-command-unknown
-          :message "Use serial-exchange while disconnected from a vehicle to identify the OpenPort 2.0 direct serial Vbat command."}
-         (device/active-vbat "/dev/cu.usbmodemTAlgJ3P81"))))
 
 (deftest vehicle-status-reports-no-device
   (is (= {:backend :mac-serial
