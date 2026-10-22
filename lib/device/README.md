@@ -102,31 +102,83 @@ vehicle power is absent.
 
 Discovered by probing an OpenPort 2.0 (firmware 1.17.4877) that was connected
 to the computer but not a vehicle. Commands are ASCII lines terminated with
-`\r\n`; replies are ASCII lines that start with `ar`.
+`\r\n`; replies are ASCII lines that start with `ar`. The commands line up with
+J2534 PassThru functions, and error codes are J2534 status codes.
+
+Channel IDs are J2534 protocol IDs (3 = ISO9141, 5 = CAN, 6 = ISO15765). Open
+channels and filters live in the adapter and survive closing and reopening the
+serial port. Filter IDs count up across channels.
 
 | Request | Reply | Meaning |
 |---|---|---|
 | `ati` | `ari main code version : 1.17.4877` | Firmware version |
-| `ata` | `aro` | OK |
-| `atz` | `aro` | OK (likely reset) |
+| `ata` | `aro` | OK, likely PassThruOpen |
+| `atz` | `aro` | OK, likely reset or PassThruClose |
 | `atr <pin>` | `arr <pin> <value>` | Pin voltage, assumed millivolts |
-| any | `are <code>` | Error; codes match J2534 status codes |
+| `ato<proto> <flags> <baud> [tag]` | `aro` | PassThruConnect |
+| `atc<chan>` | `aro` | PassThruDisconnect; also `aro` if already closed |
+| `atg<chan> <param> [tag]` | `arg<chan> <param> <value> <tag>` | GET_CONFIG |
+| `ats<chan> <param> <value>` | `aro` | SET_CONFIG |
+| `att<chan> <len> <flags>` + `len` raw bytes | `aro` | PassThruWriteMsgs |
+| `atf<chan> <type> <flags> <len> [tag]` + mask + pattern | `arf<chan> <filter-id> <tag>` | PassThruStartMsgFilter |
+| `atk<chan> <filter-id>` | `aro` | PassThruStopMsgFilter |
+| any | `are <code>` | Error |
+
+Examples:
+
+- `ato5 0 500000` opens CAN at 500 kbps. Opening it again returns `are 20`.
+- `atg5 1` returns `arg5 1 500000 0` (DATA_RATE). `ats5 3 1` turns on LOOPBACK.
+- `atf3 1 0 1` followed by bytes `00 00` adds a pass-all filter (type 1 = PASS,
+  1-byte mask `00`, 1-byte pattern `00`) and returns `arf3 <id> 0`.
 
 Pin reads seen so far: `atr 16` (OBD-II battery +12V) returns about 150-175
 with no vehicle, `atr 12` returns 0, and `atr 17` returns about 5533, likely an
-internal supply. Other pins return `are 19` (`ERR_PIN_INVALID`).
+internal supply. Other pins return `are 19`.
 
-Other error codes seen: 3 (`ERR_INVALID_PROTOCOL_ID`), 7 (`ERR_FAILED`), and 10
-(`ERR_INVALID_MSG`). Sending `atc`, `atg`, `ato`, `ats`, `atw`, and `atx` with
-no arguments returns `are 7`; `atf`, `atk`, `atl`, `atm`, and `atn` return
-`are 3`; `atp`, `att`, and `aty` return `are 10`. These are probably J2534
-operations that need arguments. `atb`, `atd`, `ate`, `ath`, `atj`, `atq`, and
-`atu` get no reply.
+Error codes seen:
 
-Not yet confirmed:
+| Code | J2534 status |
+|---|---|
+| 1 | `ERR_NOT_SUPPORTED` (e.g. unknown config param) |
+| 2 | `ERR_INVALID_CHANNEL_ID` |
+| 3 | `ERR_INVALID_PROTOCOL_ID` |
+| 7 | `ERR_FAILED` (also missing or malformed arguments) |
+| 9 | `ERR_TIMEOUT` |
+| 10 | `ERR_INVALID_MSG` |
+| 13 | `ERR_INVALID_MSG_ID` |
+| 19 | `ERR_PIN_INVALID` |
+| 20 | `ERR_CHANNEL_IN_USE` |
+| 22 | `ERR_INVALID_FILTER_ID` |
 
-- The millivolt unit. Check `vbat` against a vehicle or a 12V bench supply on
-  pins 16 and 4/5; expect roughly 12000-14000.
+Partly understood:
+
+- `atw<chan> <addr>` blocks for about 2.5 seconds, then returns `are 7` with no
+  vehicle. That matches a 5-baud init (FIVE_BAUD_INIT) with no ECU answering.
+- `atn<chan> <id>` returns `are 13`, so it is likely PassThruStopPeriodicMsg.
+- `atp<chan>` and `aty<chan>` return `are 10`, so they expect a message. They
+  are likely PassThruStartPeriodicMsg and FAST_INIT.
+- `atx<chan> <id>` returns `are 7 <id>`. It echoes the ID like an ioctl, but
+  its arguments are unknown.
+- `atl<chan>` returns `aro`. It does not clear filters; its meaning is unknown.
+- `atm<chan> ...` returns `are 7`; unknown.
+- `atb`, `atd`, `ate`, `ath`, `atj`, `atq`, and `atu` never reply, with or
+  without a channel.
+
+Gotchas:
+
+- `att` and `atf` read exactly the declared number of payload bytes. Extra
+  bytes are parsed as the start of the next command, which then fails silently.
+- With no payload, `att` waits about 0.5 seconds and returns `are 9`.
+- A correctly sized CAN `att` returns `are 9` after about 1 second because no
+  node on the bus acknowledges the frame.
+
+Not yet confirmed, and needs vehicle power or a 12V bench supply on pin 16 with
+ground on pins 4/5:
+
+- The millivolt unit for `atr`. Expect roughly 12000-14000.
+- How received messages are delivered. A K-line `att` with LOOPBACK on and a
+  pass-all filter returned `aro` but produced no echo, probably because the
+  K-line transceiver is powered from pin 16. CAN receive also needs a bus.
 - `atv` with arguments. It may set programming voltage on a pin, so do not
   send it until its arguments are understood.
 
