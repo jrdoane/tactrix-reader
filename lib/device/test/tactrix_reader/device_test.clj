@@ -1,5 +1,6 @@
 (ns tactrix-reader.device-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [are deftest is testing]]
             [tactrix-reader.device :as device]))
 
@@ -121,7 +122,9 @@
                           :read-pid
                           :read-all-pids
                           :record
-                          :export-recording]
+                          :export-recording
+                          :live-source
+                          :replay-source]
             :not-implemented [:openport-command-framing
                               :j2534-pass-thru-api
                               :can-session
@@ -635,3 +638,168 @@
            (device/record nil "recordings/x")))
     (is (= {:ok? false :path "/dev/cu.usbmodemTAlgJ3P81" :error :missing-out-dir}
            (device/record "/dev/cu.usbmodemTAlgJ3P81" nil)))))
+
+(defn- fake-adapter
+  "An in-memory adapter for session tests. `respond` is called with each
+  command line and its binary payload and returns the bytes to send back."
+  [respond]
+  (let [incoming (java.util.concurrent.LinkedBlockingQueue.)
+        pending (atom [])
+        payload-length (fn [line]
+                         (if-let [[_ n] (re-matches #"att\d+ (\d+) \d+" line)]
+                           (parse-long n)
+                           (if-let [[_ type n] (re-matches #"atf\d+ (\d+) \d+ (\d+).*" line)]
+                             (* (if (= "3" type) 3 2) (parse-long n))
+                             0)))
+        process! (fn []
+                   (loop []
+                     (let [bytes @pending
+                           newline-at (first (keep-indexed (fn [i b] (when (= 10 b) i)) bytes))]
+                       (when newline-at
+                         (let [line (str/trim (apply str (map char (subvec bytes 0 newline-at))))
+                               end (+ (inc newline-at) (payload-length line))]
+                           (when (<= end (count bytes))
+                             (reset! pending (subvec bytes end))
+                             (doseq [b (respond line (subvec bytes (inc newline-at) end))]
+                               (.put incoming (int b)))
+                             (recur)))))))
+        receive! (fn [bs]
+                   (swap! pending into (map #(bit-and % 0xFF)) bs)
+                   (process!))
+        input (proxy [java.io.InputStream] []
+                (available [] (.size incoming))
+                (read
+                  ([] (if-let [b (.poll incoming)] b -1))
+                  ([^bytes buffer] (.read ^java.io.InputStream this buffer 0 (alength buffer)))
+                  ([^bytes buffer offset length]
+                   (loop [n 0]
+                     (if-let [b (when (< n length) (.poll incoming))]
+                       (do (aset-byte buffer (+ offset n) (unchecked-byte b))
+                           (recur (inc n)))
+                       (if (pos? n) n -1))))))
+        output (proxy [java.io.OutputStream] []
+                 (write
+                   ([b] (if (bytes? b) (receive! b) (receive! [b])))
+                   ([^bytes buffer offset length]
+                    (receive! (java.util.Arrays/copyOfRange buffer (int offset) (int (+ offset length))))))
+                 (flush []))]
+    (#'device/stream-session input output)))
+
+(def ^:private fake-pid-data
+  {0x0C [0x0C 0x80]
+   0x05 [0x55]})
+
+(defn- fake-vehicle-responder []
+  (let [clock (atom 1000000)]
+    (fn [line payload]
+      (cond
+        (= "ati" line) (ascii "ari main code version : 1.17.4877\r\n")
+        (str/starts-with? line "ato") (ascii "aro\r\n")
+        (str/starts-with? line "atc") (ascii "aro\r\n")
+        (str/starts-with? line "atf") (ascii "arf5 1 0\r\n")
+        (str/starts-with? line "att")
+        (let [pid (nth payload 6)
+              reply (into [0x41 pid] (get fake-pid-data pid [0 0 0 0]))]
+          (concat (ascii "aro\r\n")
+                  (message-bytes 5 0 (swap! clock + 1000) 0x7E8
+                                 (take 8 (concat [(count reply)] reply (repeat 0))))))
+        :else []))))
+
+(defn- wait-for [pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (cond
+        (pred) true
+        (> (System/currentTimeMillis) deadline) false
+        :else (do (Thread/sleep 10) (recur))))))
+
+(deftest reply-sample-decodes-single-frame-mode-01-replies
+  (is (= {:pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 5}
+         (device/reply-sample 0x7E8 {:type :message :id 0x7E8 :timestamp-us 5
+                                     :data [4 0x41 0x0C 0x0C 0x80 0 0 0]})))
+  (is (nil? (device/reply-sample 0x7E8 {:type :message :id 0x7E0 :timestamp-us 5
+                                        :data [2 1 0x0C 0 0 0 0 0]})))
+  (is (nil? (device/reply-sample 0x7E8 {:type :line :text "aro"}))))
+
+(deftest record-captures-a-polling-session
+  (let [dir (temp-dir)]
+    (with-redefs [device/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [result (device/record "/dev/fake" (str dir) {:duration-ms 100
+                                                          :pids [0x0C 0x05]
+                                                          :interval-ms 10})]
+        (is (true? (:ok? result)))
+        (is (pos? (:request-count result)))
+        (is (= (:request-count result) (get-in result [:counts :pid-samples])))
+        (is (= "1.17.4877" (get-in (edn/read-string (slurp (java.io.File. dir "meta.edn")))
+                                   [:adapter :firmware])))
+        (is (= ["engine-rpm" "800.0" "coolant-temp" "45"]
+               (->> (str/split-lines (slurp (java.io.File. dir "pids.csv")))
+                    (drop 1)
+                    (take 2)
+                    (mapcat #(let [[_ _ _ name value] (str/split % #",")] [name value])))))))))
+
+(deftest live-source-emits-status-and-samples
+  (let [events (atom [])]
+    (with-redefs [device/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [source (device/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x0C 0x05]
+                                                          :interval-ms 10})]
+        (is (wait-for #(<= 4 (count (filter (comp #{:sample} :type) @events))) 3000))
+        ((:stop! source))))
+    (let [statuses (filter (comp #{:status} :type) @events)
+          samples (filter (comp #{:sample} :type) @events)]
+      (is (= [{:type :status :state :running :source :live :path "/dev/fake" :firmware "1.17.4877"}
+              {:type :status :state :stopped :source :live :path "/dev/fake"}]
+             statuses))
+      (is (= {:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm}
+             (dissoc (first samples) :timestamp-us)))
+      (is (= #{:engine-rpm :coolant-temp} (set (map :name samples)))))))
+
+(deftest live-source-reports-a-missing-path
+  (let [events (atom [])]
+    ((:stop! (device/start-live-source! nil {:emit #(swap! events conj %)})))
+    (is (= [{:type :status :state :failed :source :live :path nil :error :missing-path}]
+           @events))))
+
+(defn- write-recording! [dir messages]
+  (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))
+                             (byte-array (map unchecked-byte (apply concat messages)))
+                             (make-array java.nio.file.OpenOption 0))
+  (spit (java.io.File. dir "meta.edn") (pr-str {:polling {:rx-id 0x7E8}})))
+
+(deftest replay-source-emits-recorded-samples-in-order
+  (let [dir (temp-dir)
+        events (atom [])]
+    (write-recording! dir [(message-bytes 5 0 1000000 0x372 [0 0 0 0 0 0 0 0])
+                           (message-bytes 5 0 1001000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])
+                           (message-bytes 5 0 1011000 0x7E8 [3 0x41 0x05 0x55 0 0 0 0])])
+    (let [source (device/start-replay-source! (str dir) {:emit #(swap! events conj %)
+                                                         :loop? false})]
+      (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
+      ((:stop! source)))
+    (is (= [{:type :status :state :running :source :replay :recording (str dir) :sample-count 2}
+            {:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 1001000}
+            {:type :sample :pid 0x05 :name :coolant-temp :value 45 :unit :celsius :timestamp-us 1011000}
+            {:type :status :state :stopped :source :replay :recording (str dir)}]
+           @events))))
+
+(deftest replay-source-loops-with-increasing-timestamps
+  (let [dir (temp-dir)
+        events (atom [])]
+    (write-recording! dir [(message-bytes 5 0 1000000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])
+                           (message-bytes 5 0 1010000 0x7E8 [3 0x41 0x05 0x55 0 0 0 0])])
+    (let [source (device/start-replay-source! (str dir) {:emit #(swap! events conj %)
+                                                         :speed 10.0})]
+      (is (wait-for #(<= 6 (count (filter (comp #{:sample} :type) @events))) 2000))
+      ((:stop! source)))
+    (let [timestamps (keep :timestamp-us @events)]
+      (is (apply < timestamps))
+      (is (= [1000000 1010000 1035000 1045000] (take 4 timestamps))))))
+
+(deftest replay-source-reports-an-empty-recording
+  (let [dir (temp-dir)
+        events (atom [])]
+    (write-recording! dir [(ascii "aro\r\n")])
+    ((:stop! (device/start-replay-source! (str dir) {:emit #(swap! events conj %)})))
+    (is (= [{:type :status :state :failed :source :replay :recording (str dir) :error :no-samples}]
+           @events))))

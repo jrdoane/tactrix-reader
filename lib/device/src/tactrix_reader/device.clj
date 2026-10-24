@@ -334,7 +334,9 @@
                  :read-pid
                  :read-all-pids
                  :record
-                 :export-recording]
+                 :export-recording
+                 :live-source
+                 :replay-source]
    :not-implemented [:openport-command-framing
                      :j2534-pass-thru-api
                      :can-session
@@ -1216,22 +1218,21 @@
   [0x0C 0x0D 0x04 0x11 0x45 0x49 0x5A 0x10 0x0B 0x0E
    0x06 0x07 0x44 0x05 0x0F 0x5C 0x42 0x43 0x2F 0x46])
 
-(defn- copy-available!
-  "Copies whatever the adapter has sent into `sink`. Returns true when any
-  bytes were copied."
-  [^java.io.InputStream input ^java.io.ByteArrayOutputStream sink]
+(defn- read-chunk
+  "Returns the bytes the adapter has sent so far, or nil when there are none."
+  ^bytes [^java.io.InputStream input]
   (let [available (.available input)]
-    (if (pos? available)
+    (when (pos? available)
       (let [buffer (byte-array available)
             read-count (.read input buffer)]
-        (.write sink buffer 0 read-count)
-        true)
-      false)))
+        (when (pos? read-count)
+          (java.util.Arrays/copyOf buffer read-count))))))
 
-(defn- collect! [input sink ms]
+(defn- collect! [input ^java.io.ByteArrayOutputStream sink ms]
   (let [deadline (+ (System/currentTimeMillis) ms)]
     (while (< (System/currentTimeMillis) deadline)
-      (when-not (copy-available! input sink)
+      (if-let [chunk (read-chunk input)]
+        (.write sink ^bytes chunk)
         (Thread/sleep 2)))))
 
 (defn- write-command! [^java.io.OutputStream output command payload]
@@ -1253,6 +1254,92 @@
 (defn- hex-string [bytes]
   (str/join " " (map byte->hex bytes)))
 
+(defn reply-sample
+  "Decodes a received message carrying a single-frame mode 01 reply from
+  `rx-id` into a sample with the adapter's timestamp. Returns nil for any
+  other message."
+  [rx-id {:keys [type id data timestamp-us]}]
+  (when (and (= :message type) (= rx-id id) (seq data))
+    (let [decoded (decode-mode-01 (vec (take (first data) (rest data))))]
+      (when (:ok? decoded)
+        (-> decoded
+            (dissoc :ok?)
+            (assoc :timestamp-us timestamp-us))))))
+
+(defn- run-can-session!
+  "Opens the raw CAN channel with a pass-all filter and polls `pids`
+  round-robin, one request every `interval-ms`, while `continue?` returns true.
+  Every byte the adapter sends from the connect command on is passed to
+  `on-bytes`. `on-connected` is called with the firmware version once the
+  channel is open. Always closes the channel it opened."
+  [{:keys [input output]} {:keys [pids interval-ms tx-id baud continue? on-bytes on-connected]
+                           :or {on-connected (fn [_])}}]
+  (let [channel can-channel
+        setup (java.io.ByteArrayOutputStream.)
+        connect (java.io.ByteArrayOutputStream.)]
+    (collect! input (java.io.ByteArrayOutputStream.) 200)
+    (write-command! output (str "atc" channel) [])
+    (write-command! output "ati" [])
+    (collect! input setup 300)
+    (write-command! output (str "ato" channel " 0 " baud) [])
+    (collect! input connect 300)
+    (on-bytes (.toByteArray connect))
+    (let [firmware (some #(second (re-matches #"ari main code version : (.*)" %))
+                         (reply-lines setup))
+          connect-reply (first (reply-lines connect))]
+      (if (not= "aro" connect-reply)
+        {:ok? false
+         :step :connect
+         :reply connect-reply
+         :error :connect-failed}
+        (let [request-count (atom 0)]
+          (try
+            (write-command! output (str "atf" channel " 1 0 4") (repeat 8 0))
+            (on-connected firmware)
+            (loop [i 0
+                   next-request (System/currentTimeMillis)]
+              (when (continue?)
+                (let [now (System/currentTimeMillis)]
+                  (if (and (seq pids) (>= now next-request))
+                    (do
+                      (write-command! output (str "att" channel " 12 0")
+                                      (concat (u32->bytes tx-id)
+                                              [0x02 0x01 (nth pids (mod i (count pids))) 0 0 0 0 0]))
+                      (swap! request-count inc)
+                      ;; Never schedule in the past, so a stall does not
+                      ;; cause a burst of catch-up requests.
+                      (recur (inc i) (max (+ next-request interval-ms) now)))
+                    (do
+                      (if-let [chunk (read-chunk input)]
+                        (on-bytes chunk)
+                        (Thread/sleep 1))
+                      (recur i next-request))))))
+            {:ok? true
+             :firmware firmware
+             :request-count @request-count}
+            (finally
+              (let [tail (java.io.ByteArrayOutputStream.)]
+                (collect! input tail 300)
+                (write-command! output (str "atc" channel) [])
+                (collect! input tail 300)
+                (on-bytes (.toByteArray tail))))))))))
+
+(defn- recording-rx-id [dir]
+  (let [meta-file (io/file dir "meta.edn")
+        recording-meta (when (.exists meta-file) (edn/read-string (slurp meta-file)))]
+    (get-in recording-meta [:polling :rx-id] 0x7E8)))
+
+(defn- recording-bytes [dir]
+  (unsigned-bytes (java.nio.file.Files/readAllBytes (.toPath (io/file dir "raw.bin")))))
+
+(defn recording-samples
+  "Returns the decoded PID samples in a recording's raw.bin, in order."
+  [dir]
+  (let [rx-id (recording-rx-id dir)]
+    (into []
+          (keep #(reply-sample rx-id %))
+          (:events (parse-adapter-stream (recording-bytes dir))))))
+
 (defn export-recording
   "Writes frames.csv and pids.csv in `dir` from its raw.bin.
 
@@ -1260,20 +1347,13 @@
   replies from `rx-id`, which defaults to the one in meta.edn. Times are
   seconds since the first frame, plus the adapter's microsecond timestamp."
   ([dir]
-   (let [meta-file (io/file dir "meta.edn")
-         recording-meta (when (.exists meta-file) (edn/read-string (slurp meta-file)))]
-     (export-recording dir (get-in recording-meta [:polling :rx-id] 0x7E8))))
+   (export-recording dir (recording-rx-id dir)))
   ([dir rx-id]
-   (let [raw (unsigned-bytes (java.nio.file.Files/readAllBytes (.toPath (io/file dir "raw.bin"))))
-         events (:events (parse-adapter-stream raw))
+   (let [events (:events (parse-adapter-stream (recording-bytes dir)))
          messages (filterv #(and (= :message (:type %)) (not (:malformed? %))) events)
          t0 (:timestamp-us (first messages))
          seconds (fn [timestamp-us] (format "%.6f" (/ (- timestamp-us t0) 1e6)))
-         pid-rows (for [{:keys [timestamp-us id data]} messages
-                        :when (and (= rx-id id) (seq data))
-                        :let [decoded (decode-mode-01 (vec (take (first data) (rest data))))]
-                        :when (:ok? decoded)]
-                    (assoc decoded :timestamp-us timestamp-us))]
+         pid-rows (keep #(reply-sample rx-id %) messages)]
      (with-open [writer (io/writer (io/file dir "frames.csv"))]
        (.write writer "t_s,timestamp_us,channel,status,id,dlc,data\n")
        (doseq [{:keys [timestamp-us channel status id data]} messages]
@@ -1308,8 +1388,7 @@
                                  rx-id 0x7E8
                                  baud 500000}}]
    (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
-         dir (io/file out-dir)
-         channel can-channel]
+         dir (io/file out-dir)]
      (cond
        (not (seq path))
        {:ok? false
@@ -1322,55 +1401,31 @@
 
        :else
        (try
-         (let [{:keys [input output] :as session} (open-session path)
-               setup (java.io.ByteArrayOutputStream.)
+         (let [session (open-session path)
                sink (java.io.ByteArrayOutputStream.)
                started (java.time.Instant/now)
-               request-count (atom 0)]
+               deadline (atom nil)]
            (try
-             (collect! input (java.io.ByteArrayOutputStream.) 200)
-             (write-command! output (str "atc" channel) [])
-             (write-command! output "ati" [])
-             (collect! input setup 300)
-             (write-command! output (str "ato" channel " 0 " baud) [])
-             (collect! input sink 300)
-             (let [firmware (some #(second (re-matches #"ari main code version : (.*)" %))
-                                  (reply-lines setup))
-                   connect-reply (first (reply-lines sink))]
-               (if (not= "aro" connect-reply)
-                 {:ok? false
-                  :path path
-                  :step :connect
-                  :reply connect-reply
-                  :error :connect-failed}
+             (let [result (run-can-session! session
+                                            {:pids pids
+                                             :interval-ms interval-ms
+                                             :tx-id tx-id
+                                             :baud baud
+                                             :continue? #(< (System/currentTimeMillis) @deadline)
+                                             :on-bytes #(.write sink ^bytes %)
+                                             :on-connected (fn [_]
+                                                             (reset! deadline (+ (System/currentTimeMillis)
+                                                                                 duration-ms)))})]
+               (if-not (:ok? result)
+                 (assoc result :path path)
                  (do
-                   (write-command! output (str "atf" channel " 1 0 4") (repeat 8 0))
-                   (let [deadline (+ (System/currentTimeMillis) duration-ms)]
-                     (loop [i 0
-                            next-request (System/currentTimeMillis)]
-                       (let [now (System/currentTimeMillis)]
-                         (when (< now deadline)
-                           (if (and (seq pids) (>= now next-request))
-                             (do
-                               (write-command! output (str "att" channel " 12 0")
-                                               (concat (u32->bytes tx-id)
-                                                       [0x02 0x01 (nth pids (mod i (count pids))) 0 0 0 0 0]))
-                               (swap! request-count inc)
-                               (recur (inc i) (+ next-request interval-ms)))
-                             (do
-                               (when-not (copy-available! input sink)
-                                 (Thread/sleep 1))
-                               (recur i next-request)))))))
-                   (collect! input sink 300)
-                   (write-command! output (str "atc" channel) [])
-                   (collect! input sink 300)
                    (.mkdirs dir)
                    (io/copy (.toByteArray sink) (io/file dir "raw.bin"))
                    (let [counts (assoc (export-recording dir rx-id) :raw-bytes (.size sink))
                          recording-meta {:recorded-at (str started)
                                          :duration-ms duration-ms
-                                         :adapter {:firmware firmware}
-                                         :bus {:channel channel
+                                         :adapter {:firmware (:firmware result)}
+                                         :bus {:channel can-channel
                                                :protocol :can
                                                :bitrate baud
                                                :filter :pass-all
@@ -1378,7 +1433,7 @@
                                          :polling {:tx-id tx-id
                                                    :rx-id rx-id
                                                    :interval-ms interval-ms
-                                                   :request-count @request-count
+                                                   :request-count (:request-count result)
                                                    :pids (mapv byte->hex pids)
                                                    :request-frame "02 01 <pid> 00 00 00 00 00"}
                                          :files {"raw.bin" "Exact bytes received from the adapter, including command replies."
@@ -1390,7 +1445,7 @@
                       :path path
                       :out-dir (str dir)
                       :duration-ms duration-ms
-                      :request-count @request-count
+                      :request-count (:request-count result)
                       :counts counts}))))
              (finally
                (close-session session))))
@@ -1404,3 +1459,122 @@
             :path path
             :error :record-failed
             :message (.getMessage e)}))))))
+
+(def ^:private live-fast-pids
+  "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing."
+  [0x0C 0x0D 0x04 0x11 0x5A 0x10 0x0B 0x0E])
+
+(def ^:private live-slow-pids
+  "Temperatures, voltage, fuel level, trims, lambda, and check-engine status."
+  [0x05 0x5C 0x0F 0x42 0x2F 0x06 0x07 0x44 0x46 0x01])
+
+(def default-live-schedule
+  "Request order for the live source: all fast PIDs, then one slow PID, and
+  repeat. At the default interval, fast PIDs are sampled about four times a
+  second and slow PIDs about every two seconds."
+  (vec (mapcat #(conj live-fast-pids %) live-slow-pids)))
+
+(defn- message-decoder
+  "Returns a function that takes chunks of adapter bytes and calls `on-message`
+  with each complete received message, keeping partial ones for the next chunk."
+  [on-message]
+  (let [remainder (atom [])]
+    (fn [^bytes chunk]
+      (let [parsed (parse-adapter-stream (into @remainder (unsigned-bytes chunk)))]
+        (reset! remainder (:remainder parsed))
+        (doseq [event (:events parsed)
+                :when (= :message (:type event))]
+          (on-message event))))))
+
+(defn- status-emitter [emit base]
+  (fn [state & {:as details}]
+    (emit (merge {:type :status :state state} base details))))
+
+(defn start-live-source!
+  "Polls the vehicle on a background thread and calls `emit` with each event:
+  `{:type :sample ...}` for every decoded PID reply, and `{:type :status ...}`
+  when the source is running, stopped, or failed. Returns a map whose :stop!
+  function stops polling and waits for the channel to close.
+
+  Sends read-only mode 01 requests on the vehicle bus."
+  [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud]
+                   :or {schedule default-live-schedule
+                        interval-ms default-record-interval-ms
+                        tx-id 0x7E0
+                        rx-id 0x7E8
+                        baud 500000}}]
+  (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+        running? (atom true)
+        status (status-emitter emit {:source :live :path path})
+        worker (future
+                 (try
+                   (if-not (seq path)
+                     (status :failed :error :missing-path)
+                     (let [session (open-session path)]
+                       (try
+                         (let [result (run-can-session!
+                                       session
+                                       {:pids schedule
+                                        :interval-ms interval-ms
+                                        :tx-id tx-id
+                                        :baud baud
+                                        :continue? #(deref running?)
+                                        :on-bytes (message-decoder
+                                                   (fn [message]
+                                                     (when-let [sample (reply-sample rx-id message)]
+                                                       (emit (assoc sample :type :sample)))))
+                                        :on-connected #(status :running :firmware %)})]
+                           (if (:ok? result)
+                             (status :stopped)
+                             (status :failed :error (:error result) :reply (:reply result))))
+                         (finally
+                           (close-session session)))))
+                   (catch Throwable e
+                     (status :failed :error :live-source-failed :message (.getMessage e)))))]
+    {:stop! (fn []
+              (reset! running? false)
+              @worker
+              nil)}))
+
+(defn start-replay-source!
+  "Replays a recording's PID samples on a background thread, paced by their
+  timestamps, calling `emit` with the same events as `start-live-source!`.
+  Loops by default, shifting timestamps so they keep increasing. `:speed`
+  scales playback. Returns a map whose :stop! function stops playback."
+  [dir {:keys [emit loop? speed]
+        :or {loop? true
+             speed 1.0}}]
+  (let [running? (atom true)
+        status (status-emitter emit {:source :replay :recording (str dir)})
+        gap-us 25000
+        worker (future
+                 (try
+                   (let [samples (recording-samples dir)]
+                     (if (empty? samples)
+                       (status :failed :error :no-samples)
+                       (let [t0 (:timestamp-us (first samples))
+                             span-us (- (:timestamp-us (peek samples)) t0)]
+                         (status :running :sample-count (count samples))
+                         (loop [pass 0]
+                           (let [offset (* pass (+ span-us gap-us))
+                                 started (System/nanoTime)]
+                             (doseq [sample samples
+                                     :while @running?]
+                               (let [due-ms (/ (- (:timestamp-us sample) t0) 1000.0 speed)
+                                     wait-ms (- due-ms (/ (- (System/nanoTime) started) 1e6))]
+                                 (when (pos? wait-ms)
+                                   (Thread/sleep (long wait-ms)))
+                                 (emit (assoc sample
+                                              :type :sample
+                                              :timestamp-us (+ (:timestamp-us sample) offset)))))
+                             (if (and loop? @running?)
+                               (do
+                                 (Thread/sleep (long (/ gap-us 1000.0 speed)))
+                                 (recur (inc pass)))
+                               (status :stopped)))))))
+                   (catch Throwable e
+                     (status :failed :error :replay-failed :message (.getMessage e)))))]
+    {:stop! (fn []
+              (reset! running? false)
+              @worker
+              nil)}))

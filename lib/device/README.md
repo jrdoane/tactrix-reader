@@ -403,6 +403,27 @@ clojure -M:run export-recording recordings/2026-10-24-idle
 `recordings/2026-10-24-idle` is one minute of a warm 2015 Subaru Impreza
 (manual) idling in neutral: about 57,600 frames and 2,400 PID samples.
 
+## Live and replay sources
+
+`start-live-source!` and `start-replay-source!` run on a background thread and
+call an `:emit` function with the same events, so consumers such as the engine
+server cannot tell them apart:
+
+- `{:type :sample :pid :name :value :unit :timestamp-us}` for each PID reading
+- `{:type :status :source :live|:replay :state :running|:stopped|:failed ...}`
+
+Each returns a map whose `:stop!` function stops it and waits for it to finish.
+
+The live source keeps one adapter session open on the raw CAN channel and
+sends a read-only request every 25 ms. Fast-changing PIDs (RPM, speed, load,
+throttle, pedal, MAF, manifold pressure, timing) are sampled about four times
+a second; temperatures, voltage, fuel level, trims, lambda, and check-engine
+status about every two seconds. `record` uses the same session code.
+
+The replay source plays back a recording's PID samples paced by their
+timestamps, looping by default and shifting timestamps so they keep
+increasing.
+
 ## Direct adapter backend
 
 This project does not depend on a vendor J2534 library. The code we own talks to

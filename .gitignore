@@ -48,3 +48,8 @@ logs/
 
 # Recordings: frames.csv is regenerated from raw.bin
 lib/device/recordings/**/frames.csv
+
+# Dashboard build output and dependencies
+ui/dashboard/node_modules/
+ui/dashboard/.shadow-cljs/
+services/engine-server/resources/public/assets/js/
