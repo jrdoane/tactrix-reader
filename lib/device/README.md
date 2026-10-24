@@ -289,6 +289,7 @@ Decoded PIDs:
 | PID | Name | Unit |
 |---|---|---|
 | 00, 20, 40, 60 | `supported-pids-01-20`, `-21-40`, `-41-60`, `-61-80` | list of PID numbers, also as hex strings in `:value-hex` |
+| 01 | `monitor-status` | map: `:mil-on?`, `:dtc-count`, `:ignition`, `:monitors` |
 | 04 | `engine-load` | percent |
 | 05 | `coolant-temp` | Celsius |
 | 06, 07 | `short-term-fuel-trim-bank-1`, `long-term-fuel-trim-bank-1` | percent |
@@ -300,11 +301,20 @@ Decoded PIDs:
 | 10 | `maf-air-flow` | g/s |
 | 11 | `throttle-position` | percent |
 | 1F | `run-time` | seconds since engine start |
+| 21 | `distance-with-mil-on` | km |
 | 2F | `fuel-level` | percent |
+| 30 | `warm-ups-since-codes-cleared` | count |
+| 31 | `distance-since-codes-cleared` | km |
 | 33 | `barometric-pressure` | kPa |
+| 41 | `monitor-status-this-drive-cycle` | map: `:ignition`, `:monitors` |
 | 42 | `control-module-voltage` | volts |
 | 46 | `ambient-air-temp` | Celsius |
+| 4D | `time-with-mil-on` | minutes |
+| 4E | `time-since-codes-cleared` | minutes |
 | 5C | `oil-temp` | Celsius |
+
+`:monitors` lists only the readiness monitors the vehicle has, each as
+`:complete` or `:incomplete`. MIL is the check-engine light.
 
 Other PIDs return `:unknown-pid` with the raw bytes; use `obd` for those. Not
 every vehicle supports every PID; read `pid 00` to see which it does.

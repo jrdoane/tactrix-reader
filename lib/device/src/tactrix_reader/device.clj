@@ -911,9 +911,42 @@
 (defn- temperature [[a]]
   (- a 40))
 
+(def ^:private spark-ignition-monitors
+  "Monitors in bytes C/D of PIDs 01 and 41, by bit, for gasoline engines."
+  [:catalyst :heated-catalyst :evaporative-system :secondary-air-system
+   :ac-refrigerant :oxygen-sensor :oxygen-sensor-heater :egr-system])
+
+(def ^:private compression-ignition-monitors
+  "Monitors in bytes C/D of PIDs 01 and 41, by bit, for diesel engines. Bits 2
+  and 4 are reserved."
+  [:nmhc-catalyst :nox-scr nil :boost-pressure
+   nil :exhaust-gas-sensor :pm-filter :egr-vvt-system])
+
+(defn- monitor-status
+  "Decodes bytes B-D of PIDs 01 and 41. Only monitors the vehicle has are
+  listed, each as `:complete` or `:incomplete`."
+  [[_ b c d]]
+  (let [compression? (bit-test b 3)
+        common (for [[bit monitor] [[0 :misfire] [1 :fuel-system] [2 :components]]
+                     :when (bit-test b bit)]
+                 [monitor (if (bit-test b (+ bit 4)) :incomplete :complete)])
+        specific (for [[bit monitor] (map-indexed vector (if compression?
+                                                           compression-ignition-monitors
+                                                           spark-ignition-monitors))
+                       :when (and monitor (bit-test c bit))]
+                   [monitor (if (bit-test d bit) :incomplete :complete)])]
+    {:ignition (if compression? :compression :spark)
+     :monitors (into (sorted-map) (concat common specific))}))
+
+(defn- monitor-status-since-codes-cleared [[a :as bytes]]
+  (merge {:mil-on? (bit-test a 7)
+          :dtc-count (bit-and a 0x7F)}
+         (monitor-status bytes)))
+
 (def mode-01-pids
   "Common OBD-II mode 01 PIDs with their SAE J1979 formulas."
   {0x00 {:name :supported-pids-01-20 :byte-count 4 :decode (supported-pids 0x00) :pid-list? true}
+   0x01 {:name :monitor-status :byte-count 4 :decode monitor-status-since-codes-cleared}
    0x04 {:name :engine-load :byte-count 1 :unit :percent :decode percent}
    0x05 {:name :coolant-temp :byte-count 1 :unit :celsius :decode temperature}
    0x06 {:name :short-term-fuel-trim-bank-1 :byte-count 1 :unit :percent :decode fuel-trim}
@@ -927,11 +960,17 @@
    0x11 {:name :throttle-position :byte-count 1 :unit :percent :decode percent}
    0x1F {:name :run-time :byte-count 2 :unit :seconds :decode word}
    0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20) :pid-list? true}
+   0x21 {:name :distance-with-mil-on :byte-count 2 :unit :km :decode word}
    0x2F {:name :fuel-level :byte-count 1 :unit :percent :decode percent}
+   0x30 {:name :warm-ups-since-codes-cleared :byte-count 1 :unit :count :decode first}
+   0x31 {:name :distance-since-codes-cleared :byte-count 2 :unit :km :decode word}
    0x33 {:name :barometric-pressure :byte-count 1 :unit :kpa :decode first}
    0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40) :pid-list? true}
+   0x41 {:name :monitor-status-this-drive-cycle :byte-count 4 :decode monitor-status}
    0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
    0x46 {:name :ambient-air-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x4D {:name :time-with-mil-on :byte-count 2 :unit :minutes :decode word}
+   0x4E {:name :time-since-codes-cleared :byte-count 2 :unit :minutes :decode word}
    0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
    0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
 

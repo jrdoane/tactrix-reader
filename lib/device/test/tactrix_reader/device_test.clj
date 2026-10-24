@@ -502,3 +502,39 @@
               :supported []}
              (device/read-all-pids "/dev/cu.usbmodemTAlgJ3P81")))
       (is (= [0x00] @requested)))))
+
+(deftest decodes-monitor-status-since-codes-cleared
+  (is (= {:mil-on? true
+          :dtc-count 1
+          :ignition :spark
+          :monitors {:catalyst :complete
+                     :components :complete
+                     :evaporative-system :incomplete
+                     :fuel-system :complete
+                     :misfire :complete
+                     :oxygen-sensor :complete
+                     :oxygen-sensor-heater :complete}}
+         (:value (device/decode-mode-01 [0x41 0x01 0x81 0x07 0x65 0x04]))))
+  (testing "diesel monitors and incomplete common monitors"
+    (is (= {:mil-on? false
+            :dtc-count 0
+            :ignition :compression
+            :monitors {:egr-vvt-system :incomplete
+                       :misfire :incomplete
+                       :nmhc-catalyst :complete}}
+           (:value (device/decode-mode-01 [0x41 0x01 0x00 0x19 0x81 0x80]))))))
+
+(deftest decodes-monitor-status-this-drive-cycle
+  (is (= {:ignition :spark
+          :monitors {:catalyst :complete
+                     :components :complete
+                     :misfire :complete}}
+         (:value (device/decode-mode-01 [0x41 0x41 0x00 0x05 0x01 0x00])))))
+
+(deftest decodes-diagnostic-counters
+  (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:name :value :unit]))
+    [0x41 0x21 0x00 0x00] {:name :distance-with-mil-on :value 0 :unit :km}
+    [0x41 0x30 0x05] {:name :warm-ups-since-codes-cleared :value 5 :unit :count}
+    [0x41 0x31 0x12 0x34] {:name :distance-since-codes-cleared :value 4660 :unit :km}
+    [0x41 0x4D 0x00 0x0A] {:name :time-with-mil-on :value 10 :unit :minutes}
+    [0x41 0x4E 0x01 0x00] {:name :time-since-codes-cleared :value 256 :unit :minutes}))
