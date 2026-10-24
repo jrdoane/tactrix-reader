@@ -379,9 +379,10 @@ clojure -M:run record recordings/my-drive
 clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81
 ```
 
-It opens CAN at 500 kbps with a pass-all filter and sends one read-only request
-to `7E0` every 25 ms, rotating through the PIDs, so each is sampled about twice
-a second. Calling `record` with `:pids []` only listens.
+It opens CAN at 500 kbps with a pass-all filter and polls with the same
+schedule as the live source (below): one read-only request to `7E0` every
+15 ms, so fast-changing PIDs are sampled about every 135 ms. Calling `record`
+with `:pids []` only listens.
 
 The folder gets:
 
@@ -401,7 +402,9 @@ clojure -M:run export-recording recordings/2026-10-24-idle
 ```
 
 `recordings/2026-10-24-idle` is one minute of a warm 2015 Subaru Impreza
-(manual) idling in neutral: about 57,600 frames and 2,400 PID samples.
+(manual) idling in neutral: about 57,600 frames and 2,400 PID samples. It was
+made with an earlier schedule that polled 20 PIDs every 25 ms in turn, so each
+value is sampled only every 500 ms.
 
 ## Live and replay sources
 
@@ -415,10 +418,12 @@ server cannot tell them apart:
 Each returns a map whose `:stop!` function stops it and waits for it to finish.
 
 The live source keeps one adapter session open on the raw CAN channel and
-sends a read-only request every 25 ms. Fast-changing PIDs (RPM, speed, load,
-throttle, pedal, MAF, manifold pressure, timing) are sampled about four times
-a second; temperatures, voltage, fuel level, trims, lambda, and check-engine
-status about every two seconds. `record` uses the same session code.
+sends a read-only request every 15 ms (`default-poll-interval-ms`). The
+schedule (`default-poll-schedule`) sends all fast-changing PIDs (RPM, speed,
+load, throttle, pedal, MAF, manifold pressure, timing), then one slow PID
+(temperatures, voltage, fuel level, trims, lambda, check-engine status), and
+repeats. Each fast PID is sampled about every 135 ms and each slow PID about
+every 1.35 seconds. `record` uses the same session code and schedule.
 
 The replay source plays back a recording's PID samples paced by their
 timestamps, looping by default and shifting timestamps so they keep

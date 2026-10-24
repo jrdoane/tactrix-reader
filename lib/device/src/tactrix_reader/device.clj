@@ -1211,12 +1211,24 @@
   5)
 
 (def default-record-duration-ms 60000)
-(def default-record-interval-ms 25)
 
-(def default-record-pids
-  "Mode 01 PIDs polled while recording; all decode to a single number."
-  [0x0C 0x0D 0x04 0x11 0x45 0x49 0x5A 0x10 0x0B 0x0E
-   0x06 0x07 0x44 0x05 0x0F 0x5C 0x42 0x43 0x2F 0x46])
+(def default-poll-interval-ms
+  "Gap between polling requests. The ECU answers in about 1 ms."
+  15)
+
+(def ^:private fast-pids
+  "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing."
+  [0x0C 0x0D 0x04 0x11 0x5A 0x10 0x0B 0x0E])
+
+(def ^:private slow-pids
+  "Temperatures, voltage, fuel level, trims, lambda, and check-engine status."
+  [0x05 0x5C 0x0F 0x42 0x2F 0x06 0x07 0x44 0x46 0x01])
+
+(def default-poll-schedule
+  "Request order for recording and the live source: all fast PIDs, then one
+  slow PID, and repeat. At the default interval, each fast PID is sampled
+  about every 135 ms and each slow PID about every 1.35 seconds."
+  (vec (mapcat #(conj fast-pids %) slow-pids)))
 
 (defn- read-chunk
   "Returns the bytes the adapter has sent so far, or nil when there are none."
@@ -1382,8 +1394,8 @@
    (record device-or-path out-dir {}))
   ([device-or-path out-dir {:keys [duration-ms pids interval-ms tx-id rx-id baud]
                             :or {duration-ms default-record-duration-ms
-                                 pids default-record-pids
-                                 interval-ms default-record-interval-ms
+                                 pids default-poll-schedule
+                                 interval-ms default-poll-interval-ms
                                  tx-id 0x7E0
                                  rx-id 0x7E8
                                  baud 500000}}]
@@ -1460,20 +1472,6 @@
             :error :record-failed
             :message (.getMessage e)}))))))
 
-(def ^:private live-fast-pids
-  "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing."
-  [0x0C 0x0D 0x04 0x11 0x5A 0x10 0x0B 0x0E])
-
-(def ^:private live-slow-pids
-  "Temperatures, voltage, fuel level, trims, lambda, and check-engine status."
-  [0x05 0x5C 0x0F 0x42 0x2F 0x06 0x07 0x44 0x46 0x01])
-
-(def default-live-schedule
-  "Request order for the live source: all fast PIDs, then one slow PID, and
-  repeat. At the default interval, fast PIDs are sampled about four times a
-  second and slow PIDs about every two seconds."
-  (vec (mapcat #(conj live-fast-pids %) live-slow-pids)))
-
 (defn- message-decoder
   "Returns a function that takes chunks of adapter bytes and calls `on-message`
   with each complete received message, keeping partial ones for the next chunk."
@@ -1498,8 +1496,8 @@
 
   Sends read-only mode 01 requests on the vehicle bus."
   [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud]
-                   :or {schedule default-live-schedule
-                        interval-ms default-record-interval-ms
+                   :or {schedule default-poll-schedule
+                        interval-ms default-poll-interval-ms
                         tx-id 0x7E0
                         rx-id 0x7E8
                         baud 500000}}]
