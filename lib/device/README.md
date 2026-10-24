@@ -306,11 +306,15 @@ Decoded PIDs:
 | 1F | `run-time` | seconds since engine start |
 | 21 | `distance-with-mil-on` | km |
 | 24 | `wideband-oxygen-sensor-1-voltage` | map: `:lambda`, `:volts` |
+| 2C | `commanded-egr` | percent |
+| 2D | `egr-error` | percent |
+| 2E | `commanded-evap-purge` | percent |
 | 2F | `fuel-level` | percent |
 | 30 | `warm-ups-since-codes-cleared` | count |
 | 31 | `distance-since-codes-cleared` | km |
 | 33 | `barometric-pressure` | kPa |
 | 34 | `wideband-oxygen-sensor-1-current` | map: `:lambda`, `:milliamps` |
+| 3C-3F | `catalyst-temp-bank-1-sensor-1`, `-bank-2-sensor-1`, `-bank-1-sensor-2`, `-bank-2-sensor-2` | Celsius |
 | 41 | `monitor-status-this-drive-cycle` | map: `:ignition`, `:monitors` |
 | 42 | `control-module-voltage` | volts |
 | 43 | `absolute-load` | percent |
@@ -323,6 +327,7 @@ Decoded PIDs:
 | 4D | `time-with-mil-on` | minutes |
 | 4E | `time-since-codes-cleared` | minutes |
 | 51 | `fuel-type` | keyword such as `:gasoline` |
+| 53 | `evap-vapor-pressure-absolute` | kPa |
 | 5A | `relative-accelerator-pedal-position` | percent |
 | 5C | `oil-temp` | Celsius |
 

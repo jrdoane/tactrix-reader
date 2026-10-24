@@ -571,3 +571,12 @@
     0x4B :accelerator-pedal-position-f
     0x4C :commanded-throttle-actuator
     0x5A :relative-accelerator-pedal-position))
+
+(deftest decodes-emissions-hardware-pids
+  (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:name :value :unit]))
+    [0x41 0x2C 0x80] {:name :commanded-egr :value 50.2 :unit :percent}
+    [0x41 0x2D 0x70] {:name :egr-error :value -12.5 :unit :percent}
+    [0x41 0x2E 0xFF] {:name :commanded-evap-purge :value 100.0 :unit :percent}
+    [0x41 0x3C 0x12 0x34] {:name :catalyst-temp-bank-1-sensor-1 :value 426.0 :unit :celsius}
+    [0x41 0x3F 0x01 0x91] {:name :catalyst-temp-bank-2-sensor-2 :value 0.1 :unit :celsius}
+    [0x41 0x53 0x4E 0x21] {:name :evap-vapor-pressure-absolute :value 100.005 :unit :kpa}))

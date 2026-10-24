@@ -914,6 +914,9 @@
   [bytes]
   (round-to 3 (/ (* 2.0 (word bytes)) 65536)))
 
+(defn- catalyst-temperature [bytes]
+  (round-to 1 (- (/ (word bytes) 10.0) 40)))
+
 (def ^:private fuel-system-states
   {0 :none
    1 :open-loop-cold
@@ -1019,11 +1022,18 @@
    0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20) :pid-list? true}
    0x21 {:name :distance-with-mil-on :byte-count 2 :unit :km :decode word}
    0x24 {:name :wideband-oxygen-sensor-1-voltage :byte-count 4 :decode wideband-oxygen-sensor-voltage}
+   0x2C {:name :commanded-egr :byte-count 1 :unit :percent :decode percent}
+   0x2D {:name :egr-error :byte-count 1 :unit :percent :decode fuel-trim}
+   0x2E {:name :commanded-evap-purge :byte-count 1 :unit :percent :decode percent}
    0x2F {:name :fuel-level :byte-count 1 :unit :percent :decode percent}
    0x30 {:name :warm-ups-since-codes-cleared :byte-count 1 :unit :count :decode first}
    0x31 {:name :distance-since-codes-cleared :byte-count 2 :unit :km :decode word}
    0x33 {:name :barometric-pressure :byte-count 1 :unit :kpa :decode first}
    0x34 {:name :wideband-oxygen-sensor-1-current :byte-count 4 :decode wideband-oxygen-sensor-current}
+   0x3C {:name :catalyst-temp-bank-1-sensor-1 :byte-count 2 :unit :celsius :decode catalyst-temperature}
+   0x3D {:name :catalyst-temp-bank-2-sensor-1 :byte-count 2 :unit :celsius :decode catalyst-temperature}
+   0x3E {:name :catalyst-temp-bank-1-sensor-2 :byte-count 2 :unit :celsius :decode catalyst-temperature}
+   0x3F {:name :catalyst-temp-bank-2-sensor-2 :byte-count 2 :unit :celsius :decode catalyst-temperature}
    0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40) :pid-list? true}
    0x41 {:name :monitor-status-this-drive-cycle :byte-count 4 :decode monitor-status}
    0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
@@ -1040,6 +1050,7 @@
    0x4D {:name :time-with-mil-on :byte-count 2 :unit :minutes :decode word}
    0x4E {:name :time-since-codes-cleared :byte-count 2 :unit :minutes :decode word}
    0x51 {:name :fuel-type :byte-count 1 :decode fuel-type}
+   0x53 {:name :evap-vapor-pressure-absolute :byte-count 2 :unit :kpa :decode #(round-to 3 (/ (word %) 200.0))}
    0x5A {:name :relative-accelerator-pedal-position :byte-count 1 :unit :percent :decode percent}
    0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
    0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
