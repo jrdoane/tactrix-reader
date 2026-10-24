@@ -416,7 +416,10 @@
     [0x41 0x42 0x30 0x07] {:ok? true :name :control-module-voltage :value 12.295 :unit :volts}
     [0x41 0x0D 0x64] {:ok? true :name :vehicle-speed :value 100 :unit :km-per-hour}
     [0x41 0x11 0xFF] {:ok? true :name :throttle-position :value 100.0 :unit :percent}
+    [0x41 0x2F 0xB3] {:ok? true :name :fuel-level :value 70.2 :unit :percent}
+    [0x41 0x04 0x55] {:ok? true :name :engine-load :value 33.3 :unit :percent}
     [0x41 0x06 0x80] {:ok? true :name :short-term-fuel-trim-bank-1 :value 0.0 :unit :percent}
+    [0x41 0x07 0x7B] {:ok? true :name :long-term-fuel-trim-bank-1 :value -3.9 :unit :percent}
     [0x41 0x0E 0x80] {:ok? true :name :timing-advance :value 0.0 :unit :degrees}
     [0x41 0x10 0x01 0x2C] {:ok? true :name :maf-air-flow :value 3.0 :unit :grams-per-second}))
 

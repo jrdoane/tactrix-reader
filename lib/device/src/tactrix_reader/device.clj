@@ -898,11 +898,14 @@
 (defn- word [[a b]]
   (+ (* 256 a) b))
 
+(defn- round-1 [x]
+  (/ (Math/round (* 10.0 x)) 10.0))
+
 (defn- percent [[a]]
-  (/ (* 100.0 a) 255))
+  (round-1 (/ (* 100.0 a) 255)))
 
 (defn- fuel-trim [[a]]
-  (/ (* 100.0 (- a 128)) 128))
+  (round-1 (/ (* 100.0 (- a 128)) 128)))
 
 (defn- temperature [[a]]
   (- a 40))
