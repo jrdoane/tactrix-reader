@@ -303,6 +303,7 @@ Decoded PIDs:
 | 11 | `throttle-position` | percent |
 | 13 | `oxygen-sensors-present` | list such as `:bank-1-sensor-1` |
 | 15 | `oxygen-sensor-bank-1-sensor-2` | map: `:volts`, `:fuel-trim-percent` (nil if unused) |
+| 1C | `obd-standard` | keyword such as `:obd-and-obd-ii` |
 | 1F | `run-time` | seconds since engine start |
 | 21 | `distance-with-mil-on` | km |
 | 24 | `wideband-oxygen-sensor-1-voltage` | map: `:lambda`, `:volts` |
@@ -330,10 +331,12 @@ Decoded PIDs:
 | 53 | `evap-vapor-pressure-absolute` | kPa |
 | 5A | `relative-accelerator-pedal-position` | percent |
 | 5C | `oil-temp` | Celsius |
+| 65 | `auxiliary-io-status` | map of reported inputs, e.g. `:manual-transmission-in-gear?` (false in neutral) |
 
 `:monitors` lists only the readiness monitors the vehicle has, each as
-`:complete` or `:incomplete`. MIL is the check-engine light. Fuel system and
-fuel type codes the decoder does not recognise are returned as numbers.
+`:complete` or `:incomplete`. MIL is the check-engine light. Fuel system,
+fuel type, and OBD standard codes the decoder does not recognise are returned
+as numbers.
 
 Other PIDs return `:unknown-pid` with the raw bytes; use `obd` for those. Not
 every vehicle supports every PID; read `pid 00` to see which it does.

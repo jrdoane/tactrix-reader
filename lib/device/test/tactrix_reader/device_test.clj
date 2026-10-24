@@ -580,3 +580,16 @@
     [0x41 0x3C 0x12 0x34] {:name :catalyst-temp-bank-1-sensor-1 :value 426.0 :unit :celsius}
     [0x41 0x3F 0x01 0x91] {:name :catalyst-temp-bank-2-sensor-2 :value 0.1 :unit :celsius}
     [0x41 0x53 0x4E 0x21] {:name :evap-vapor-pressure-absolute :value 100.005 :unit :kpa}))
+
+(deftest decodes-obd-standard-and-auxiliary-io
+  (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:name :value]))
+    [0x41 0x1C 0x01] {:name :obd-standard :value :obd-ii-carb}
+    [0x41 0x1C 0x0B] {:name :obd-standard :value :jobd-and-obd-ii}
+    [0x41 0x1C 0x0E] {:name :obd-standard :value 14}
+    [0x41 0x65 0x02 0x02] {:name :auxiliary-io-status
+                           :value {:automatic-transmission-in-drive? true}}
+    [0x41 0x65 0x04 0x00] {:name :auxiliary-io-status
+                           :value {:manual-transmission-in-gear? false}}
+    [0x41 0x65 0x09 0x08] {:name :auxiliary-io-status
+                           :value {:pto-active? false :glow-plug-lamp-on? true}}
+    [0x41 0x65 0x00 0xFF] {:name :auxiliary-io-status :value {}}))

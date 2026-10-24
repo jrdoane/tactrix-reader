@@ -965,6 +965,44 @@
   [[a]]
   (get fuel-types a a))
 
+(def ^:private obd-standards
+  {1 :obd-ii-carb
+   2 :obd-epa
+   3 :obd-and-obd-ii
+   4 :obd-i
+   5 :not-obd-compliant
+   6 :eobd
+   7 :eobd-and-obd-ii
+   8 :eobd-and-obd
+   9 :eobd-obd-and-obd-ii
+   10 :jobd
+   11 :jobd-and-obd-ii
+   12 :jobd-and-eobd
+   13 :jobd-eobd-and-obd-ii
+   17 :emd
+   18 :emd-plus
+   19 :hd-obd-c
+   20 :hd-obd
+   21 :wwh-obd})
+
+(defn- obd-standard
+  "Unrecognised codes are returned as numbers."
+  [[a]]
+  (get obd-standards a a))
+
+(defn- auxiliary-io-status
+  "Byte A says which inputs are reported; byte B holds their states. Only
+  reported inputs are listed. The transmission bits are 0 in neutral, which
+  was confirmed on a manual vehicle."
+  [[a b]]
+  (into {}
+        (for [[bit key] [[0 :pto-active?]
+                         [1 :automatic-transmission-in-drive?]
+                         [2 :manual-transmission-in-gear?]
+                         [3 :glow-plug-lamp-on?]]
+              :when (bit-test a bit)]
+          [key (bit-test b bit)])))
+
 (defn- temperature [[a]]
   (- a 40))
 
@@ -1018,6 +1056,7 @@
    0x11 {:name :throttle-position :byte-count 1 :unit :percent :decode percent}
    0x13 {:name :oxygen-sensors-present :byte-count 1 :decode oxygen-sensors-present}
    0x15 {:name :oxygen-sensor-bank-1-sensor-2 :byte-count 2 :decode narrowband-oxygen-sensor}
+   0x1C {:name :obd-standard :byte-count 1 :decode obd-standard}
    0x1F {:name :run-time :byte-count 2 :unit :seconds :decode word}
    0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20) :pid-list? true}
    0x21 {:name :distance-with-mil-on :byte-count 2 :unit :km :decode word}
@@ -1053,7 +1092,8 @@
    0x53 {:name :evap-vapor-pressure-absolute :byte-count 2 :unit :kpa :decode #(round-to 3 (/ (word %) 200.0))}
    0x5A {:name :relative-accelerator-pedal-position :byte-count 1 :unit :percent :decode percent}
    0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
-   0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
+   0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}
+   0x65 {:name :auxiliary-io-status :byte-count 2 :decode auxiliary-io-status}})
 
 (def ^:private mode-01-pids-by-name
   (into {} (map (fn [[pid {:keys [name]}]] [name pid])) mode-01-pids))
