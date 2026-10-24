@@ -1,0 +1,52 @@
+{:recorded-at "2026-10-24T19:30:41.781501Z",
+ :duration-ms 60000,
+ :vehicle
+ {:description "2015 Subaru Impreza, manual transmission",
+  :state "engine warm, idling in neutral"},
+ :adapter {:product "Tactrix OpenPort 2.0", :firmware "1.17.4877"},
+ :bus
+ {:channel 5,
+  :protocol :can,
+  :bitrate 500000,
+  :filter :pass-all,
+  :loopback false,
+  :note
+  "The 7E0 requests appear in frames.csv even with LOOPBACK off: the adapter delivers its own transmitted frames when the filter passes them."},
+ :polling
+ {:tx-id 2016,
+  :rx-id 2024,
+  :interval-ms 25,
+  :request-count 2400,
+  :pids
+  ["0C"
+   "0D"
+   "04"
+   "11"
+   "45"
+   "49"
+   "5A"
+   "10"
+   "0B"
+   "0E"
+   "06"
+   "07"
+   "44"
+   "05"
+   "0F"
+   "5C"
+   "42"
+   "43"
+   "2F"
+   "46"],
+  :request-frame "02 01 <pid> 00 00 00 00 00"},
+ :files
+ {"raw.bin"
+  "Exact bytes received from the adapter, including command replies. Parse with tactrix-reader.device/parse-adapter-stream.",
+  "frames.csv"
+  "Every received CAN frame. t_s is seconds since the first frame; id and data are hex. Not committed; regenerate with `clojure -M:run export-recording recordings/2026-10-24-idle`.",
+  "pids.csv" "Decoded mode 01 replies from 7E8."},
+ :counts
+ {:raw-bytes 1198432,
+  :frames 57627,
+  :pid-samples 2400,
+  :reply-lines {"aro" 2402, "arf5" 1}}}

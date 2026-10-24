@@ -155,8 +155,12 @@ Status values seen:
 
 | Status | Seen on | Meaning |
 |---|---|---|
-| `00` | CAN | Received frame, or the LOOPBACK copy of a sent frame |
-| `20` | CAN with LOOPBACK | ID 0, no data, right after the echo; likely transmit done |
+| `00` | CAN | Received frame, or a copy of a frame this adapter sent |
+| `20` | CAN with LOOPBACK | ID 0, no data, right after the sent frame's copy; likely transmit done |
+
+On CAN, the adapter delivers a copy of each frame it sends whenever the
+channel's filters pass that ID, even with LOOPBACK off. LOOPBACK adds the `20`
+frame.
 | `10` | ISO15765 | Sent ID, no data; likely transmit done |
 | `80` | ISO15765 | Reply ID, no data; a multi-frame reply has started |
 | `40` | ISO15765 with padding | Complete, reassembled message |
@@ -362,6 +366,42 @@ clojure -M:run pids
 PIDs that fail to read are listed in `:errors` and make `:ok?` false. Decoded
 PIDs the vehicle does not support are listed in `:not-supported` and are not
 requested.
+
+## Recordings
+
+`record` captures raw CAN traffic for offline work while polling a set of mode
+01 PIDs (RPM, speed, load, temperatures, trims, lambda, throttle and pedal,
+voltage, fuel level). It records for 60 seconds unless given a number of
+seconds:
+
+```sh
+clojure -M:run record recordings/my-drive
+clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81
+```
+
+It opens CAN at 500 kbps with a pass-all filter and sends one read-only request
+to `7E0` every 25 ms, rotating through the PIDs, so each is sampled about twice
+a second. Calling `record` with `:pids []` only listens.
+
+The folder gets:
+
+| File | Contents |
+|---|---|
+| `raw.bin` | Exact bytes the adapter sent, including command replies |
+| `meta.edn` | Firmware, bus settings, polling schedule, and counts |
+| `frames.csv` | Every CAN frame, including copies of the polling requests |
+| `pids.csv` | Decoded PID replies |
+
+Both CSVs use `t_s` (seconds since the first frame) and the adapter's
+microsecond timestamp, so PID values line up with bus traffic. They are derived
+from `raw.bin`; `frames.csv` is large and not committed. Regenerate both with:
+
+```sh
+clojure -M:run export-recording recordings/2026-10-24-idle
+```
+
+`recordings/2026-10-24-idle` is one minute of a warm 2015 Subaru Impreza
+(manual) idling in neutral: about 57,600 frames and 2,400 PID samples.
 
 ## Direct adapter backend
 

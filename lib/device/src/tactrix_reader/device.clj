@@ -3,8 +3,10 @@
 
   This namespace intentionally starts at the host/device layer. It proves that
   macOS can see and open the adapter before any vehicle protocol is attempted."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.java.shell :as shell]
+            [clojure.pprint :as pprint]
             [clojure.string :as str]))
 
 (def default-open-timeout-ms 2000)
@@ -330,7 +332,9 @@
                  :read-vbat
                  :obd-request
                  :read-pid
-                 :read-all-pids]
+                 :read-all-pids
+                 :record
+                 :export-recording]
    :not-implemented [:openport-command-framing
                      :j2534-pass-thru-api
                      :can-session
@@ -1199,3 +1203,204 @@
                          (select-keys result [:pid :name :value :unit])))
           :errors errors
           :not-supported (vec (remove supported? decodable))})))))
+
+(def can-channel
+  "The adapter uses J2534 protocol IDs as channel IDs; 5 is raw CAN."
+  5)
+
+(def default-record-duration-ms 60000)
+(def default-record-interval-ms 25)
+
+(def default-record-pids
+  "Mode 01 PIDs polled while recording; all decode to a single number."
+  [0x0C 0x0D 0x04 0x11 0x45 0x49 0x5A 0x10 0x0B 0x0E
+   0x06 0x07 0x44 0x05 0x0F 0x5C 0x42 0x43 0x2F 0x46])
+
+(defn- copy-available!
+  "Copies whatever the adapter has sent into `sink`. Returns true when any
+  bytes were copied."
+  [^java.io.InputStream input ^java.io.ByteArrayOutputStream sink]
+  (let [available (.available input)]
+    (if (pos? available)
+      (let [buffer (byte-array available)
+            read-count (.read input buffer)]
+        (.write sink buffer 0 read-count)
+        true)
+      false)))
+
+(defn- collect! [input sink ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)]
+    (while (< (System/currentTimeMillis) deadline)
+      (when-not (copy-available! input sink)
+        (Thread/sleep 2)))))
+
+(defn- write-command! [^java.io.OutputStream output command payload]
+  (.write output (byte-values->byte-array (concat (map int (str command "\r\n")) payload)))
+  (.flush output))
+
+(defn- unsigned-bytes [^bytes bytes]
+  (mapv #(bit-and % 0xFF) bytes))
+
+(defn- reply-lines [^java.io.ByteArrayOutputStream sink]
+  (keep :text (:events (parse-adapter-stream (unsigned-bytes (.toByteArray sink))))))
+
+(defn- csv-field [value]
+  (let [s (str value)]
+    (if (re-find #"[\",\n]" s)
+      (str "\"" (str/replace s "\"" "\"\"") "\"")
+      s)))
+
+(defn- hex-string [bytes]
+  (str/join " " (map byte->hex bytes)))
+
+(defn export-recording
+  "Writes frames.csv and pids.csv in `dir` from its raw.bin.
+
+  frames.csv lists every received CAN frame. pids.csv lists decoded mode 01
+  replies from `rx-id`, which defaults to the one in meta.edn. Times are
+  seconds since the first frame, plus the adapter's microsecond timestamp."
+  ([dir]
+   (let [meta-file (io/file dir "meta.edn")
+         recording-meta (when (.exists meta-file) (edn/read-string (slurp meta-file)))]
+     (export-recording dir (get-in recording-meta [:polling :rx-id] 0x7E8))))
+  ([dir rx-id]
+   (let [raw (unsigned-bytes (java.nio.file.Files/readAllBytes (.toPath (io/file dir "raw.bin"))))
+         events (:events (parse-adapter-stream raw))
+         messages (filterv #(and (= :message (:type %)) (not (:malformed? %))) events)
+         t0 (:timestamp-us (first messages))
+         seconds (fn [timestamp-us] (format "%.6f" (/ (- timestamp-us t0) 1e6)))
+         pid-rows (for [{:keys [timestamp-us id data]} messages
+                        :when (and (= rx-id id) (seq data))
+                        :let [decoded (decode-mode-01 (vec (take (first data) (rest data))))]
+                        :when (:ok? decoded)]
+                    (assoc decoded :timestamp-us timestamp-us))]
+     (with-open [writer (io/writer (io/file dir "frames.csv"))]
+       (.write writer "t_s,timestamp_us,channel,status,id,dlc,data\n")
+       (doseq [{:keys [timestamp-us channel status id data]} messages]
+         (.write writer (str (str/join "," [(seconds timestamp-us) timestamp-us channel
+                                            (byte->hex status) (format "%03X" id)
+                                            (count data) (hex-string data)])
+                             "\n"))))
+     (with-open [writer (io/writer (io/file dir "pids.csv"))]
+       (.write writer "t_s,timestamp_us,pid,name,value,unit\n")
+       (doseq [{:keys [timestamp-us pid name value unit]} pid-rows]
+         (.write writer (str (str/join "," [(seconds timestamp-us) timestamp-us (byte->hex pid)
+                                            (clojure.core/name name) (csv-field value)
+                                            (if unit (clojure.core/name unit) "")])
+                             "\n"))))
+     {:frames (count messages)
+      :pid-samples (count pid-rows)
+      :reply-lines (frequencies (keep #(some-> (:text %) (str/split #" ") first) events))})))
+
+(defn record
+  "Records raw CAN traffic to `out-dir` while polling mode 01 PIDs.
+
+  Writes raw.bin (the exact bytes the adapter sent), meta.edn, and the CSVs
+  from `export-recording`. Polling sends one read-only request every
+  `:interval-ms`, rotating through `:pids`; pass `:pids []` to only listen."
+  ([device-or-path out-dir]
+   (record device-or-path out-dir {}))
+  ([device-or-path out-dir {:keys [duration-ms pids interval-ms tx-id rx-id baud]
+                            :or {duration-ms default-record-duration-ms
+                                 pids default-record-pids
+                                 interval-ms default-record-interval-ms
+                                 tx-id 0x7E0
+                                 rx-id 0x7E8
+                                 baud 500000}}]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         dir (io/file out-dir)
+         channel can-channel]
+     (cond
+       (not (seq path))
+       {:ok? false
+        :error :missing-path}
+
+       (not dir)
+       {:ok? false
+        :path path
+        :error :missing-out-dir}
+
+       :else
+       (try
+         (let [{:keys [input output] :as session} (open-session path)
+               setup (java.io.ByteArrayOutputStream.)
+               sink (java.io.ByteArrayOutputStream.)
+               started (java.time.Instant/now)
+               request-count (atom 0)]
+           (try
+             (collect! input (java.io.ByteArrayOutputStream.) 200)
+             (write-command! output (str "atc" channel) [])
+             (write-command! output "ati" [])
+             (collect! input setup 300)
+             (write-command! output (str "ato" channel " 0 " baud) [])
+             (collect! input sink 300)
+             (let [firmware (some #(second (re-matches #"ari main code version : (.*)" %))
+                                  (reply-lines setup))
+                   connect-reply (first (reply-lines sink))]
+               (if (not= "aro" connect-reply)
+                 {:ok? false
+                  :path path
+                  :step :connect
+                  :reply connect-reply
+                  :error :connect-failed}
+                 (do
+                   (write-command! output (str "atf" channel " 1 0 4") (repeat 8 0))
+                   (let [deadline (+ (System/currentTimeMillis) duration-ms)]
+                     (loop [i 0
+                            next-request (System/currentTimeMillis)]
+                       (let [now (System/currentTimeMillis)]
+                         (when (< now deadline)
+                           (if (and (seq pids) (>= now next-request))
+                             (do
+                               (write-command! output (str "att" channel " 12 0")
+                                               (concat (u32->bytes tx-id)
+                                                       [0x02 0x01 (nth pids (mod i (count pids))) 0 0 0 0 0]))
+                               (swap! request-count inc)
+                               (recur (inc i) (+ next-request interval-ms)))
+                             (do
+                               (when-not (copy-available! input sink)
+                                 (Thread/sleep 1))
+                               (recur i next-request)))))))
+                   (collect! input sink 300)
+                   (write-command! output (str "atc" channel) [])
+                   (collect! input sink 300)
+                   (.mkdirs dir)
+                   (io/copy (.toByteArray sink) (io/file dir "raw.bin"))
+                   (let [counts (assoc (export-recording dir rx-id) :raw-bytes (.size sink))
+                         recording-meta {:recorded-at (str started)
+                                         :duration-ms duration-ms
+                                         :adapter {:firmware firmware}
+                                         :bus {:channel channel
+                                               :protocol :can
+                                               :bitrate baud
+                                               :filter :pass-all
+                                               :loopback false}
+                                         :polling {:tx-id tx-id
+                                                   :rx-id rx-id
+                                                   :interval-ms interval-ms
+                                                   :request-count @request-count
+                                                   :pids (mapv byte->hex pids)
+                                                   :request-frame "02 01 <pid> 00 00 00 00 00"}
+                                         :files {"raw.bin" "Exact bytes received from the adapter, including command replies."
+                                                 "frames.csv" "Every received CAN frame, including copies of the polling requests. Regenerate with export-recording."
+                                                 "pids.csv" "Decoded mode 01 replies. Regenerate with export-recording."}
+                                         :counts counts}]
+                     (spit (io/file dir "meta.edn") (with-out-str (pprint/pprint recording-meta)))
+                     {:ok? true
+                      :path path
+                      :out-dir (str dir)
+                      :duration-ms duration-ms
+                      :request-count @request-count
+                      :counts counts}))))
+             (finally
+               (close-session session))))
+         (catch java.io.FileNotFoundException e
+           {:ok? false
+            :path path
+            :error :not-found-or-permission-denied
+            :message (.getMessage e)})
+         (catch Throwable e
+           {:ok? false
+            :path path
+            :error :record-failed
+            :message (.getMessage e)}))))))

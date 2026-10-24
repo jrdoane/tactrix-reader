@@ -45,3 +45,6 @@ logs/
 *.swp
 *.swo
 *~
+
+# Recordings: frames.csv is regenerated from raw.bin
+lib/device/recordings/**/frames.csv

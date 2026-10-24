@@ -1,5 +1,6 @@
 (ns tactrix-reader.device-test
-  (:require [clojure.test :refer [are deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [are deftest is testing]]
             [tactrix-reader.device :as device]))
 
 (def sample-ioreg
@@ -118,7 +119,9 @@
                           :read-vbat
                           :obd-request
                           :read-pid
-                          :read-all-pids]
+                          :read-all-pids
+                          :record
+                          :export-recording]
             :not-implemented [:openport-command-framing
                               :j2534-pass-thru-api
                               :can-session
@@ -593,3 +596,42 @@
     [0x41 0x65 0x09 0x08] {:name :auxiliary-io-status
                            :value {:pto-active? false :glow-plug-lamp-on? true}}
     [0x41 0x65 0x00 0xFF] {:name :auxiliary-io-status :value {}}))
+
+(defn- temp-dir []
+  (.toFile (java.nio.file.Files/createTempDirectory "recording" (make-array java.nio.file.attribute.FileAttribute 0))))
+
+(deftest export-recording-writes-csvs-from-raw-bytes
+  (let [dir (temp-dir)
+        raw (concat (ascii "aro\r\n")
+                    (message-bytes 5 0 1000000 0x372 [0 0xA8 0 0 0 0 0 0])
+                    (message-bytes 5 0 1000246 0x7E0 [2 1 0x0C 0 0 0 0 0])
+                    (ascii "aro\r\n")
+                    (message-bytes 5 0 1001362 0x7E8 [4 0x41 0x0C 0x0A 0x3F 0 0 0])
+                    (message-bytes 5 0 1002000 0x7E8 [6 0x41 0x03 0x02 0x00 0 0 0])
+                    (ascii "arf5 1 0\r\n"))]
+    (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))
+                               (byte-array (map unchecked-byte raw))
+                               (make-array java.nio.file.OpenOption 0))
+    (spit (java.io.File. dir "meta.edn") (pr-str {:polling {:rx-id 0x7E8}}))
+    (is (= {:frames 4
+            :pid-samples 2
+            :reply-lines {"aro" 2 "arf5" 1}}
+           (device/export-recording (str dir))))
+    (is (= ["t_s,timestamp_us,channel,status,id,dlc,data"
+            "0.000000,1000000,5,00,372,8,00 A8 00 00 00 00 00 00"
+            "0.000246,1000246,5,00,7E0,8,02 01 0C 00 00 00 00 00"
+            "0.001362,1001362,5,00,7E8,8,04 41 0C 0A 3F 00 00 00"
+            "0.002000,1002000,5,00,7E8,8,06 41 03 02 00 00 00 00"]
+           (str/split-lines (slurp (java.io.File. dir "frames.csv")))))
+    (testing "map values are quoted"
+      (is (= ["t_s,timestamp_us,pid,name,value,unit"
+              "0.001362,1001362,0C,engine-rpm,655.75,rpm"
+              "0.002000,1002000,03,fuel-system-status,\"{:system-1 :closed-loop, :system-2 :none}\","]
+             (str/split-lines (slurp (java.io.File. dir "pids.csv"))))))))
+
+(deftest record-validates-before-opening-the-device
+  (with-redefs [device/open-session (fn [_] (throw (ex-info "should not open" {})))]
+    (is (= {:ok? false :error :missing-path}
+           (device/record nil "recordings/x")))
+    (is (= {:ok? false :path "/dev/cu.usbmodemTAlgJ3P81" :error :missing-out-dir}
+           (device/record "/dev/cu.usbmodemTAlgJ3P81" nil)))))

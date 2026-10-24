@@ -24,7 +24,10 @@
            "clojure -M:run pid engine-rpm"
            "clojure -M:run pid 05 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run pids"
-           "clojure -M:run pids /dev/cu.usbmodemTAlgJ3P81"]
+           "clojure -M:run pids /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run record recordings/my-drive"
+           "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run export-recording recordings/my-drive"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
               :open "Open and close the first detected device, or the given path."
               :status "Report host/device status and conservative vehicle status."
@@ -35,7 +38,9 @@
               :probe "Run one named adapter-local probe and return a transcript."
               :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."
               :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."
-              :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."}})
+              :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."
+              :record "Record CAN traffic and polled PIDs to a folder (default 60 seconds). Sends vehicle bus traffic."
+              :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
 (defn- parse-pid
   "Reads a PID argument as hex (`0C`) or a name (`engine-rpm`)."
@@ -87,6 +92,16 @@
 
         "pids"
         (print-edn (device/read-all-pids (or arg (first-detected-path))))
+
+        "record"
+        (let [[out-dir seconds path] (rest args)]
+          (print-edn (device/record (or path (first-detected-path))
+                                    out-dir
+                                    (cond-> {}
+                                      seconds (assoc :duration-ms (* 1000 (Long/parseLong seconds)))))))
+
+        "export-recording"
+        (print-edn (device/export-recording arg))
 
         (print-edn (assoc (usage)
                           :error :unknown-command
