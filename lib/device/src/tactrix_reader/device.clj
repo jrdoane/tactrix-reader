@@ -328,7 +328,8 @@
                  :run-probe
                  :hex-request-parser
                  :read-vbat
-                 :obd-request]
+                 :obd-request
+                 :read-pid]
    :not-implemented [:openport-command-framing
                      :j2534-pass-thru-api
                      :can-session
@@ -883,3 +884,99 @@
              (merge base {:ok? false
                           :error :obd-request-failed
                           :message (.getMessage e)}))))))))
+
+(defn- supported-pids
+  "Decodes a 4-byte supported-PIDs bitmap. Bit 7 of the first byte is PID
+  `base + 1`."
+  [base]
+  (fn [[a b c d]]
+    (let [bits (u32 [a b c d])]
+      (vec (for [i (range 32)
+                 :when (bit-test bits (- 31 i))]
+             (+ base 1 i))))))
+
+(defn- word [[a b]]
+  (+ (* 256 a) b))
+
+(defn- percent [[a]]
+  (/ (* 100.0 a) 255))
+
+(defn- fuel-trim [[a]]
+  (/ (* 100.0 (- a 128)) 128))
+
+(defn- temperature [[a]]
+  (- a 40))
+
+(def mode-01-pids
+  "Common OBD-II mode 01 PIDs with their SAE J1979 formulas."
+  {0x00 {:name :supported-pids-01-20 :byte-count 4 :decode (supported-pids 0x00)}
+   0x04 {:name :engine-load :byte-count 1 :unit :percent :decode percent}
+   0x05 {:name :coolant-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x06 {:name :short-term-fuel-trim-bank-1 :byte-count 1 :unit :percent :decode fuel-trim}
+   0x07 {:name :long-term-fuel-trim-bank-1 :byte-count 1 :unit :percent :decode fuel-trim}
+   0x0B {:name :intake-manifold-pressure :byte-count 1 :unit :kpa :decode first}
+   0x0C {:name :engine-rpm :byte-count 2 :unit :rpm :decode #(/ (word %) 4.0)}
+   0x0D {:name :vehicle-speed :byte-count 1 :unit :km-per-hour :decode first}
+   0x0E {:name :timing-advance :byte-count 1 :unit :degrees :decode (fn [[a]] (- (/ a 2.0) 64))}
+   0x0F {:name :intake-air-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x10 {:name :maf-air-flow :byte-count 2 :unit :grams-per-second :decode #(/ (word %) 100.0)}
+   0x11 {:name :throttle-position :byte-count 1 :unit :percent :decode percent}
+   0x1F {:name :run-time :byte-count 2 :unit :seconds :decode word}
+   0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20)}
+   0x2F {:name :fuel-level :byte-count 1 :unit :percent :decode percent}
+   0x33 {:name :barometric-pressure :byte-count 1 :unit :kpa :decode first}
+   0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40)}
+   0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
+   0x46 {:name :ambient-air-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}})
+
+(def ^:private mode-01-pids-by-name
+  (into {} (map (fn [[pid {:keys [name]}]] [name pid])) mode-01-pids))
+
+(defn decode-mode-01
+  "Decodes a positive mode 01 reply such as `[0x41 0x0C 0x0C 0x80]`."
+  [data]
+  (let [[service pid & args] data
+        args (vec args)
+        {:keys [name byte-count unit decode]} (get mode-01-pids pid)]
+    (cond
+      (not= 0x41 service)
+      {:ok? false
+       :error :not-mode-01-reply}
+
+      (nil? name)
+      {:ok? false
+       :pid pid
+       :error :unknown-pid
+       :raw args}
+
+      (< (count args) byte-count)
+      {:ok? false
+       :pid pid
+       :name name
+       :error :short-reply
+       :raw args}
+
+      :else
+      (cond-> {:ok? true
+               :pid pid
+               :name name
+               :value (decode (subvec args 0 byte-count))}
+        unit (assoc :unit unit)))))
+
+(defn read-pid
+  "Reads and decodes one mode 01 PID, given as a number such as `0x0C` or a
+  name such as `:engine-rpm`. Sends traffic on the vehicle bus."
+  ([device-or-path pid]
+   (read-pid device-or-path pid {}))
+  ([device-or-path pid opts]
+   (let [pid-number (if (keyword? pid) (mode-01-pids-by-name pid) pid)]
+     (if-not (and (int? pid-number) (<= 0 pid-number 0xFF))
+       {:ok? false
+        :error :unknown-pid
+        :pid pid
+        :known-pids (sort (keys mode-01-pids-by-name))}
+       (let [result (obd-request device-or-path (format "01%02X" pid-number) opts)]
+         (if (:ok? result)
+           (merge result (decode-mode-01 (get-in result [:response :bytes])))
+           result))))))

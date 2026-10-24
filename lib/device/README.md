@@ -264,6 +264,51 @@ negative response returns `:negative-response` with its `:nrc`; NRC `0x78`
 (response pending) is waited through. `obd-request` takes `:tx-id`, `:rx-id`,
 `:baud`, and `:timeout-ms` options for other ECUs and buses.
 
+### Decoded PIDs
+
+`pid` reads one mode 01 PID and decodes it with the SAE J1979 formula. Give it
+a name or a hex PID number:
+
+```sh
+clojure -M:run pid engine-rpm
+clojure -M:run pid 05
+```
+
+```clojure
+{:ok? true
+ :pid 12
+ :name :engine-rpm
+ :value 1198.5
+ :unit :rpm
+ ...}
+```
+
+The rest of the `obd` result (request, raw response bytes) is included.
+Decoded PIDs:
+
+| PID | Name | Unit |
+|---|---|---|
+| 00, 20, 40 | `supported-pids-01-20`, `-21-40`, `-41-60` | list of PID numbers |
+| 04 | `engine-load` | percent |
+| 05 | `coolant-temp` | Celsius |
+| 06, 07 | `short-term-fuel-trim-bank-1`, `long-term-fuel-trim-bank-1` | percent |
+| 0B | `intake-manifold-pressure` | kPa |
+| 0C | `engine-rpm` | rpm |
+| 0D | `vehicle-speed` | km/h |
+| 0E | `timing-advance` | degrees before TDC |
+| 0F | `intake-air-temp` | Celsius |
+| 10 | `maf-air-flow` | g/s |
+| 11 | `throttle-position` | percent |
+| 1F | `run-time` | seconds since engine start |
+| 2F | `fuel-level` | percent |
+| 33 | `barometric-pressure` | kPa |
+| 42 | `control-module-voltage` | volts |
+| 46 | `ambient-air-temp` | Celsius |
+| 5C | `oil-temp` | Celsius |
+
+Other PIDs return `:unknown-pid` with the raw bytes; use `obd` for those. Not
+every vehicle supports every PID; read `pid 00` to see which it does.
+
 ## Direct adapter backend
 
 This project does not depend on a vendor J2534 library. The code we own talks to

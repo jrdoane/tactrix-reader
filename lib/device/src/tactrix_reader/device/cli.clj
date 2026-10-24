@@ -20,7 +20,9 @@
            "clojure -M:run probe adapter-ping 01020304"
            "clojure -M:run probe adapter-ping 01020304 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run obd 0100"
-           "clojure -M:run obd 0902 /dev/cu.usbmodemTAlgJ3P81"]
+           "clojure -M:run obd 0902 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run pid engine-rpm"
+           "clojure -M:run pid 05 /dev/cu.usbmodemTAlgJ3P81"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
               :open "Open and close the first detected device, or the given path."
               :status "Report host/device status and conservative vehicle status."
@@ -29,7 +31,15 @@
               :observe "Passively read bytes from the device for protocol discovery."
               :exchange "Write explicit hex bytes to a disconnected adapter and capture response bytes."
               :probe "Run one named adapter-local probe and return a transcript."
-              :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."}})
+              :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."
+              :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."}})
+
+(defn- parse-pid
+  "Reads a PID argument as hex (`0C`) or a name (`engine-rpm`)."
+  [s]
+  (if (and s (re-matches #"[0-9A-Fa-f]{1,2}" s))
+    (Integer/parseInt s 16)
+    (keyword s)))
 
 (defn- first-detected-path []
   (some :path (device/scan-devices)))
@@ -67,6 +77,10 @@
         "obd"
         (let [[request-hex path] (rest args)]
           (print-edn (device/obd-request (or path (first-detected-path)) request-hex)))
+
+        "pid"
+        (let [[pid path] (rest args)]
+          (print-edn (device/read-pid (or path (first-detected-path)) (parse-pid pid))))
 
         (print-edn (assoc (usage)
                           :error :unknown-command

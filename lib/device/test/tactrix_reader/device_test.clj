@@ -1,5 +1,5 @@
 (ns tactrix-reader.device-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [are deftest is testing]]
             [tactrix-reader.device :as device]))
 
 (def sample-ioreg
@@ -116,7 +116,8 @@
                           :run-probe
                           :hex-request-parser
                           :read-vbat
-                          :obd-request]
+                          :obd-request
+                          :read-pid]
             :not-implemented [:openport-command-framing
                               :j2534-pass-thru-api
                               :can-session
@@ -407,3 +408,52 @@
             :step :response
             :error :timeout}
            (select-keys result [:ok? :step :error])))))
+
+(deftest decodes-common-mode-01-pids
+  (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:ok? :name :value :unit]))
+    [0x41 0x0C 0x0C 0x80] {:ok? true :name :engine-rpm :value 800.0 :unit :rpm}
+    [0x41 0x05 0x55] {:ok? true :name :coolant-temp :value 45 :unit :celsius}
+    [0x41 0x42 0x30 0x07] {:ok? true :name :control-module-voltage :value 12.295 :unit :volts}
+    [0x41 0x0D 0x64] {:ok? true :name :vehicle-speed :value 100 :unit :km-per-hour}
+    [0x41 0x11 0xFF] {:ok? true :name :throttle-position :value 100.0 :unit :percent}
+    [0x41 0x06 0x80] {:ok? true :name :short-term-fuel-trim-bank-1 :value 0.0 :unit :percent}
+    [0x41 0x0E 0x80] {:ok? true :name :timing-advance :value 0.0 :unit :degrees}
+    [0x41 0x10 0x01 0x2C] {:ok? true :name :maf-air-flow :value 3.0 :unit :grams-per-second}))
+
+(deftest decodes-supported-pid-bitmaps
+  (is (= {:ok? true
+          :pid 0
+          :name :supported-pids-01-20
+          :value [0x01 0x03 0x04 0x05 0x06 0x07 0x0B 0x0C 0x0D 0x0E 0x0F 0x10
+                  0x11 0x13 0x15 0x1C 0x1F 0x20]}
+         (device/decode-mode-01 [0x41 0x00 0xBE 0x3F 0xA8 0x13]))))
+
+(deftest reports-undecodable-mode-01-replies
+  (is (= {:ok? false :error :not-mode-01-reply}
+         (device/decode-mode-01 [0x49 0x02 0x01])))
+  (is (= {:ok? false :pid 0x99 :error :unknown-pid :raw [1 2]}
+         (device/decode-mode-01 [0x41 0x99 1 2])))
+  (is (= {:ok? false :pid 0x0C :name :engine-rpm :error :short-reply :raw [0x0C]}
+         (device/decode-mode-01 [0x41 0x0C 0x0C]))))
+
+(deftest read-pid-requests-and-decodes
+  (with-redefs [device/obd-request (fn [path request-hex _opts]
+                                     (is (= "/dev/cu.usbmodemTAlgJ3P81" path))
+                                     (is (= "010C" request-hex))
+                                     {:ok? true
+                                      :response {:bytes [0x41 0x0C 0x0C 0x80]}})]
+    (is (= {:ok? true :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm}
+           (select-keys (device/read-pid "/dev/cu.usbmodemTAlgJ3P81" :engine-rpm)
+                        [:ok? :pid :name :value :unit])))
+    (is (= 800.0 (:value (device/read-pid "/dev/cu.usbmodemTAlgJ3P81" 0x0C))))))
+
+(deftest read-pid-passes-through-request-failures
+  (with-redefs [device/obd-request (fn [& _] {:ok? false :error :timeout})]
+    (is (= {:ok? false :error :timeout}
+           (device/read-pid "/dev/cu.usbmodemTAlgJ3P81" :coolant-temp)))))
+
+(deftest read-pid-rejects-unknown-names-without-sending
+  (with-redefs [device/obd-request (fn [& _] (throw (ex-info "should not send" {})))]
+    (let [result (device/read-pid "/dev/cu.usbmodemTAlgJ3P81" :warp-drive)]
+      (is (= :unknown-pid (:error result)))
+      (is (some #{:engine-rpm} (:known-pids result))))))
