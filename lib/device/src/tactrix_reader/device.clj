@@ -1029,10 +1029,18 @@
    0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
    0x43 {:name :absolute-load :byte-count 2 :unit :percent :decode #(round-to 1 (/ (* 100.0 (word %)) 255))}
    0x44 {:name :commanded-lambda :byte-count 2 :unit :lambda :decode lambda}
+   0x45 {:name :relative-throttle-position :byte-count 1 :unit :percent :decode percent}
    0x46 {:name :ambient-air-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x47 {:name :absolute-throttle-position-b :byte-count 1 :unit :percent :decode percent}
+   0x48 {:name :absolute-throttle-position-c :byte-count 1 :unit :percent :decode percent}
+   0x49 {:name :accelerator-pedal-position-d :byte-count 1 :unit :percent :decode percent}
+   0x4A {:name :accelerator-pedal-position-e :byte-count 1 :unit :percent :decode percent}
+   0x4B {:name :accelerator-pedal-position-f :byte-count 1 :unit :percent :decode percent}
+   0x4C {:name :commanded-throttle-actuator :byte-count 1 :unit :percent :decode percent}
    0x4D {:name :time-with-mil-on :byte-count 2 :unit :minutes :decode word}
    0x4E {:name :time-since-codes-cleared :byte-count 2 :unit :minutes :decode word}
    0x51 {:name :fuel-type :byte-count 1 :decode fuel-type}
+   0x5A {:name :relative-accelerator-pedal-position :byte-count 1 :unit :percent :decode percent}
    0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
    0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
 

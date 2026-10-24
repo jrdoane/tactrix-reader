@@ -559,3 +559,15 @@
     [0x41 0x44 0x7F 0x00] {:name :commanded-lambda :value 0.992 :unit :lambda}
     [0x41 0x51 0x01] {:name :fuel-type :value :gasoline}
     [0x41 0x51 0x63] {:name :fuel-type :value 0x63}))
+
+(deftest decodes-throttle-and-pedal-pids
+  (are [pid name] (= {:name name :value 50.2 :unit :percent}
+                     (select-keys (device/decode-mode-01 [0x41 pid 0x80]) [:name :value :unit]))
+    0x45 :relative-throttle-position
+    0x47 :absolute-throttle-position-b
+    0x48 :absolute-throttle-position-c
+    0x49 :accelerator-pedal-position-d
+    0x4A :accelerator-pedal-position-e
+    0x4B :accelerator-pedal-position-f
+    0x4C :commanded-throttle-actuator
+    0x5A :relative-accelerator-pedal-position))

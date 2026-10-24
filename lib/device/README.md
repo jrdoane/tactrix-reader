@@ -315,10 +315,15 @@ Decoded PIDs:
 | 42 | `control-module-voltage` | volts |
 | 43 | `absolute-load` | percent |
 | 44 | `commanded-lambda` | lambda (1.0 is stoichiometric) |
+| 45 | `relative-throttle-position` | percent |
 | 46 | `ambient-air-temp` | Celsius |
+| 47, 48 | `absolute-throttle-position-b`, `-c` | percent |
+| 49, 4A, 4B | `accelerator-pedal-position-d`, `-e`, `-f` | percent |
+| 4C | `commanded-throttle-actuator` | percent |
 | 4D | `time-with-mil-on` | minutes |
 | 4E | `time-since-codes-cleared` | minutes |
 | 51 | `fuel-type` | keyword such as `:gasoline` |
+| 5A | `relative-accelerator-pedal-position` | percent |
 | 5C | `oil-temp` | Celsius |
 
 `:monitors` lists only the readiness monitors the vehicle has, each as
