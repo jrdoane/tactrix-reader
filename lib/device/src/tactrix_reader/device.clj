@@ -197,7 +197,7 @@
 (defn parse-pin-voltage-response
   "Parses an OpenPort reply to `atr <pin>`.
 
-  A successful read looks like `arr 16 12400`, where the value is assumed to be
+  A successful read looks like `arr 16 12400`, where the value is in
   millivolts. Errors look like `are 19`, where the code matches a J2534 status
   code (19 is ERR_PIN_INVALID)."
   [response]

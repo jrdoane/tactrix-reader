@@ -114,7 +114,7 @@ serial port. Filter IDs count up across channels.
 | `ati` | `ari main code version : 1.17.4877` | Firmware version |
 | `ata` | `aro` | OK, likely PassThruOpen |
 | `atz` | `aro` | OK, likely reset or PassThruClose |
-| `atr <pin>` | `arr <pin> <value>` | Pin voltage, assumed millivolts |
+| `atr <pin>` | `arr <pin> <millivolts>` | Pin voltage |
 | `ato<proto> <flags> <baud> [tag]` | `aro` | PassThruConnect |
 | `atc<chan>` | `aro` | PassThruDisconnect; also `aro` if already closed |
 | `atg<chan> <param> [tag]` | `arg<chan> <param> <value> <tag>` | GET_CONFIG |
@@ -132,8 +132,58 @@ Examples:
   1-byte mask `00`, 1-byte pattern `00`) and returns `arf3 <id> 0`.
 
 Pin reads seen so far: `atr 16` (OBD-II battery +12V) returns about 150-175
-with no vehicle, `atr 12` returns 0, and `atr 17` returns about 5533, likely an
-internal supply. Other pins return `are 19`.
+with no vehicle and 12591 on a vehicle with the engine off, `atr 12` returns 0,
+and `atr 17` returns about 5533, likely an internal supply. Other pins return
+`are 19`.
+
+### Received messages
+
+Received messages are binary, not text lines, and arrive unprompted on the
+serial stream between command replies:
+
+```
+"ar" <channel digit> <length u8> <status u8> <timestamp u32> <CAN ID u32> <data>
+```
+
+`length` counts the bytes after itself (1 + 4 + 4 + data). Integers are big
+endian. The timestamp is the adapter's clock in microseconds.
+
+For example, `ar5` `11` `00` `0A57C6EF` `00000370` `00 00 20 05 FC 07 00 00` is
+an 8-byte CAN frame with ID `0x370`.
+
+Status values seen:
+
+| Status | Seen on | Meaning |
+|---|---|---|
+| `00` | CAN | Received frame, or the LOOPBACK copy of a sent frame |
+| `20` | CAN with LOOPBACK | ID 0, no data, right after the echo; likely transmit done |
+| `10` | ISO15765 | Sent ID, no data; likely transmit done |
+| `80` | ISO15765 | Reply ID, no data; a multi-frame reply has started |
+| `40` | ISO15765 with padding | Complete, reassembled message |
+
+These are not standard J2534 RxStatus bit values, so treat their meanings as
+observations.
+
+### Vehicle results
+
+Tested on a 2015 Subaru with the ignition on and the engine off. The OBD port
+carries live CAN traffic at 500 kbps, about 880 frames per second, so a CAN
+channel with a pass-all filter (`atf5 1 0 4` + 4-byte mask `00000000` + 4-byte
+pattern `00000000`) receives frames without sending anything.
+
+OBD-II requests that worked:
+
+- Raw CAN: `att5 12 0` + `000007DF 02 01 00 00 00 00 00 00` (mode 01 PID 00 to
+  the functional address). The engine ECU replies on `7E8` with
+  `06 41 00 BE 3F A8 13 00` about 1 ms later.
+- ISO15765: a flow-control filter is `atf6 3 64 4` + 4-byte mask `FFFFFFFF`,
+  4-byte pattern `000007E8`, and 4-byte flow-control ID `000007E0`. Then
+  `att6 6 64` + `000007E0 01 00` gets `41 00 BE 3F A8 13`, and
+  `att6 6 64` + `000007E0 09 02` gets the full 20-byte VIN reply as one
+  reassembled message.
+
+Flags 64 is `ISO15765_FRAME_PAD`. Without it, ISO15765 requests go out as short
+frames and this ECU ignores them.
 
 Error codes seen:
 
@@ -172,13 +222,11 @@ Gotchas:
 - A correctly sized CAN `att` returns `are 9` after about 1 second because no
   node on the bus acknowledges the frame.
 
-Not yet confirmed, and needs vehicle power or a 12V bench supply on pin 16 with
-ground on pins 4/5:
+Not yet confirmed:
 
-- The millivolt unit for `atr`. Expect roughly 12000-14000.
-- How received messages are delivered. A K-line `att` with LOOPBACK on and a
+- K-line receive. With no vehicle, a K-line `att` with LOOPBACK on and a
   pass-all filter returned `aro` but produced no echo, probably because the
-  K-line transceiver is powered from pin 16. CAN receive also needs a bus.
+  K-line transceiver is powered from pin 16. Not yet retried on a vehicle.
 - `atv` with arguments. It may set programming voltage on a pin, so do not
   send it until its arguments are understood.
 
