@@ -230,6 +230,40 @@ Not yet confirmed:
 - `atv` with arguments. It may set programming voltage on a pin, so do not
   send it until its arguments are understood.
 
+## OBD-II requests
+
+`obd` sends one OBD-II request to the engine ECU over ISO15765 and prints the
+reply. Unlike the commands above, this sends traffic on the vehicle bus:
+
+```sh
+clojure -M:run obd 0100
+clojure -M:run obd 0902 /dev/cu.usbmodemTAlgJ3P81
+```
+
+```clojure
+{:ok? true
+ :protocol :iso15765
+ :tx-id 2016
+ :rx-id 2024
+ :request {:bytes [1 0] :hex ["01" "00"]}
+ :response {:bytes [65 0 190 63 168 19]
+            :hex ["41" "00" "BE" "3F" "A8" "13"]
+            :status 64
+            :timestamp-us 612340701}}
+```
+
+The request is the service byte and its parameters. Only read-only services
+are sent (01, 02, 03, 05, 06, 07, 09, 0A); service 04 (clear DTCs) and 08
+(control on-board systems) return `:service-not-read-only` without opening the
+device.
+
+Each request opens ISO15765 at 500 kbps with padding, adds a flow-control
+filter for `7E0`/`7E8`, sends the request, waits for the reply, and closes the
+channel. The adapter reassembles multi-frame replies such as the VIN. A
+negative response returns `:negative-response` with its `:nrc`; NRC `0x78`
+(response pending) is waited through. `obd-request` takes `:tx-id`, `:rx-id`,
+`:baud`, and `:timeout-ms` options for other ECUs and buses.
+
 ## Direct adapter backend
 
 This project does not depend on a vendor J2534 library. The code we own talks to

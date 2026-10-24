@@ -327,7 +327,8 @@
                  :serial-exchange
                  :run-probe
                  :hex-request-parser
-                 :read-vbat]
+                 :read-vbat
+                 :obd-request]
    :not-implemented [:openport-command-framing
                      :j2534-pass-thru-api
                      :can-session
@@ -598,3 +599,287 @@
               :path path
               :error :observe-failed
               :message (.getMessage e)})))))))
+
+(def default-obd-timeout-ms 1000)
+(def default-obd-command-timeout-ms 1000)
+
+(def iso15765-channel
+  "The adapter uses J2534 protocol IDs as channel IDs; 6 is ISO15765."
+  6)
+
+(def iso15765-frame-pad
+  "J2534 ISO15765_FRAME_PAD TxFlag. Some ECUs ignore unpadded frames."
+  64)
+
+(def read-only-obd-services
+  "OBD-II services that only read data. Service 04 clears DTCs and service 08
+  controls on-board systems, so both are excluded."
+  #{0x01 0x02 0x03 0x05 0x06 0x07 0x09 0x0A})
+
+(defn- u32 [bytes]
+  (reduce (fn [acc b] (+ (* acc 256) b)) 0 bytes))
+
+(defn- u32->bytes [n]
+  (mapv #(bit-and (bit-shift-right n %) 0xFF) [24 16 8 0]))
+
+(defn- decode-message [channel body]
+  (if (< (count body) 9)
+    {:type :message
+     :channel channel
+     :malformed? true
+     :bytes body}
+    {:type :message
+     :channel channel
+     :status (body 0)
+     :timestamp-us (u32 (subvec body 1 5))
+     :id (u32 (subvec body 5 9))
+     :data (subvec body 9)}))
+
+(defn parse-adapter-stream
+  "Splits bytes read from the adapter into reply lines and received messages.
+
+  Replies are ASCII lines such as `aro`. Received messages are binary:
+  `ar<channel digit><length><body>`, where the body is a status byte, a
+  big-endian microsecond timestamp, a big-endian CAN ID, and data. Returns the
+  parsed events plus any trailing bytes that do not form a complete event yet."
+  [bytes]
+  (loop [bytes (vec bytes)
+         events []]
+    (let [message? (and (>= (count bytes) 3)
+                        (= [97 114] (subvec bytes 0 2))
+                        (<= 48 (bytes 2) 57))
+          newline-at (when-not message?
+                       (first (keep-indexed (fn [i b] (when (= 10 b) i)) bytes)))]
+      (cond
+        (empty? bytes)
+        {:events events
+         :remainder []}
+
+        message?
+        (let [end (when (>= (count bytes) 4) (+ 4 (bytes 3)))]
+          (if (and end (<= end (count bytes)))
+            (recur (subvec bytes end)
+                   (conj events (decode-message (- (bytes 2) 48) (subvec bytes 4 end))))
+            {:events events
+             :remainder bytes}))
+
+        newline-at
+        (let [text (str/trim (apply str (map char (subvec bytes 0 newline-at))))]
+          (recur (subvec bytes (inc newline-at))
+                 (cond-> events
+                   (seq text) (conj {:type :line :text text}))))
+
+        :else
+        {:events events
+         :remainder bytes}))))
+
+(defn- stream-session [input output]
+  {:input (java.io.BufferedInputStream. input)
+   :output (java.io.BufferedOutputStream. output)
+   :remainder (atom [])
+   :events (atom [])})
+
+(defn- open-session [path]
+  (stream-session (java.io.FileInputStream. path)
+                  (java.io.FileOutputStream. path)))
+
+(defn- close-session [{:keys [^java.io.Closeable input ^java.io.Closeable output]}]
+  (.close output)
+  (.close input))
+
+(defn- read-events!
+  "Reads whatever the adapter has sent and queues the parsed events. Returns
+  true when any bytes were read."
+  [{:keys [input remainder events]}]
+  (let [bytes (read-available-bytes input 4096)]
+    (when (seq bytes)
+      (let [parsed (parse-adapter-stream (into @remainder bytes))]
+        (reset! remainder (:remainder parsed))
+        (swap! events into (:events parsed))))
+    (boolean (seq bytes))))
+
+(defn- take-event!
+  "Removes and returns the first queued event matching `pred`, reading from the
+  adapter until one arrives. Returns nil after `timeout-ms`."
+  [session pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [queued @(:events session)
+            index (first (keep-indexed (fn [i event] (when (pred event) i)) queued))]
+        (cond
+          index
+          (do
+            (reset! (:events session) (into (subvec queued 0 index)
+                                            (subvec queued (inc index))))
+            (queued index))
+
+          (>= (System/currentTimeMillis) deadline)
+          nil
+
+          :else
+          (do
+            (when-not (read-events! session)
+              (Thread/sleep 5))
+            (recur)))))))
+
+(defn- send-command!
+  "Writes one ASCII command followed by an optional raw payload and returns the
+  adapter's reply line, or nil on timeout."
+  [{:keys [^java.io.OutputStream output] :as session} command payload timeout-ms]
+  (.write output (byte-values->byte-array (concat (map int (str command "\r\n")) payload)))
+  (.flush output)
+  (:text (take-event! session #(= :line (:type %)) timeout-ms)))
+
+(defn- reply-error [step command reply]
+  (merge {:ok? false
+          :step step
+          :command command
+          :reply reply}
+         (if-let [[_ code] (when reply (re-matches #"are (\d+)( .*)?" reply))]
+           {:error :adapter-error
+            :adapter/error-code (Integer/parseInt code)}
+           {:error (if reply :unexpected-reply :timeout)})))
+
+(defn- response-pending?
+  "True for the negative response NRC 0x78, which means the ECU needs more time."
+  [data]
+  (and (= 3 (count data))
+       (= 0x7F (data 0))
+       (= 0x78 (data 2))))
+
+(defn- run-obd-request
+  "Opens an ISO15765 channel, sends `request`, and waits for the reply message.
+  Always closes the channel afterwards."
+  [session request {:keys [tx-id rx-id baud timeout-ms command-timeout-ms]}]
+  (let [channel iso15765-channel
+        close (str "atc" channel)
+        connect (str "ato" channel " 0 " baud)
+        flow-control (str "atf" channel " 3 " iso15765-frame-pad " 4")
+        transmit (str "att" channel " " (+ 4 (count request)) " " iso15765-frame-pad)
+        reply? (fn [event]
+                 (and (= :message (:type event))
+                      (= channel (:channel event))
+                      (= rx-id (:id event))
+                      (seq (:data event))))]
+    ;; Channels persist in the adapter between port opens, so start closed.
+    (send-command! session close [] command-timeout-ms)
+    (try
+      (let [reply (send-command! session connect [] command-timeout-ms)]
+        (if (not= "aro" reply)
+          (reply-error :connect connect reply)
+          (let [reply (send-command! session flow-control
+                                     (concat [0xFF 0xFF 0xFF 0xFF]
+                                             (u32->bytes rx-id)
+                                             (u32->bytes tx-id))
+                                     command-timeout-ms)]
+            (if-not (and reply (str/starts-with? reply (str "arf" channel " ")))
+              (reply-error :flow-control-filter flow-control reply)
+              (let [reply (send-command! session transmit
+                                         (concat (u32->bytes tx-id) request)
+                                         command-timeout-ms)]
+                (if (not= "aro" reply)
+                  (reply-error :transmit transmit reply)
+                  (loop []
+                    (let [message (take-event! session reply? timeout-ms)]
+                      (cond
+                        (nil? message)
+                        {:ok? false
+                         :step :response
+                         :error :timeout}
+
+                        (response-pending? (:data message))
+                        (recur)
+
+                        :else
+                        {:ok? true
+                         :message message})))))))))
+      (finally
+        (send-command! session close [] command-timeout-ms)))))
+
+(defn obd-request
+  "Sends one read-only OBD-II request over ISO15765 and returns the ECU reply.
+
+  `request-hex` is the service byte and its parameters, such as `0100`
+  (supported PIDs) or `0902` (VIN). Only read-only services are sent. The
+  adapter handles multi-frame replies and returns them reassembled.
+
+  Unlike the discovery helpers, this sends traffic on the vehicle bus."
+  ([device-or-path request-hex]
+   (obd-request device-or-path request-hex {}))
+  ([device-or-path request-hex {:keys [tx-id rx-id baud timeout-ms command-timeout-ms drain?]
+                                :or {tx-id 0x7E0
+                                     rx-id 0x7E8
+                                     baud 500000
+                                     timeout-ms default-obd-timeout-ms
+                                     command-timeout-ms default-obd-command-timeout-ms
+                                     drain? true}}]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         request (hex->bytes request-hex)
+         service (first (:bytes request))
+         base {:backend :mac-serial
+               :path path
+               :protocol :iso15765
+               :tx-id tx-id
+               :rx-id rx-id}]
+     (cond
+       (not (seq path))
+       (assoc base :ok? false :error :missing-path)
+
+       (not (:ok? request))
+       (assoc base :ok? false :error :invalid-hex-request :request request)
+
+       (not (read-only-obd-services service))
+       (assoc base :ok? false :error :service-not-read-only :service service)
+
+       :else
+       (let [request-summary {:bytes (:bytes request)
+                              :hex (mapv byte->hex (:bytes request))}]
+         (try
+           (let [session (open-session path)]
+             (try
+               (when drain?
+                 (read-events! session)
+                 (reset! (:events session) [])
+                 (reset! (:remainder session) []))
+               (let [result (run-obd-request session (:bytes request)
+                                             {:tx-id tx-id
+                                              :rx-id rx-id
+                                              :baud baud
+                                              :timeout-ms timeout-ms
+                                              :command-timeout-ms command-timeout-ms})
+                     {:keys [data status timestamp-us]} (:message result)
+                     response {:bytes data
+                               :hex (mapv byte->hex data)
+                               :status status
+                               :timestamp-us timestamp-us}]
+                 (cond
+                   (not (:ok? result))
+                   (merge base {:request request-summary} result)
+
+                   (= 0x7F (first data))
+                   (merge base {:ok? false
+                                :error :negative-response
+                                :nrc (get data 2)
+                                :request request-summary
+                                :response response})
+
+                   (not= (+ service 0x40) (first data))
+                   (merge base {:ok? false
+                                :error :unexpected-response
+                                :request request-summary
+                                :response response})
+
+                   :else
+                   (merge base {:ok? true
+                                :request request-summary
+                                :response response})))
+               (finally
+                 (close-session session))))
+           (catch java.io.FileNotFoundException e
+             (merge base {:ok? false
+                          :error :not-found-or-permission-denied
+                          :message (.getMessage e)}))
+           (catch Throwable e
+             (merge base {:ok? false
+                          :error :obd-request-failed
+                          :message (.getMessage e)}))))))))

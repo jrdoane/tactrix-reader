@@ -115,7 +115,8 @@
                           :serial-exchange
                           :run-probe
                           :hex-request-parser
-                          :read-vbat]
+                          :read-vbat
+                          :obd-request]
             :not-implemented [:openport-command-framing
                               :j2534-pass-thru-api
                               :can-session
@@ -264,3 +265,145 @@
 (deftest observe-device-reports-missing-path
   (is (= {:ok? false :error :missing-path}
          (device/observe-device nil))))
+
+(defn- ascii [s]
+  (map int s))
+
+(defn- u32-bytes [n]
+  (map #(bit-and (bit-shift-right n %) 0xFF) [24 16 8 0]))
+
+(defn- message-bytes [channel status timestamp-us id data]
+  (let [body (concat [status] (u32-bytes timestamp-us) (u32-bytes id) data)]
+    (concat (ascii (str "ar" channel)) [(count body)] body)))
+
+(defn- run-fake-obd
+  "Runs obd-request against canned adapter output. Returns the result and the
+  bytes written to the adapter."
+  [replies request-hex opts]
+  (let [output (java.io.ByteArrayOutputStream.)
+        input (java.io.ByteArrayInputStream. (byte-array (map unchecked-byte replies)))]
+    (with-redefs [device/open-session (fn [_]
+                                        (#'device/stream-session input output))]
+      {:result (device/obd-request "/dev/cu.usbmodemTAlgJ3P81" request-hex
+                                   (merge {:drain? false} opts))
+       :written (mapv #(bit-and % 0xFF) (.toByteArray output))})))
+
+(def fake-vin (ascii "TESTVIN0123456789"))
+
+(deftest parses-adapter-stream
+  (is (= {:events [{:type :line :text "aro"}
+                   {:type :message
+                    :channel 5
+                    :status 0
+                    :timestamp-us 0x0A57C6EF
+                    :id 0x370
+                    :data [0 0 0x20 5 0xFC 7 0 0]}
+                   {:type :line :text "arf5 1 0"}]
+          :remainder []}
+         (device/parse-adapter-stream
+          (concat (ascii "aro\r\n")
+                  (message-bytes 5 0 0x0A57C6EF 0x370 [0 0 0x20 5 0xFC 7 0 0])
+                  (ascii "arf5 1 0\r\n")))))
+  (testing "keeps incomplete events for the next read"
+    (let [message (vec (message-bytes 6 0x40 1 0x7E8 [0x41 0]))]
+      (is (= {:events []
+              :remainder (subvec message 0 8)}
+             (device/parse-adapter-stream (subvec message 0 8))))
+      (is (= {:events [{:type :line :text "aro"}]
+              :remainder (vec (ascii "ar"))}
+             (device/parse-adapter-stream (ascii "aro\r\nar")))))))
+
+(deftest obd-request-validates-before-opening-the-device
+  (let [opened? (atom false)]
+    (with-redefs [device/open-session (fn [_] (reset! opened? true))]
+      (is (= :missing-path (:error (device/obd-request nil "0100"))))
+      (is (= :invalid-hex-request (:error (device/obd-request "/dev/cu.usbmodemTAlgJ3P81" "GG"))))
+      (is (= {:ok? false
+              :backend :mac-serial
+              :path "/dev/cu.usbmodemTAlgJ3P81"
+              :protocol :iso15765
+              :tx-id 0x7E0
+              :rx-id 0x7E8
+              :error :service-not-read-only
+              :service 4}
+             (device/obd-request "/dev/cu.usbmodemTAlgJ3P81" "04")))
+      (is (false? @opened?)))))
+
+(deftest obd-request-reads-multi-frame-reply
+  (let [{:keys [result written]}
+        (run-fake-obd (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x10 100 0x7E0 [])
+                              (message-bytes 6 0x80 200 0x7E8 [])
+                              (message-bytes 6 0x40 300 0x7E8 (concat [0x49 2 1] fake-vin))
+                              (ascii "aro\r\n"))
+                      "0902"
+                      {})]
+    (is (= (vec (concat (ascii "atc6\r\n")
+                        (ascii "ato6 0 500000\r\n")
+                        (ascii "atf6 3 64 4\r\n")
+                        [0xFF 0xFF 0xFF 0xFF 0 0 7 0xE8 0 0 7 0xE0]
+                        (ascii "att6 6 64\r\n")
+                        [0 0 7 0xE0 9 2]
+                        (ascii "atc6\r\n")))
+           written))
+    (is (= {:ok? true
+            :backend :mac-serial
+            :path "/dev/cu.usbmodemTAlgJ3P81"
+            :protocol :iso15765
+            :tx-id 0x7E0
+            :rx-id 0x7E8
+            :request {:bytes [9 2]
+                      :hex ["09" "02"]}
+            :response {:bytes (vec (concat [0x49 2 1] fake-vin))
+                       :hex (mapv #(format "%02X" %) (concat [0x49 2 1] fake-vin))
+                       :status 0x40
+                       :timestamp-us 300}}
+           result))))
+
+(deftest obd-request-waits-through-response-pending
+  (let [{:keys [result]}
+        (run-fake-obd (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 [0x7F 1 0x78])
+                              (message-bytes 6 0x40 200 0x7E8 [0x41 0 0xBE 0x3F 0xA8 0x13])
+                              (ascii "aro\r\n"))
+                      "0100"
+                      {})]
+    (is (true? (:ok? result)))
+    (is (= ["41" "00" "BE" "3F" "A8" "13"] (get-in result [:response :hex])))))
+
+(deftest obd-request-reports-negative-responses
+  (let [{:keys [result]}
+        (run-fake-obd (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 [0x7F 9 0x31])
+                              (ascii "aro\r\n"))
+                      "0902"
+                      {})]
+    (is (= {:ok? false
+            :error :negative-response
+            :nrc 0x31}
+           (select-keys result [:ok? :error :nrc])))))
+
+(deftest obd-request-reports-adapter-errors-and-closes-the-channel
+  (let [{:keys [result written]}
+        (run-fake-obd (ascii "aro\r\nare 20\r\naro\r\n") "0100" {})]
+    (is (= {:ok? false
+            :step :connect
+            :command "ato6 0 500000"
+            :reply "are 20"
+            :error :adapter-error
+            :adapter/error-code 20}
+           (select-keys result [:ok? :step :command :reply :error :adapter/error-code])))
+    (is (= (vec (concat (ascii "atc6\r\n")
+                        (ascii "ato6 0 500000\r\n")
+                        (ascii "atc6\r\n")))
+           written))))
+
+(deftest obd-request-times-out-without-a-reply
+  (let [{:keys [result]}
+        (run-fake-obd (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\naro\r\n")
+                      "0100"
+                      {:timeout-ms 50})]
+    (is (= {:ok? false
+            :step :response
+            :error :timeout}
+           (select-keys result [:ok? :step :error])))))
