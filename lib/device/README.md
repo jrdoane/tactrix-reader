@@ -309,6 +309,28 @@ Decoded PIDs:
 Other PIDs return `:unknown-pid` with the raw bytes; use `obd` for those. Not
 every vehicle supports every PID; read `pid 00` to see which it does.
 
+`pids` reads everything at once. It reads the supported-PID bitmaps (following
+each one's next-range bit), then reads only the decoded PIDs the vehicle
+supports:
+
+```sh
+clojure -M:run pids
+```
+
+```clojure
+{:ok? true
+ :supported-hex ["01" "03" "04" ...]
+ :values [{:pid 4 :name :engine-load :value 23.5 :unit :percent}
+          {:pid 5 :name :coolant-temp :value 77 :unit :celsius}
+          ...]
+ :errors []
+ :not-supported []}
+```
+
+PIDs that fail to read are listed in `:errors` and make `:ok?` false. Decoded
+PIDs the vehicle does not support are listed in `:not-supported` and are not
+requested.
+
 ## Direct adapter backend
 
 This project does not depend on a vendor J2534 library. The code we own talks to

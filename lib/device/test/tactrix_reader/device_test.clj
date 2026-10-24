@@ -117,7 +117,8 @@
                           :hex-request-parser
                           :read-vbat
                           :obd-request
-                          :read-pid]
+                          :read-pid
+                          :read-all-pids]
             :not-implemented [:openport-command-framing
                               :j2534-pass-thru-api
                               :can-session
@@ -466,3 +467,38 @@
     (let [result (device/read-pid "/dev/cu.usbmodemTAlgJ3P81" :warp-drive)]
       (is (= :unknown-pid (:error result)))
       (is (some #{:engine-rpm} (:known-pids result))))))
+
+(defn- fake-read-pid
+  "Returns canned read-pid results by PID and records which PIDs were read."
+  [requested results]
+  (fn [_path pid _opts]
+    (swap! requested conj pid)
+    (get results pid {:ok? false :error :timeout})))
+
+(deftest read-all-pids-reads-only-supported-pids
+  (let [requested (atom [])]
+    (with-redefs [device/read-pid (fake-read-pid
+                                   requested
+                                   {0x00 {:ok? true :value [0x05 0x0C 0x20]}
+                                    0x20 {:ok? true :value [0x2F]}
+                                    0x05 {:ok? true :pid 0x05 :name :coolant-temp :value 73 :unit :celsius}
+                                    0x0C {:ok? true :pid 0x0C :name :engine-rpm :value 682.0 :unit :rpm}})]
+      (let [result (device/read-all-pids "/dev/cu.usbmodemTAlgJ3P81")]
+        (is (= [0x00 0x20 0x05 0x0C 0x2F] @requested))
+        (is (= {:ok? false
+                :supported-hex ["05" "0C" "20" "2F"]
+                :values [{:pid 0x05 :name :coolant-temp :value 73 :unit :celsius}
+                         {:pid 0x0C :name :engine-rpm :value 682.0 :unit :rpm}]
+                :errors [{:pid 0x2F :name :fuel-level :error :timeout}]}
+               (dissoc result :not-supported)))
+        (is (some #{0x5C} (:not-supported result)))
+        (is (not-any? #{0x05 0x0C 0x2F} (:not-supported result)))))))
+
+(deftest read-all-pids-stops-when-bitmap-read-fails
+  (let [requested (atom [])]
+    (with-redefs [device/read-pid (fake-read-pid requested {})]
+      (is (= {:ok? false
+              :error :timeout
+              :supported []}
+             (device/read-all-pids "/dev/cu.usbmodemTAlgJ3P81")))
+      (is (= [0x00] @requested)))))

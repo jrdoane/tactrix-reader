@@ -329,7 +329,8 @@
                  :hex-request-parser
                  :read-vbat
                  :obd-request
-                 :read-pid]
+                 :read-pid
+                 :read-all-pids]
    :not-implemented [:openport-command-framing
                      :j2534-pass-thru-api
                      :can-session
@@ -986,3 +987,55 @@
          (if (:ok? result)
            (merge result (decode-mode-01 (get-in result [:response :bytes])))
            result))))))
+
+(defn read-supported-pids
+  "Reads the supported-PID bitmaps starting at PID 00, following each bitmap's
+  next-range bit. Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (read-supported-pids device-or-path {}))
+  ([device-or-path opts]
+   (loop [base 0x00
+          supported []]
+     (let [result (read-pid device-or-path base opts)
+           supported (into supported (:value result))
+           next-base (+ base 0x20)]
+       (cond
+         (not (:ok? result))
+         (assoc result :supported supported)
+
+         (and (some #{next-base} (:value result))
+              (:pid-list? (get mode-01-pids next-base)))
+         (recur next-base supported)
+
+         :else
+         {:ok? true
+          :supported supported})))))
+
+(defn read-all-pids
+  "Reads every decodable mode 01 PID the vehicle reports as supported.
+  Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (read-all-pids device-or-path {}))
+  ([device-or-path opts]
+   (let [supported (read-supported-pids device-or-path opts)]
+     (if-not (:ok? supported)
+       supported
+       (let [supported? (set (:supported supported))
+             decodable (sort (for [[pid {:keys [pid-list?]}] mode-01-pids
+                                   :when (not pid-list?)]
+                               pid))
+             results (for [pid decodable
+                           :when (supported? pid)]
+                       (assoc (read-pid device-or-path pid opts)
+                              :pid pid
+                              :name (get-in mode-01-pids [pid :name])))
+             errors (vec (for [result results
+                               :when (not (:ok? result))]
+                           (select-keys result [:pid :name :error :nrc :step])))]
+         {:ok? (empty? errors)
+          :supported-hex (mapv byte->hex (:supported supported))
+          :values (vec (for [result results
+                             :when (:ok? result)]
+                         (select-keys result [:pid :name :value :unit])))
+          :errors errors
+          :not-supported (vec (remove supported? decodable))})))))
