@@ -538,3 +538,24 @@
     [0x41 0x31 0x12 0x34] {:name :distance-since-codes-cleared :value 4660 :unit :km}
     [0x41 0x4D 0x00 0x0A] {:name :time-with-mil-on :value 10 :unit :minutes}
     [0x41 0x4E 0x01 0x00] {:name :time-since-codes-cleared :value 256 :unit :minutes}))
+
+(deftest decodes-fuel-and-air-fuel-ratio-pids
+  (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:name :value :unit]))
+    [0x41 0x03 0x02 0x00] {:name :fuel-system-status
+                           :value {:system-1 :closed-loop :system-2 :none}}
+    [0x41 0x03 0x04 0x03] {:name :fuel-system-status
+                           :value {:system-1 :open-loop-load-or-decel :system-2 3}}
+    [0x41 0x13 0x33] {:name :oxygen-sensors-present
+                      :value [:bank-1-sensor-1 :bank-1-sensor-2 :bank-2-sensor-1 :bank-2-sensor-2]}
+    [0x41 0x15 0x8C 0x80] {:name :oxygen-sensor-bank-1-sensor-2
+                           :value {:volts 0.7 :fuel-trim-percent 0.0}}
+    [0x41 0x15 0x8C 0xFF] {:name :oxygen-sensor-bank-1-sensor-2
+                           :value {:volts 0.7 :fuel-trim-percent nil}}
+    [0x41 0x24 0x80 0x00 0x40 0x00] {:name :wideband-oxygen-sensor-1-voltage
+                                     :value {:lambda 1.0 :volts 2.0}}
+    [0x41 0x34 0x80 0x00 0x80 0x80] {:name :wideband-oxygen-sensor-1-current
+                                     :value {:lambda 1.0 :milliamps 0.5}}
+    [0x41 0x43 0x00 0x55] {:name :absolute-load :value 33.3 :unit :percent}
+    [0x41 0x44 0x7F 0x00] {:name :commanded-lambda :value 0.992 :unit :lambda}
+    [0x41 0x51 0x01] {:name :fuel-type :value :gasoline}
+    [0x41 0x51 0x63] {:name :fuel-type :value 0x63}))

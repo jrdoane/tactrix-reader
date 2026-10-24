@@ -899,14 +899,68 @@
 (defn- word [[a b]]
   (+ (* 256 a) b))
 
-(defn- round-1 [x]
-  (/ (Math/round (* 10.0 x)) 10.0))
+(defn- round-to [places x]
+  (let [scale (Math/pow 10 places)]
+    (/ (Math/round (* x scale)) scale)))
 
 (defn- percent [[a]]
-  (round-1 (/ (* 100.0 a) 255)))
+  (round-to 1 (/ (* 100.0 a) 255)))
 
 (defn- fuel-trim [[a]]
-  (round-1 (/ (* 100.0 (- a 128)) 128)))
+  (round-to 1 (/ (* 100.0 (- a 128)) 128)))
+
+(defn- lambda
+  "Air-fuel equivalence ratio from two bytes; 1.0 is stoichiometric."
+  [bytes]
+  (round-to 3 (/ (* 2.0 (word bytes)) 65536)))
+
+(def ^:private fuel-system-states
+  {0 :none
+   1 :open-loop-cold
+   2 :closed-loop
+   4 :open-loop-load-or-decel
+   8 :open-loop-failure
+   16 :closed-loop-feedback-fault})
+
+(defn- fuel-system-status
+  "Bytes A/B are fuel systems 1/2. Unrecognised codes are returned as numbers."
+  [[a b]]
+  {:system-1 (get fuel-system-states a a)
+   :system-2 (get fuel-system-states b b)})
+
+(defn- oxygen-sensors-present
+  "Bits 0-3 are bank 1 sensors 1-4; bits 4-7 are bank 2 sensors 1-4."
+  [[a]]
+  (vec (for [bit (range 8)
+             :when (bit-test a bit)]
+         (keyword (str "bank-" (inc (quot bit 4)) "-sensor-" (inc (mod bit 4)))))))
+
+(defn- narrowband-oxygen-sensor
+  "A narrowband sensor's voltage and the fuel trim it drives. A trim byte of
+  0xFF means the sensor is not used for trim."
+  [[a b]]
+  {:volts (/ a 200.0)
+   :fuel-trim-percent (when (not= 0xFF b) (fuel-trim [b]))})
+
+(defn- wideband-oxygen-sensor-voltage [[a b c d]]
+  {:lambda (lambda [a b])
+   :volts (round-to 3 (/ (* 8.0 (word [c d])) 65536))})
+
+(defn- wideband-oxygen-sensor-current [[a b c d]]
+  {:lambda (lambda [a b])
+   :milliamps (round-to 3 (- (/ (word [c d]) 256.0) 128))})
+
+(def ^:private fuel-types
+  [:not-available :gasoline :methanol :ethanol :diesel :lpg :cng :propane
+   :electric :bifuel-gasoline :bifuel-methanol :bifuel-ethanol :bifuel-lpg
+   :bifuel-cng :bifuel-propane :bifuel-electric :bifuel-electric-and-combustion
+   :hybrid-gasoline :hybrid-ethanol :hybrid-diesel :hybrid-electric
+   :hybrid-electric-and-combustion :hybrid-regenerative :bifuel-diesel])
+
+(defn- fuel-type
+  "Unrecognised codes are returned as numbers."
+  [[a]]
+  (get fuel-types a a))
 
 (defn- temperature [[a]]
   (- a 40))
@@ -947,6 +1001,7 @@
   "Common OBD-II mode 01 PIDs with their SAE J1979 formulas."
   {0x00 {:name :supported-pids-01-20 :byte-count 4 :decode (supported-pids 0x00) :pid-list? true}
    0x01 {:name :monitor-status :byte-count 4 :decode monitor-status-since-codes-cleared}
+   0x03 {:name :fuel-system-status :byte-count 2 :decode fuel-system-status}
    0x04 {:name :engine-load :byte-count 1 :unit :percent :decode percent}
    0x05 {:name :coolant-temp :byte-count 1 :unit :celsius :decode temperature}
    0x06 {:name :short-term-fuel-trim-bank-1 :byte-count 1 :unit :percent :decode fuel-trim}
@@ -958,19 +1013,26 @@
    0x0F {:name :intake-air-temp :byte-count 1 :unit :celsius :decode temperature}
    0x10 {:name :maf-air-flow :byte-count 2 :unit :grams-per-second :decode #(/ (word %) 100.0)}
    0x11 {:name :throttle-position :byte-count 1 :unit :percent :decode percent}
+   0x13 {:name :oxygen-sensors-present :byte-count 1 :decode oxygen-sensors-present}
+   0x15 {:name :oxygen-sensor-bank-1-sensor-2 :byte-count 2 :decode narrowband-oxygen-sensor}
    0x1F {:name :run-time :byte-count 2 :unit :seconds :decode word}
    0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20) :pid-list? true}
    0x21 {:name :distance-with-mil-on :byte-count 2 :unit :km :decode word}
+   0x24 {:name :wideband-oxygen-sensor-1-voltage :byte-count 4 :decode wideband-oxygen-sensor-voltage}
    0x2F {:name :fuel-level :byte-count 1 :unit :percent :decode percent}
    0x30 {:name :warm-ups-since-codes-cleared :byte-count 1 :unit :count :decode first}
    0x31 {:name :distance-since-codes-cleared :byte-count 2 :unit :km :decode word}
    0x33 {:name :barometric-pressure :byte-count 1 :unit :kpa :decode first}
+   0x34 {:name :wideband-oxygen-sensor-1-current :byte-count 4 :decode wideband-oxygen-sensor-current}
    0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40) :pid-list? true}
    0x41 {:name :monitor-status-this-drive-cycle :byte-count 4 :decode monitor-status}
    0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
+   0x43 {:name :absolute-load :byte-count 2 :unit :percent :decode #(round-to 1 (/ (* 100.0 (word %)) 255))}
+   0x44 {:name :commanded-lambda :byte-count 2 :unit :lambda :decode lambda}
    0x46 {:name :ambient-air-temp :byte-count 1 :unit :celsius :decode temperature}
    0x4D {:name :time-with-mil-on :byte-count 2 :unit :minutes :decode word}
    0x4E {:name :time-since-codes-cleared :byte-count 2 :unit :minutes :decode word}
+   0x51 {:name :fuel-type :byte-count 1 :decode fuel-type}
    0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
    0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
 

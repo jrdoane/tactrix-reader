@@ -290,6 +290,7 @@ Decoded PIDs:
 |---|---|---|
 | 00, 20, 40, 60 | `supported-pids-01-20`, `-21-40`, `-41-60`, `-61-80` | list of PID numbers, also as hex strings in `:value-hex` |
 | 01 | `monitor-status` | map: `:mil-on?`, `:dtc-count`, `:ignition`, `:monitors` |
+| 03 | `fuel-system-status` | map: `:system-1`, `:system-2` (e.g. `:closed-loop`) |
 | 04 | `engine-load` | percent |
 | 05 | `coolant-temp` | Celsius |
 | 06, 07 | `short-term-fuel-trim-bank-1`, `long-term-fuel-trim-bank-1` | percent |
@@ -300,21 +301,29 @@ Decoded PIDs:
 | 0F | `intake-air-temp` | Celsius |
 | 10 | `maf-air-flow` | g/s |
 | 11 | `throttle-position` | percent |
+| 13 | `oxygen-sensors-present` | list such as `:bank-1-sensor-1` |
+| 15 | `oxygen-sensor-bank-1-sensor-2` | map: `:volts`, `:fuel-trim-percent` (nil if unused) |
 | 1F | `run-time` | seconds since engine start |
 | 21 | `distance-with-mil-on` | km |
+| 24 | `wideband-oxygen-sensor-1-voltage` | map: `:lambda`, `:volts` |
 | 2F | `fuel-level` | percent |
 | 30 | `warm-ups-since-codes-cleared` | count |
 | 31 | `distance-since-codes-cleared` | km |
 | 33 | `barometric-pressure` | kPa |
+| 34 | `wideband-oxygen-sensor-1-current` | map: `:lambda`, `:milliamps` |
 | 41 | `monitor-status-this-drive-cycle` | map: `:ignition`, `:monitors` |
 | 42 | `control-module-voltage` | volts |
+| 43 | `absolute-load` | percent |
+| 44 | `commanded-lambda` | lambda (1.0 is stoichiometric) |
 | 46 | `ambient-air-temp` | Celsius |
 | 4D | `time-with-mil-on` | minutes |
 | 4E | `time-since-codes-cleared` | minutes |
+| 51 | `fuel-type` | keyword such as `:gasoline` |
 | 5C | `oil-temp` | Celsius |
 
 `:monitors` lists only the readiness monitors the vehicle has, each as
-`:complete` or `:incomplete`. MIL is the check-engine light.
+`:complete` or `:incomplete`. MIL is the check-engine light. Fuel system and
+fuel type codes the decoder does not recognise are returned as numbers.
 
 Other PIDs return `:unknown-pid` with the raw bytes; use `obd` for those. Not
 every vehicle supports every PID; read `pid 00` to see which it does.
