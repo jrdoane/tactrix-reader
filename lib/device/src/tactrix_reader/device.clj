@@ -909,7 +909,7 @@
 
 (def mode-01-pids
   "Common OBD-II mode 01 PIDs with their SAE J1979 formulas."
-  {0x00 {:name :supported-pids-01-20 :byte-count 4 :decode (supported-pids 0x00)}
+  {0x00 {:name :supported-pids-01-20 :byte-count 4 :decode (supported-pids 0x00) :pid-list? true}
    0x04 {:name :engine-load :byte-count 1 :unit :percent :decode percent}
    0x05 {:name :coolant-temp :byte-count 1 :unit :celsius :decode temperature}
    0x06 {:name :short-term-fuel-trim-bank-1 :byte-count 1 :unit :percent :decode fuel-trim}
@@ -922,13 +922,14 @@
    0x10 {:name :maf-air-flow :byte-count 2 :unit :grams-per-second :decode #(/ (word %) 100.0)}
    0x11 {:name :throttle-position :byte-count 1 :unit :percent :decode percent}
    0x1F {:name :run-time :byte-count 2 :unit :seconds :decode word}
-   0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20)}
+   0x20 {:name :supported-pids-21-40 :byte-count 4 :decode (supported-pids 0x20) :pid-list? true}
    0x2F {:name :fuel-level :byte-count 1 :unit :percent :decode percent}
    0x33 {:name :barometric-pressure :byte-count 1 :unit :kpa :decode first}
-   0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40)}
+   0x40 {:name :supported-pids-41-60 :byte-count 4 :decode (supported-pids 0x40) :pid-list? true}
    0x42 {:name :control-module-voltage :byte-count 2 :unit :volts :decode #(/ (word %) 1000.0)}
    0x46 {:name :ambient-air-temp :byte-count 1 :unit :celsius :decode temperature}
-   0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}})
+   0x5C {:name :oil-temp :byte-count 1 :unit :celsius :decode temperature}
+   0x60 {:name :supported-pids-61-80 :byte-count 4 :decode (supported-pids 0x60) :pid-list? true}})
 
 (def ^:private mode-01-pids-by-name
   (into {} (map (fn [[pid {:keys [name]}]] [name pid])) mode-01-pids))
@@ -938,7 +939,7 @@
   [data]
   (let [[service pid & args] data
         args (vec args)
-        {:keys [name byte-count unit decode]} (get mode-01-pids pid)]
+        {:keys [name byte-count unit decode pid-list?]} (get mode-01-pids pid)]
     (cond
       (not= 0x41 service)
       {:ok? false
@@ -958,11 +959,13 @@
        :raw args}
 
       :else
-      (cond-> {:ok? true
-               :pid pid
-               :name name
-               :value (decode (subvec args 0 byte-count))}
-        unit (assoc :unit unit)))))
+      (let [value (decode (subvec args 0 byte-count))]
+        (cond-> {:ok? true
+                 :pid pid
+                 :name name
+                 :value value}
+          unit (assoc :unit unit)
+          pid-list? (assoc :value-hex (mapv byte->hex value)))))))
 
 (defn read-pid
   "Reads and decodes one mode 01 PID, given as a number such as `0x0C` or a

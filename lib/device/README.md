@@ -288,7 +288,7 @@ Decoded PIDs:
 
 | PID | Name | Unit |
 |---|---|---|
-| 00, 20, 40 | `supported-pids-01-20`, `-21-40`, `-41-60` | list of PID numbers |
+| 00, 20, 40, 60 | `supported-pids-01-20`, `-21-40`, `-41-60`, `-61-80` | list of PID numbers, also as hex strings in `:value-hex` |
 | 04 | `engine-load` | percent |
 | 05 | `coolant-temp` | Celsius |
 | 06, 07 | `short-term-fuel-trim-bank-1`, `long-term-fuel-trim-bank-1` | percent |
