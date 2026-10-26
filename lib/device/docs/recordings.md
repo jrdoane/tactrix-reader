@@ -1,0 +1,62 @@
+# Recordings
+
+A recording captures raw CAN traffic from the vehicle while polling a set of
+mode 01 PIDs, so decoding can be worked on and the dashboard run without a
+vehicle. Run these commands from `lib/device`.
+
+## Recording
+
+`record` sends traffic on the vehicle bus. It records for 60 seconds unless
+given a number of seconds:
+
+```sh
+clojure -M:run record recordings/my-drive
+clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81
+```
+
+It opens CAN at 500 kbps with a pass-all filter and polls with the same
+schedule as the [live source](../README.md#live-and-replay-sources): one
+read-only request to `7E0` every 15 ms, covering RPM, speed, load,
+temperatures, trims, lambda, throttle and pedal, voltage, and fuel level. Fast
+PIDs are sampled about every 135 ms and slow ones about every 1.35 seconds.
+
+From Clojure, `record` takes `:duration-ms`, `:pids`, `:interval-ms`,
+`:tx-id`, `:rx-id`, and `:baud`. Pass `:pids []` to only listen.
+
+## Files
+
+| File | Contents | Committed |
+|---|---|---|
+| `raw.bin` | Exact bytes the adapter sent, including command replies | Yes |
+| `meta.edn` | Firmware, bus settings, polling schedule, and counts | Yes |
+| `frames.csv` | Every CAN frame, including copies of the polling requests | No; large |
+| `pids.csv` | Decoded PID replies | Yes |
+
+`raw.bin` is the source of truth. It uses the adapter's
+[received message format](openport-protocol.md#received-messages) and can be
+parsed with `parse-adapter-stream`.
+
+Both CSVs are derived from `raw.bin`. Regenerate them with:
+
+```sh
+clojure -M:run export-recording recordings/2026-10-24-idle
+```
+
+| CSV | Columns |
+|---|---|
+| `frames.csv` | `t_s,timestamp_us,channel,status,id,dlc,data` |
+| `pids.csv` | `t_s,timestamp_us,pid,name,value,unit` |
+
+`t_s` is seconds since the first frame and `timestamp_us` is the adapter's
+microsecond clock, so PID values line up with bus traffic. `id`, `status`,
+`pid`, and `data` are hex.
+
+## Committed recordings
+
+### `2026-10-24-idle`
+
+One minute of a warm 2015 Subaru Impreza (manual) idling in neutral: about
+57,600 frames and 2,400 PID samples. The engine server replays it by default.
+
+It predates the current polling schedule. It polled 20 PIDs in turn, one every
+25 ms, so each value is sampled only every 500 ms.

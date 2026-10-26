@@ -1,10 +1,13 @@
 # Engine dashboard
 
 ClojureScript front end built with re-frame, Reagent 2, and React 19. It
-connects to the engine server's `/stream` endpoint and shows live engine data.
+connects to the [engine server's](../../services/engine-server/README.md)
+`/stream` endpoint and shows live engine data.
+
+## Building
 
 The build writes to `services/engine-server/resources/public/assets/js`, where
-the server serves it.
+the server serves it. From this directory:
 
 ```sh
 npm install
@@ -16,6 +19,8 @@ When using `watch`, start the server with `PEDESTAL_DEV_MODE=true` so its
 Content-Security-Policy allows hot reload.
 
 ## Layout
+
+Namespaces are under `tactrix-reader.dashboard`:
 
 | Namespace | Role |
 |---|---|
