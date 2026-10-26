@@ -78,7 +78,7 @@ A single large namespace, layered roughly top to bottom:
 
 - **Discovery and adapter checks:** `scan-devices` (via `ioreg`), `open-device!`, `read-vbat`, `vehicle-status`.
 - **Protocol discovery helpers:** `serial-exchange`, `run-probe`, `observe-device`. They write only the bytes they are given.
-- **OpenPort command layer:** `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events.
+- **OpenPort command layer:** `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events. `openport-operations` maps J2534 operations (such as `:pass-thru-connect`) to their confirmed command prefixes (such as `"ato"`), and `known-operation?` and `unsupported-operation` read it. There is no general J2534 API yet.
 - **Two ways of talking to the ECU:**
   - `obd-request` (and `read-pid` and `read-all-pids` on top of it) opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly.
   - `run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
@@ -107,4 +107,5 @@ map should stay in sync with the command table in `lib/device/README.md`.
   vehicle connected.
 - `lib/device/docs/openport-protocol.md` records adapter behavior that was
   observed, not documented by the vendor. Mark inferences as such when adding
-  to it.
+  to it. Add a command to `openport-operations` only once probing confirms
+  it, and update the doc's commands table along with the map.
