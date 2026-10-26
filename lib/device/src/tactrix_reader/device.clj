@@ -1,8 +1,7 @@
 (ns tactrix-reader.device
-  "Proof-of-life helpers for OpenPort/J2534-style USB adapters.
-
-  This namespace intentionally starts at the host/device layer. It proves that
-  macOS can see and open the adapter before any vehicle protocol is attempted."
+  "Talks to a Tactrix OpenPort 2.0 through its macOS serial device: device
+  discovery, the adapter's OpenPort commands, read-only OBD-II requests and
+  PID decoding, CAN recordings, and live and replay data sources."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
@@ -494,22 +493,41 @@
             :error :exchange-failed
             :message (.getMessage e)}))))))
 
+(def openport-operations
+  "J2534 operations whose OpenPort command has been confirmed by probing, with
+  the command prefix. See docs/openport-protocol.md."
+  {:pass-thru-read-version "ati"
+   :pass-thru-connect "ato"
+   :pass-thru-disconnect "atc"
+   :pass-thru-write-msgs "att"
+   :pass-thru-start-msg-filter "atf"
+   :pass-thru-stop-msg-filter "atk"
+   :get-config "atg"
+   :set-config "ats"
+   :read-vbatt "atr"})
+
 (defn known-operation?
-  "Returns true when `operation-name` has a discovered direct adapter command."
-  [_operation-name]
-  false)
+  "Returns true when `operation-name`, a keyword or string such as
+  `:pass-thru-connect`, has a confirmed OpenPort command."
+  [operation-name]
+  (contains? openport-operations (some-> operation-name name keyword)))
 
 (defn unsupported-operation
-  "Returns a standard unsupported result for J2534-shaped operations whose
-  OpenPort framing has not been discovered yet."
+  "Returns a standard unsupported result for a J2534-shaped operation, which
+  this backend does not implement yet. The error says whether its OpenPort
+  command is known."
   [operation-name]
-  {:ok? false
-   :backend :mac-serial
-   :operation/name operation-name
-   :operation/known? false
-   :state :unsupported
-   :error :needs-openport-command-framing
-   :message "OpenPort command framing has not been discovered for this operation."})
+  (let [command (get openport-operations (some-> operation-name name keyword))]
+    (cond-> {:ok? false
+             :backend :mac-serial
+             :operation/name operation-name
+             :operation/known? (some? command)
+             :state :unsupported
+             :error (if command :not-implemented :needs-openport-command)
+             :message (if command
+                        "The OpenPort command for this operation is known, but the J2534 API is not implemented."
+                        "The OpenPort command for this operation has not been discovered.")}
+      command (assoc :operation/command command))))
 
 (defn- probe-request-summary [request]
   {:byte-count (count (:bytes request))

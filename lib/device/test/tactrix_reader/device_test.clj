@@ -249,15 +249,31 @@
             :truncated? false}
            (device/run-probe "/dev/cu.usbmodemTAlgJ3P81" " adapter-ping " "0102")))))
 
-(deftest unsupported-operation-reports-framing-boundary
+(deftest known-operations-have-confirmed-commands
+  (is (true? (device/known-operation? :pass-thru-connect)))
+  (is (true? (device/known-operation? "pass-thru-write-msgs")))
+  (is (false? (device/known-operation? :pass-thru-start-periodic-msg)))
+  (is (false? (device/known-operation? "adapter-ping")))
+  (is (false? (device/known-operation? nil))))
+
+(deftest unsupported-operation-reports-whether-command-is-known
   (is (= {:ok? false
           :backend :mac-serial
           :operation/name :pass-thru-connect
+          :operation/known? true
+          :operation/command "ato"
+          :state :unsupported
+          :error :not-implemented
+          :message "The OpenPort command for this operation is known, but the J2534 API is not implemented."}
+         (device/unsupported-operation :pass-thru-connect)))
+  (is (= {:ok? false
+          :backend :mac-serial
+          :operation/name :pass-thru-start-periodic-msg
           :operation/known? false
           :state :unsupported
-          :error :needs-openport-command-framing
-          :message "OpenPort command framing has not been discovered for this operation."}
-         (device/unsupported-operation :pass-thru-connect))))
+          :error :needs-openport-command
+          :message "The OpenPort command for this operation has not been discovered."}
+         (device/unsupported-operation :pass-thru-start-periodic-msg))))
 
 (deftest vehicle-status-reports-no-device
   (is (= {:backend :mac-serial
