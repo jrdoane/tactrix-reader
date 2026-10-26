@@ -38,13 +38,14 @@ path use the first detected adapter when it is left out.
 | `obd <hex> [path]` | Send one read-only OBD-II request | Yes |
 | `pid <name-or-hex> [path]` | Read and decode one mode 01 PID | Yes |
 | `pids [path]` | Read every decodable PID the vehicle supports | Yes |
+| `ssm-init [path]` | Read the ECU ID with Subaru SSM | Yes |
 | `ssm-read <addresses> [path]` | Read one byte at each comma-separated hex ECU address with Subaru SSM | Yes |
 | `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
 | `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
 
 `obd`, `pid`, and `pids` are covered in
-[OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-read` in
-[Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
+[OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init` and
+`ssm-read` in [Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
 [Recordings](docs/recordings.md).
 
 Failures are returned as EDN with `:ok? false` and an `:error` keyword rather
@@ -157,7 +158,7 @@ The main entry points in `tactrix-reader.device`:
 | `vehicle-status`, `read-vbat` | Adapter and vehicle power checks |
 | `obd-request` | One read-only OBD-II request over ISO15765 |
 | `read-pid`, `read-all-pids`, `decode-mode-01` | Mode 01 PID reads and decoding |
-| `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) memory reads over ISO15765 |
+| `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
 | `record`, `export-recording`, `recording-samples` | [Recordings](docs/recordings.md) |
 | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
 | `start-live-source!`, `start-replay-source!` | Data sources, below |

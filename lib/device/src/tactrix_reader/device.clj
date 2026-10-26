@@ -334,6 +334,7 @@
                  :obd-request
                  :read-pid
                  :read-all-pids
+                 :ssm-init
                  :ssm-read
                  :can-session
                  :record
@@ -346,6 +347,7 @@
                  :operations [:obd-request
                               :read-pid
                               :read-all-pids
+                              :ssm-init
                               :ssm-read
                               :record
                               :live-source]}
@@ -926,11 +928,54 @@
        :else
        (iso15765-request path (:bytes request) base :obd-request-failed opts)))))
 
+(def ssm-init-command
+  "The Subaru Select Monitor (SSM) command that identifies the ECU. With
+  `ssm-read-addresses-command`, it is one of only two SSM commands sent: `B0`
+  and `B8` write ECU memory and are never built."
+  0xAA)
+
 (def ssm-read-addresses-command
-  "The Subaru Select Monitor (SSM) command that reads one byte at each of a list
-  of 3-byte ECU memory addresses. It is the only SSM command sent: `B0` and
-  `B8` write ECU memory and are never built."
+  "The SSM command that reads one byte at each of a list of 3-byte ECU memory
+  addresses."
   0xA8)
+
+(defn ssm-init
+  "Identifies the ECU with the SSM `AA` command, sent over ISO15765 like
+  `obd-request`.
+
+  The reply is `EA`, 3 bytes of unknown meaning, the 5-byte ECU ID, and
+  bitfields of the standard SSM parameters the ECU supports. Returns the ECU ID
+  as hex in `:ecu-id`, such as `\"7334384107\"`; logger definitions use it to
+  find ECU-specific addresses. Takes the same options as `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (ssm-init device-or-path {}))
+  ([device-or-path opts]
+   (let [{:keys [tx-id rx-id] :as opts} (merge iso15765-defaults opts)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         base {:backend :mac-serial
+               :path path
+               :protocol :iso15765
+               :tx-id tx-id
+               :rx-id rx-id}]
+     (if-not (seq path)
+       (assoc base :ok? false :error :missing-path)
+       (let [result (iso15765-request path [ssm-init-command] base :ssm-init-failed opts)
+             data (get-in result [:response :bytes])]
+         (cond
+           (not (:ok? result))
+           result
+
+           (< (count data) 9)
+           (assoc result :ok? false :error :unexpected-response)
+
+           :else
+           (let [capabilities (subvec data 9)]
+             (assoc result
+                    :ecu-id (apply str (map byte->hex (subvec data 4 9)))
+                    :capabilities {:bytes capabilities
+                                   :hex (mapv byte->hex capabilities)}))))))))
 
 (defn- ssm-address? [address]
   (and (int? address) (<= 0 address 0xFFFFFF)))

@@ -122,6 +122,7 @@
                           :obd-request
                           :read-pid
                           :read-all-pids
+                          :ssm-init
                           :ssm-read
                           :can-session
                           :record
@@ -134,6 +135,7 @@
                           :operations [:obd-request
                                        :read-pid
                                        :read-all-pids
+                                       :ssm-init
                                        :ssm-read
                                        :record
                                        :live-source]}
@@ -440,14 +442,15 @@
            (select-keys result [:ok? :step :error])))))
 
 (defn- run-fake-ssm
-  "Runs ssm-read against canned adapter output. Returns the result and the
-  bytes written to the adapter."
-  [replies addresses]
+  "Runs `request`, an SSM function such as `device/ssm-init`, against canned
+  adapter output. `args` go between the device path and the options. Returns
+  the result and the bytes written to the adapter."
+  [replies request & args]
   (let [output (java.io.ByteArrayOutputStream.)
         input (java.io.ByteArrayInputStream. (byte-array (map unchecked-byte replies)))]
     (with-redefs [device/open-session (fn [_]
                                         (#'device/stream-session input output))]
-      {:result (device/ssm-read "/dev/cu.usbmodemTAlgJ3P81" addresses {:drain? false})
+      {:result (apply request "/dev/cu.usbmodemTAlgJ3P81" (concat args [{:drain? false}]))
        :written (mapv #(bit-and % 0xFF) (.toByteArray output))})))
 
 (deftest ssm-read-validates-before-opening-the-device
@@ -468,7 +471,7 @@
         (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
                               (message-bytes 6 0x40 100 0x7E8 [0xE8 0x80 0x3F])
                               (ascii "aro\r\n"))
-                      [0x000022 0xFF6A04])]
+                      device/ssm-read [0x000022 0xFF6A04])]
     (is (= (vec (concat (ascii "atc6\r\n")
                         (ascii "ato6 0 500000\r\n")
                         (ascii "atf6 3 64 4\r\n")
@@ -488,7 +491,7 @@
         (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
                               (message-bytes 6 0x40 100 0x7E8 [0xE8 0x80])
                               (ascii "aro\r\n"))
-                      [0x000022 0x000023])]
+                      device/ssm-read [0x000022 0x000023])]
     (is (= {:ok? false :error :unexpected-response}
            (select-keys result [:ok? :error])))
     (is (nil? (:values result)))))
@@ -498,9 +501,45 @@
         (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
                               (message-bytes 6 0x40 100 0x7E8 [0x7F 0xA8 0x31])
                               (ascii "aro\r\n"))
-                      [0x000022])]
+                      device/ssm-read [0x000022])]
     (is (= {:ok? false :error :negative-response :nrc 0x31}
            (select-keys result [:ok? :error :nrc])))))
+
+(def ^:private fake-ssm-init-reply
+  (vec (concat [0xEA 0xA2 0x10 0x11 0x73 0x34 0x38 0x41 0x07]
+               [0xF3 0xFA 0xC9 0x8E])))
+
+(deftest ssm-init-sends-aa-and-reads-the-ecu-id
+  (let [{:keys [result written]}
+        (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 fake-ssm-init-reply)
+                              (ascii "aro\r\n"))
+                      device/ssm-init)]
+    (is (= (vec (concat (ascii "atc6\r\n")
+                        (ascii "ato6 0 500000\r\n")
+                        (ascii "atf6 3 64 4\r\n")
+                        [0xFF 0xFF 0xFF 0xFF 0 0 7 0xE8 0 0 7 0xE0]
+                        (ascii "att6 5 64\r\n")
+                        [0 0 7 0xE0 0xAA]
+                        (ascii "atc6\r\n")))
+           written))
+    (is (= {:ok? true
+            :ecu-id "7334384107"
+            :capabilities {:bytes [0xF3 0xFA 0xC9 0x8E]
+                           :hex ["F3" "FA" "C9" "8E"]}}
+           (select-keys result [:ok? :ecu-id :capabilities])))))
+
+(deftest ssm-init-reports-short-and-missing-replies
+  (with-redefs [device/open-session (fn [_] (throw (ex-info "should not open" {})))]
+    (is (= :missing-path (:error (device/ssm-init nil)))))
+  (let [{:keys [result]}
+        (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 (subvec fake-ssm-init-reply 0 8))
+                              (ascii "aro\r\n"))
+                      device/ssm-init)]
+    (is (= {:ok? false :error :unexpected-response}
+           (select-keys result [:ok? :error])))
+    (is (nil? (:ecu-id result)))))
 
 (deftest decodes-common-mode-01-pids
   (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:ok? :name :value :unit]))
