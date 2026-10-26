@@ -334,6 +334,7 @@
                  :obd-request
                  :read-pid
                  :read-all-pids
+                 :read-vehicle-info
                  :ssm-init
                  :ssm-read
                  :can-session
@@ -347,6 +348,7 @@
                  :operations [:obd-request
                               :read-pid
                               :read-all-pids
+                              :read-vehicle-info
                               :ssm-init
                               :ssm-read
                               :record
@@ -1344,6 +1346,79 @@
           :errors errors
           :not-supported (vec (remove supported? decodable))})))))
 
+(defn- ascii-text
+  "Decodes ASCII bytes, dropping zero padding and surrounding spaces."
+  [bytes]
+  (str/trim (apply str (map char (remove zero? bytes)))))
+
+(defn decode-mode-09
+  "Decodes a positive mode 09 reply for the VIN (`02`), calibration IDs (`04`),
+  or ECU name (`0A`), such as `[0x49 0x02 0x01 ...]`. On CAN, the byte after
+  the info type is the number of data items."
+  [data]
+  (let [[service info-type item-count & items] data
+        items (vec items)]
+    (cond
+      (not= 0x49 service)
+      {:ok? false
+       :error :not-mode-09-reply}
+
+      (nil? item-count)
+      {:ok? false
+       :info-type info-type
+       :error :short-reply}
+
+      :else
+      (case info-type
+        0x02 {:ok? true :name :vin :value (ascii-text items)}
+        ;; Each calibration ID is 16 bytes, zero-padded.
+        0x04 {:ok? true :name :calibration-ids :value (mapv ascii-text (take item-count (partition 16 items)))}
+        0x0A {:ok? true :name :ecu-name :value (ascii-text items)}
+        {:ok? false
+         :info-type info-type
+         :error :unknown-info-type
+         :raw items}))))
+
+(def ^:private vehicle-info-requests
+  [[:vin "0902"]
+   [:calibration-ids "0904"]
+   [:ecu-name "090A"]])
+
+(defn read-vehicle-info
+  "Reads what identifies the vehicle and its engine ECU: the VIN, calibration
+  IDs, and ECU name (mode 09), and the ECU ID (SSM `AA`, see `ssm-init`).
+
+  Each item the ECU does not answer is nil, with its error under `:errors`.
+  `:ok?` is true when at least one item was read. Takes the same options as
+  `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (read-vehicle-info device-or-path {}))
+  ([device-or-path opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
+     (if-not (seq path)
+       {:ok? false
+        :error :missing-path}
+       (let [results (into {}
+                           (for [[item request-hex] vehicle-info-requests]
+                             (let [result (obd-request path request-hex opts)
+                                   decoded (when (:ok? result)
+                                             (decode-mode-09 (get-in result [:response :bytes])))]
+                               [item (if (:ok? result) decoded result)])))
+             ecu-id (ssm-init path opts)
+             results (assoc results :ecu-id (assoc ecu-id :value (:ecu-id ecu-id)))
+             errors (into {}
+                          (for [[item result] results
+                                :when (not (:ok? result))]
+                            [item (select-keys result [:error :nrc])]))]
+         (merge {:ok? (boolean (some :ok? (vals results)))
+                 :path path
+                 :errors errors}
+                (when (= (count errors) (count results))
+                  {:error (get-in errors [:vin :error])})
+                (update-vals results #(when (:ok? %) (:value %)))))))))
+
 (def can-channel
   "The adapter uses J2534 protocol IDs as channel IDs; 5 is raw CAN."
   5)
@@ -1474,10 +1549,15 @@
                 (collect! input tail 300)
                 (on-bytes (.toByteArray tail))))))))))
 
+(defn recording-meta
+  "Reads a recording's meta.edn, or returns nil when it has none."
+  [dir]
+  (let [meta-file (io/file dir "meta.edn")]
+    (when (.exists meta-file)
+      (edn/read-string (slurp meta-file)))))
+
 (defn- recording-rx-id [dir]
-  (let [meta-file (io/file dir "meta.edn")
-        recording-meta (when (.exists meta-file) (edn/read-string (slurp meta-file)))]
-    (get-in recording-meta [:polling :rx-id] 0x7E8)))
+  (get-in (recording-meta dir) [:polling :rx-id] 0x7E8))
 
 (defn- recording-bytes [dir]
   (unsigned-bytes (java.nio.file.Files/readAllBytes (.toPath (io/file dir "raw.bin")))))

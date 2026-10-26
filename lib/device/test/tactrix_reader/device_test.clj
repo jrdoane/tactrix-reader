@@ -122,6 +122,7 @@
                           :obd-request
                           :read-pid
                           :read-all-pids
+                          :read-vehicle-info
                           :ssm-init
                           :ssm-read
                           :can-session
@@ -135,6 +136,7 @@
                           :operations [:obd-request
                                        :read-pid
                                        :read-all-pids
+                                       :read-vehicle-info
                                        :ssm-init
                                        :ssm-read
                                        :record
@@ -633,6 +635,51 @@
               :supported []}
              (device/read-all-pids "/dev/cu.usbmodemTAlgJ3P81")))
       (is (= [0x00] @requested)))))
+
+(def ^:private fake-calibration-id
+  (concat (ascii "EA1T002C") (repeat 8 0)))
+
+(deftest decodes-mode-09-vehicle-information
+  (is (= {:ok? true :name :vin :value "TESTVIN0123456789"}
+         (device/decode-mode-09 (concat [0x49 2 1] fake-vin))))
+  (is (= {:ok? true :name :calibration-ids :value ["EA1T002C" "CAL2"]}
+         (device/decode-mode-09 (concat [0x49 4 2] fake-calibration-id
+                                        (ascii "CAL2") (repeat 12 0)))))
+  (is (= {:ok? true :name :ecu-name :value "ECM-EngineControl"}
+         (device/decode-mode-09 (concat [0x49 0x0A 1] (ascii "ECM") [0] (ascii "-EngineControl") [0 0]))))
+  (is (= :unknown-info-type (:error (device/decode-mode-09 [0x49 0x06 1 0x12 0x34 0x56 0x78]))))
+  (is (= :not-mode-09-reply (:error (device/decode-mode-09 [0x41 0x0C 0x0C 0x80])))))
+
+(deftest read-vehicle-info-collects-each-item-and-its-errors
+  (let [requested (atom [])
+        replies {"0902" {:ok? true :response {:bytes (vec (concat [0x49 2 1] fake-vin))}}
+                 "0904" {:ok? true :response {:bytes (vec (concat [0x49 4 1] fake-calibration-id))}}
+                 "090A" {:ok? false :error :negative-response :nrc 0x12}}]
+    (with-redefs [device/obd-request (fn [_path request-hex _opts]
+                                       (swap! requested conj request-hex)
+                                       (get replies request-hex))
+                  device/ssm-init (fn [_path _opts]
+                                    (swap! requested conj "AA")
+                                    {:ok? false :step :response :error :timeout})]
+      (is (= {:ok? true
+              :path "/dev/cu.usbmodemTAlgJ3P81"
+              :vin "TESTVIN0123456789"
+              :calibration-ids ["EA1T002C"]
+              :ecu-name nil
+              :ecu-id nil
+              :errors {:ecu-name {:error :negative-response :nrc 0x12}
+                       :ecu-id {:error :timeout}}}
+             (device/read-vehicle-info "/dev/cu.usbmodemTAlgJ3P81")))
+      (is (= ["0902" "0904" "090A" "AA"] @requested)))))
+
+(deftest read-vehicle-info-reports-when-nothing-answers
+  (with-redefs [device/obd-request (fn [& _] {:ok? false :error :not-found-or-permission-denied})
+                device/ssm-init (fn [& _] {:ok? false :error :not-found-or-permission-denied})]
+    (is (= {:ok? false
+            :error :not-found-or-permission-denied}
+           (select-keys (device/read-vehicle-info "/dev/cu.usbmodemTAlgJ3P81") [:ok? :error]))))
+  (is (= {:ok? false :error :missing-path}
+         (device/read-vehicle-info nil))))
 
 (deftest decodes-monitor-status-since-codes-cleared
   (is (= {:mil-on? true

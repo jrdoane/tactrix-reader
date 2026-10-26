@@ -88,6 +88,42 @@ PIDs that fail to read are listed in `:errors` and make `:ok?` false. Decoded
 PIDs the vehicle does not support are listed in `:not-supported` and are not
 requested.
 
+## Vehicle identity: `vehicle-info`
+
+`vehicle-info` reads what identifies the vehicle and its engine ECU. The
+engine server runs it when the dashboard connects to an adapter.
+
+```sh
+clojure -M:run vehicle-info
+```
+
+It sends these requests one at a time:
+
+| Request | Item | Reply |
+|---|---|---|
+| `0902` | `:vin` | 17 ASCII characters |
+| `0904` | `:calibration-ids` | 16 zero-padded ASCII bytes per ID |
+| `090A` | `:ecu-name` | 20 ASCII bytes, such as `ECM-EngineControl` |
+| SSM `AA` | `:ecu-id` | See [Subaru SSM reads](subaru-ssm.md) |
+
+An item the ECU does not answer is nil, with its error under `:errors`:
+
+```clojure
+{:ok? true
+ :path "/dev/cu.usbmodemTAlgJ3P81"
+ :vin "..."
+ :calibration-ids ["EA1T002C"]
+ :ecu-name nil
+ :ecu-id nil
+ :errors {:ecu-name {:error :negative-response :nrc 18}
+          :ecu-id {:error :timeout}}}
+```
+
+`:ok?` is false only when nothing answered. On this project's 2015 Impreza,
+`0904` returns `EA1T002C` and SSM `AA` gets no reply. `0902` and `090A` have
+not been tried on it yet. Each unanswered request waits for the 1-second
+timeout, so expect a few seconds when items are missing.
+
 ## Decoded PIDs
 
 Not every vehicle supports every PID; `pid 00` shows which PIDs 01-20 it does.

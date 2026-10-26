@@ -4,6 +4,17 @@ ClojureScript front end built with re-frame, Reagent 2, and React 19. It
 connects to the [engine server's](../../services/engine-server/README.md)
 `/stream` endpoint and shows live engine data.
 
+The page has:
+
+- An adapter picker with Rescan, Connect, Disconnect, and Replay recording.
+- Panels for the source, the adapter (serial, device, firmware, battery
+  voltage), the vehicle (VIN, calibration ID, ECU name, SSM ECU ID, or why
+  each could not be read), and diagnostics from PID 01 (check-engine light,
+  stored codes, readiness monitors).
+- Large readouts for RPM, speed, coolant, and throttle, then grouped tiles for
+  the other polled PIDs.
+- A table of every value received.
+
 ## Building
 
 The build writes to `services/engine-server/resources/public/assets/js`, where
@@ -26,6 +37,7 @@ Namespaces are under `tactrix-reader.dashboard`:
 |---|---|
 | `core` | Mounts the app with `reagent.dom.client` |
 | `stream` | `:stream/connect` effect: opens the `EventSource` and decodes Transit |
-| `events` | App state: connection, source status, latest sample per PID |
+| `http` | `:http` effect: calls `/api` with Transit and dispatches the reply |
+| `events` | App state: connection, source status and info, latest sample per PID, adapters |
 | `subs` | Subscriptions |
-| `views` | Page: RPM and coolant readouts and a table of every value |
+| `views` | Page: source controls, info panels, readouts, and a table of every value |

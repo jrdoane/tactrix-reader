@@ -26,6 +26,8 @@
            "clojure -M:run pid 05 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run pids"
            "clojure -M:run pids /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run vehicle-info"
+           "clojure -M:run vehicle-info /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run ssm-init"
            "clojure -M:run ssm-init /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run ssm-read 000022"
@@ -44,6 +46,7 @@
               :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."
               :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."
               :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."
+              :vehicle-info "Read the VIN, calibration IDs, ECU name, and SSM ECU ID. Sends vehicle bus traffic."
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :record "Record CAN traffic and polled PIDs to a folder (default 60 seconds). Sends vehicle bus traffic."
@@ -107,6 +110,9 @@
 
         "pids"
         (print-edn (device/read-all-pids (or arg (first-detected-path))))
+
+        "vehicle-info"
+        (print-edn (device/read-vehicle-info (or arg (first-detected-path))))
 
         "ssm-init"
         (print-edn (device/ssm-init (or arg (first-detected-path))))

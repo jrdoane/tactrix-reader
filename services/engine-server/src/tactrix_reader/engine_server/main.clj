@@ -3,35 +3,34 @@
   (:require [io.pedestal.connector :as connector]
             [tactrix-reader.device :as device]
             [tactrix-reader.engine-server.hub :as hub]
-            [tactrix-reader.engine-server.server :as server]))
+            [tactrix-reader.engine-server.server :as server]
+            [tactrix-reader.engine-server.sources :as sources]))
 
 (def default-recording "../../lib/device/recordings/2026-10-24-idle")
 
-(defn- start-source [{:keys [type recording path]} emit]
-  (case type
-    :replay (device/start-replay-source! recording {:emit emit})
-    :live (device/start-live-source! (or path (some :path (device/scan-devices)))
-                                     {:emit emit})))
-
 (defn start-system
-  "Starts the hub, the source, and the HTTP server. `source` is
-  `{:type :replay :recording dir}` or `{:type :live :path device-path}`."
-  [{:keys [source port host]}]
+  "Starts the hub, the source manager, and the HTTP server. `source` is the
+  first source: `{:type :replay :recording dir}` or
+  `{:type :live :path device-path}`. The dashboard can switch to another
+  adapter or back to replaying `recording`, which defaults to `source`'s."
+  [{:keys [source recording port host]}]
   (let [hub (hub/start-hub)
-        source-handle (start-source source (hub/emit-fn hub))
-        server (connector/start! (server/create-server {:host host :port port :hub hub}))]
+        manager (sources/start-manager {:emit (hub/emit-fn hub)
+                                        :recording (or recording (:recording source) default-recording)
+                                        :source source})
+        server (connector/start! (server/create-server {:host host :port port :hub hub :sources manager}))]
     {:hub hub
-     :source source-handle
+     :sources manager
      :server server}))
 
-(defn stop-system [{:keys [hub source server]}]
+(defn stop-system [{:keys [hub sources server]}]
   (connector/stop! server)
-  ((:stop! source))
+  (sources/stop-manager sources)
   (hub/stop-hub hub))
 
 (defn- parse-source [[mode arg]]
   (case mode
-    "live" {:type :live :path arg}
+    "live" {:type :live :path (or arg (some :path (device/scan-devices)))}
     {:type :replay :recording (or arg default-recording)}))
 
 (defn -main

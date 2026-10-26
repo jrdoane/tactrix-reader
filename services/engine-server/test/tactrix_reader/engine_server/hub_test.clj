@@ -34,7 +34,29 @@
     (emit coolant)
     (is (= :samples (:event (take-within subscription 1000))))
     (is (= {:status {:source :replay :state :running}
+            :info nil
             :samples [(dissoc coolant :type)]}
+           (hub/snapshot hub)))
+    (hub/stop-hub hub)))
+
+(deftest forwards-info-and-clears-everything-on-reset
+  (let [hub (hub/start-hub {:batch-ms 50})
+        subscription (hub/subscribe hub)
+        emit (hub/emit-fn hub)
+        info {:source :live :vehicle {:vin "TESTVIN0123456789"}}]
+    (emit (assoc info :type :info))
+    (is (= {:event :info :data info}
+           (take-within subscription 1000)))
+    (emit coolant)
+    (is (= :samples (:event (take-within subscription 1000))))
+    (emit rpm-1)
+    (emit {:type :reset})
+    (is (= {:event :snapshot
+            :data {:status nil :info nil :samples []}}
+           (take-within subscription 1000)))
+    (is (= ::timeout (take-within subscription 200))
+        "samples pending at the reset are dropped")
+    (is (= {:status nil :info nil :samples []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 

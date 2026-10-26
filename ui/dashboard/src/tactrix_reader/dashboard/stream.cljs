@@ -25,4 +25,5 @@
      (listen! source "snapshot" :stream/snapshot)
      (listen! source "samples" :stream/samples)
      (listen! source "status" :stream/status)
+     (listen! source "info" :stream/info)
      (reset! event-source source))))
