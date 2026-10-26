@@ -117,19 +117,24 @@
                           :serial-exchange
                           :run-probe
                           :hex-request-parser
+                          :openport-command-framing
                           :read-vbat
                           :obd-request
                           :read-pid
                           :read-all-pids
+                          :can-session
                           :record
                           :export-recording
                           :live-source
                           :replay-source]
-            :not-implemented [:openport-command-framing
-                              :j2534-pass-thru-api
-                              :can-session
-                              :k-line-session
-                              :ecu-messaging]
+            :not-implemented [:j2534-pass-thru-api
+                              :k-line-session]
+            :vehicle-bus {:read-only? true
+                          :operations [:obd-request
+                                       :read-pid
+                                       :read-all-pids
+                                       :record
+                                       :live-source]}
             :discovery-policy {:writes :explicit-request-only
                                :sweeps? false
                                :vehicle-bus-traffic? false}}

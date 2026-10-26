@@ -316,7 +316,8 @@
       :reasons reasons})))
 
 (defn direct-backend-info
-  "Describes the in-house adapter backend and its current discovery surface."
+  "Describes the in-house adapter backend: what it implements, which operations
+  send traffic on the vehicle bus, and the policy for protocol discovery."
   []
   {:backend :mac-serial
    :external-libraries? false
@@ -329,19 +330,24 @@
                  :serial-exchange
                  :run-probe
                  :hex-request-parser
+                 :openport-command-framing
                  :read-vbat
                  :obd-request
                  :read-pid
                  :read-all-pids
+                 :can-session
                  :record
                  :export-recording
                  :live-source
                  :replay-source]
-   :not-implemented [:openport-command-framing
-                     :j2534-pass-thru-api
-                     :can-session
-                     :k-line-session
-                     :ecu-messaging]
+   :not-implemented [:j2534-pass-thru-api
+                     :k-line-session]
+   :vehicle-bus {:read-only? true
+                 :operations [:obd-request
+                              :read-pid
+                              :read-all-pids
+                              :record
+                              :live-source]}
    :discovery-policy {:writes :explicit-request-only
                       :sweeps? false
                       :vehicle-bus-traffic? false}})

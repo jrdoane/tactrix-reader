@@ -31,7 +31,7 @@
    :commands {:scan "List detected OpenPort/usbmodem devices."
               :open "Open and close the first detected device, or the given path."
               :status "Report host/device status and conservative vehicle status."
-              :direct-info "Report the in-house direct backend discovery surface."
+              :direct-info "Report what the in-house direct backend implements and which operations send vehicle bus traffic."
               :vbat "Read adapter-reported vehicle battery voltage from OBD-II pin 16."
               :observe "Passively read bytes from the device for protocol discovery."
               :exchange "Write explicit hex bytes to a disconnected adapter and capture response bytes."
