@@ -34,9 +34,9 @@ body {
 }
 
 main {
-  max-width: 960px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 24px 16px;
+  padding: 24px clamp(16px, 3vw, 40px);
 }
 
 header {
