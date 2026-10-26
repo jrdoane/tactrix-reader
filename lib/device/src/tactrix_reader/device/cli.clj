@@ -43,10 +43,10 @@
               :observe "Passively read bytes from the device for protocol discovery."
               :exchange "Write explicit hex bytes to a disconnected adapter and capture response bytes."
               :probe "Run one named adapter-local probe and return a transcript."
-              :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."
+              :obd "Send one read-only OBD-II request over ISO15765 and decode mode 01 and 09 replies. Sends vehicle bus traffic."
               :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."
               :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."
-              :vehicle-info "Read the VIN, calibration IDs, ECU name, and SSM ECU ID. Sends vehicle bus traffic."
+              :vehicle-info "Read the VIN, calibration IDs and verification numbers, ECU name, and SSM ECU ID. Sends vehicle bus traffic."
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :record "Record CAN traffic and polled PIDs to a folder (default 60 seconds). Sends vehicle bus traffic."
@@ -101,8 +101,15 @@
           (print-edn (device/run-probe (or path (first-detected-path)) probe-name request-hex)))
 
         "obd"
-        (let [[request-hex path] (rest args)]
-          (print-edn (device/obd-request (or path (first-detected-path)) request-hex)))
+        (let [[request-hex path] (rest args)
+              result (device/obd-request (or path (first-detected-path)) request-hex)
+              reply (get-in result [:response :bytes])
+              decoded (case (first reply)
+                        0x41 (device/decode-mode-01 reply)
+                        0x49 (device/decode-mode-09 reply)
+                        nil)]
+          (print-edn (cond-> result
+                       decoded (assoc :decoded decoded))))
 
         "pid"
         (let [[pid path] (rest args)]

@@ -8,7 +8,7 @@ The page has:
 
 - An adapter picker with Rescan, Connect, Disconnect, and Replay recording.
 - Panels for the source, the adapter (serial, device, firmware, battery
-  voltage), the vehicle (VIN, calibration ID, ECU name, SSM ECU ID, or why
+  voltage), the vehicle (VIN, calibration ID and CVN, ECU name, SSM ECU ID, or why
   each could not be read), and diagnostics from PID 01 (check-engine light,
   stored codes, readiness monitors).
 - Large readouts for RPM, speed, coolant, and throttle, then grouped tiles for

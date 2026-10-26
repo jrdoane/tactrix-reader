@@ -176,13 +176,15 @@
 
 (defn- vehicle-panel []
   (let [{:keys [source vehicle]} @(rf/subscribe [::subs/info])
-        {:keys [vin calibration-ids ecu-name ecu-id errors]} vehicle
+        {:keys [vin calibration-ids calibration-verification-numbers ecu-name ecu-id errors]} vehicle
         live? (= :live source)]
     [panel "Vehicle"
      (field "Vehicle" (:description vehicle))
      (field "VIN" vin (when live? (unread-reason (:vin errors))))
      (field "Calibration ID" (some->> (seq calibration-ids) (str/join ", "))
             (when live? (unread-reason (:calibration-ids errors))))
+     (field "CVN" (some->> (seq calibration-verification-numbers) (str/join ", "))
+            (when live? (unread-reason (:calibration-verification-numbers errors))))
      (field "ECU name" ecu-name (when live? (unread-reason (:ecu-name errors))))
      (field "ECU ID (SSM)" ecu-id (when live? (unread-reason (:ecu-id errors))))]))
 

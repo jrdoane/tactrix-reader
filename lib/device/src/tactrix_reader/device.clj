@@ -1351,12 +1351,36 @@
   [bytes]
   (str/trim (apply str (map char (remove zero? bytes)))))
 
+(def ^:private in-use-monitors
+  "The monitors in a spark ignition in-use performance reply (`0908`), in
+  reply order. Each has a completion count and a conditions-met count."
+  [:catalyst-bank-1 :catalyst-bank-2
+   :oxygen-sensor-bank-1 :oxygen-sensor-bank-2
+   :egr-system :secondary-air :evaporative-system
+   :secondary-oxygen-sensor-bank-1 :secondary-oxygen-sensor-bank-2])
+
+(defn- in-use-performance
+  "Decodes the 16-bit counters of a `0908` reply. Older ECUs send 16
+  counters and newer ones 20, so the monitor list is cut to fit."
+  [counters]
+  (let [[general-denominator ignition-cycles & monitor-counts] counters]
+    {:general-denominator general-denominator
+     :ignition-cycles ignition-cycles
+     :monitors (into {}
+                     (map (fn [monitor [completions conditions]]
+                            [monitor {:completions completions :conditions conditions}])
+                          in-use-monitors
+                          (partition 2 monitor-counts)))}))
+
 (defn decode-mode-09
-  "Decodes a positive mode 09 reply for the VIN (`02`), calibration IDs (`04`),
-  or ECU name (`0A`), such as `[0x49 0x02 0x01 ...]`. On CAN, the byte after
-  the info type is the number of data items."
+  "Decodes a positive mode 09 reply, such as `[0x49 0x02 0x01 ...]`: the
+  supported info types (`00`), VIN (`02`), calibration IDs (`04`),
+  calibration verification numbers (`06`), in-use performance counters for a
+  spark ignition engine (`08`), or ECU name (`0A`). On CAN, the byte after
+  the info type is the number of data items, except for `00`."
   [data]
-  (let [[service info-type item-count & items] data
+  (let [[service info-type & args] data
+        [item-count & items] args
         items (vec items)]
     (cond
       (not= 0x49 service)
@@ -1370,9 +1394,19 @@
 
       :else
       (case info-type
+        ;; A 4-byte bitmap, like mode 01 PID 00, with no item count.
+        0x00 {:ok? true :name :supported-info-types :value ((supported-pids 0x00) (vec args))}
         0x02 {:ok? true :name :vin :value (ascii-text items)}
         ;; Each calibration ID is 16 bytes, zero-padded.
         0x04 {:ok? true :name :calibration-ids :value (mapv ascii-text (take item-count (partition 16 items)))}
+        ;; Each CVN is 4 bytes, one per calibration ID, shown as hex.
+        0x06 {:ok? true
+              :name :calibration-verification-numbers
+              :value (mapv #(apply str (map byte->hex %)) (take item-count (partition 4 items)))}
+        ;; The item count is the number of 16-bit counters.
+        0x08 {:ok? true
+              :name :in-use-performance
+              :value (in-use-performance (map word (take item-count (partition 2 items))))}
         0x0A {:ok? true :name :ecu-name :value (ascii-text items)}
         {:ok? false
          :info-type info-type
@@ -1382,11 +1416,13 @@
 (def ^:private vehicle-info-requests
   [[:vin "0902"]
    [:calibration-ids "0904"]
+   [:calibration-verification-numbers "0906"]
    [:ecu-name "090A"]])
 
 (defn read-vehicle-info
   "Reads what identifies the vehicle and its engine ECU: the VIN, calibration
-  IDs, and ECU name (mode 09), and the ECU ID (SSM `AA`, see `ssm-init`).
+  IDs, calibration verification numbers, and ECU name (mode 09), and the ECU
+  ID (SSM `AA`, see `ssm-init`).
 
   Each item the ECU does not answer is nil, with its error under `:errors`.
   `:ok?` is true when at least one item was read. Takes the same options as

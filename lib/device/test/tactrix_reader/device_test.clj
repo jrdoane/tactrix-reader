@@ -647,13 +647,44 @@
                                         (ascii "CAL2") (repeat 12 0)))))
   (is (= {:ok? true :name :ecu-name :value "ECM-EngineControl"}
          (device/decode-mode-09 (concat [0x49 0x0A 1] (ascii "ECM") [0] (ascii "-EngineControl") [0 0]))))
-  (is (= :unknown-info-type (:error (device/decode-mode-09 [0x49 0x06 1 0x12 0x34 0x56 0x78]))))
+  (is (= :unknown-info-type (:error (device/decode-mode-09 [0x49 0x0B 1 0x12 0x34]))))
   (is (= :not-mode-09-reply (:error (device/decode-mode-09 [0x41 0x0C 0x0C 0x80])))))
+
+;; Replies from the project's 2015 Impreza.
+(deftest decodes-mode-09-support-and-calibration-checks
+  (is (= {:ok? true :name :supported-info-types :value [0x02 0x04 0x06 0x08 0x0A]}
+         (device/decode-mode-09 [0x49 0x00 0x55 0x40 0x00 0x00])))
+  (is (= {:ok? true :name :calibration-verification-numbers :value ["9EB33551"]}
+         (device/decode-mode-09 [0x49 0x06 0x01 0x9E 0xB3 0x35 0x51])))
+  (is (= {:ok? true
+          :name :in-use-performance
+          :value {:general-denominator 4
+                  :ignition-cycles 19
+                  :monitors {:catalyst-bank-1 {:completions 0 :conditions 0}
+                             :catalyst-bank-2 {:completions 0 :conditions 0}
+                             :oxygen-sensor-bank-1 {:completions 4 :conditions 4}
+                             :oxygen-sensor-bank-2 {:completions 0 :conditions 0}
+                             :egr-system {:completions 15 :conditions 4}
+                             :secondary-air {:completions 0 :conditions 0}
+                             :evaporative-system {:completions 1 :conditions 0}
+                             :secondary-oxygen-sensor-bank-1 {:completions 7 :conditions 4}
+                             :secondary-oxygen-sensor-bank-2 {:completions 0 :conditions 0}}}}
+         (device/decode-mode-09 [0x49 0x08 0x14
+                                 0 4 0 19 0 0 0 0 0 0 0 0 0 4 0 4 0 0 0 0
+                                 0 15 0 4 0 0 0 0 0 1 0 0 0 7 0 4 0 0 0 0])))
+  (testing "an older ECU sends 16 counters, without the secondary oxygen sensors"
+    (is (= #{:catalyst-bank-1 :catalyst-bank-2 :oxygen-sensor-bank-1 :oxygen-sensor-bank-2
+             :egr-system :secondary-air :evaporative-system}
+           (-> (device/decode-mode-09 (into [0x49 0x08 0x10] (repeat 32 0)))
+               (get-in [:value :monitors])
+               keys
+               set)))))
 
 (deftest read-vehicle-info-collects-each-item-and-its-errors
   (let [requested (atom [])
         replies {"0902" {:ok? true :response {:bytes (vec (concat [0x49 2 1] fake-vin))}}
                  "0904" {:ok? true :response {:bytes (vec (concat [0x49 4 1] fake-calibration-id))}}
+                 "0906" {:ok? true :response {:bytes [0x49 6 1 0x9E 0xB3 0x35 0x51]}}
                  "090A" {:ok? false :error :negative-response :nrc 0x12}}]
     (with-redefs [device/obd-request (fn [_path request-hex _opts]
                                        (swap! requested conj request-hex)
@@ -665,12 +696,13 @@
               :path "/dev/cu.usbmodemTAlgJ3P81"
               :vin "TESTVIN0123456789"
               :calibration-ids ["EA1T002C"]
+              :calibration-verification-numbers ["9EB33551"]
               :ecu-name nil
               :ecu-id nil
               :errors {:ecu-name {:error :negative-response :nrc 0x12}
                        :ecu-id {:error :timeout}}}
              (device/read-vehicle-info "/dev/cu.usbmodemTAlgJ3P81")))
-      (is (= ["0902" "0904" "090A" "AA"] @requested)))))
+      (is (= ["0902" "0904" "0906" "090A" "AA"] @requested)))))
 
 (deftest read-vehicle-info-reports-when-nothing-answers
   (with-redefs [device/obd-request (fn [& _] {:ok? false :error :not-found-or-permission-denied})

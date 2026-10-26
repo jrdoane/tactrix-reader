@@ -36,8 +36,8 @@ or the committed one.
    with `:no-vehicle-power` if there is none.
 3. Reads the vehicle's identity with
    [`read-vehicle-info`](../../lib/device/docs/obd-pids.md#vehicle-identity-vehicle-info):
-   VIN, calibration IDs, ECU name, and SSM ECU ID. Status is `:identifying`
-   meanwhile.
+   VIN, calibration IDs and verification numbers, ECU name, and SSM ECU ID.
+   Status is `:identifying` meanwhile.
 4. Starts polling mode 01 PIDs.
 
 The status goes `:connecting`, `:identifying`, then `:running`, or `:failed`
