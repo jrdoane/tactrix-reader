@@ -113,15 +113,17 @@ An item the ECU does not answer is nil, with its error under `:errors`:
  :path "/dev/cu.usbmodemTAlgJ3P81"
  :vin "..."
  :calibration-ids ["EA1T002C"]
- :ecu-name nil
+ :ecu-name "ECM-EngineControl"
  :ecu-id nil
- :errors {:ecu-name {:error :negative-response :nrc 18}
-          :ecu-id {:error :timeout}}}
+ :errors {:ecu-id {:error :timeout}}}
 ```
 
-`:ok?` is false only when nothing answered. On this project's 2015 Impreza,
-`0904` returns `EA1T002C` and SSM `AA` gets no reply. `0902` and `090A` have
-not been tried on it yet. Each unanswered request waits for the 1-second
+A refused request has `{:error :negative-response :nrc <code>}` instead.
+`:ok?` is false only when nothing answered.
+
+That is what this project's 2015 Impreza returns. `0902`, `0904`, and `090A`
+all answer, with the 17-character VIN, `EA1T002C`, and `ECM-EngineControl`.
+SSM `AA` gets no reply. Each unanswered request waits for the 1-second
 timeout, so expect a few seconds when items are missing.
 
 ## Decoded PIDs
