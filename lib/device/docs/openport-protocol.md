@@ -153,6 +153,9 @@ short frames and this ECU ignores them.
 
 ## Not yet confirmed
 
+- **Multi-frame ISO15765 transmit.** Every ISO15765 request sent so far fits
+  in one CAN frame. Whether the adapter segments longer `att6` payloads, such
+  as an SSM read of two or more addresses, has not been tried.
 - **K-line receive.** With no vehicle, a K-line `att` with LOOPBACK on and a
   pass-all filter returned `aro` but produced no echo, probably because the
   K-line transceiver is powered from pin 16. Not yet retried on a vehicle.

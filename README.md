@@ -31,6 +31,7 @@ ignition on, and run `clojure -M:run live` instead.
 
 - [Device library](lib/device/README.md): command-line tool and Clojure API
 - [OBD-II requests and decoded PIDs](lib/device/docs/obd-pids.md)
+- [Subaru SSM reads](lib/device/docs/subaru-ssm.md): ECU memory reads such as knock correction
 - [Recordings](lib/device/docs/recordings.md): capturing and exporting CAN traffic
 - [OpenPort serial protocol](lib/device/docs/openport-protocol.md): reverse-engineered adapter commands
 - [Engine server](services/engine-server/README.md): running, endpoints, and the stream format

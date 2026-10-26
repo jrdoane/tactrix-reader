@@ -122,6 +122,7 @@
                           :obd-request
                           :read-pid
                           :read-all-pids
+                          :ssm-read
                           :can-session
                           :record
                           :export-recording
@@ -133,6 +134,7 @@
                           :operations [:obd-request
                                        :read-pid
                                        :read-all-pids
+                                       :ssm-read
                                        :record
                                        :live-source]}
             :discovery-policy {:writes :explicit-request-only
@@ -436,6 +438,69 @@
             :step :response
             :error :timeout}
            (select-keys result [:ok? :step :error])))))
+
+(defn- run-fake-ssm
+  "Runs ssm-read against canned adapter output. Returns the result and the
+  bytes written to the adapter."
+  [replies addresses]
+  (let [output (java.io.ByteArrayOutputStream.)
+        input (java.io.ByteArrayInputStream. (byte-array (map unchecked-byte replies)))]
+    (with-redefs [device/open-session (fn [_]
+                                        (#'device/stream-session input output))]
+      {:result (device/ssm-read "/dev/cu.usbmodemTAlgJ3P81" addresses {:drain? false})
+       :written (mapv #(bit-and % 0xFF) (.toByteArray output))})))
+
+(deftest ssm-read-validates-before-opening-the-device
+  (let [opened? (atom false)]
+    (with-redefs [device/open-session (fn [_] (reset! opened? true))]
+      (is (= :missing-path (:error (device/ssm-read nil [0x22]))))
+      (are [addresses] (= :invalid-ssm-addresses
+                          (:error (device/ssm-read "/dev/cu.usbmodemTAlgJ3P81" addresses)))
+        nil
+        []
+        [0x1000000]
+        [-1]
+        ["000022"])
+      (is (false? @opened?)))))
+
+(deftest ssm-read-sends-a8-and-pairs-bytes-with-addresses
+  (let [{:keys [result written]}
+        (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 [0xE8 0x80 0x3F])
+                              (ascii "aro\r\n"))
+                      [0x000022 0xFF6A04])]
+    (is (= (vec (concat (ascii "atc6\r\n")
+                        (ascii "ato6 0 500000\r\n")
+                        (ascii "atf6 3 64 4\r\n")
+                        [0xFF 0xFF 0xFF 0xFF 0 0 7 0xE8 0 0 7 0xE0]
+                        (ascii "att6 12 64\r\n")
+                        [0 0 7 0xE0 0xA8 0 0 0 0x22 0xFF 0x6A 0x04]
+                        (ascii "atc6\r\n")))
+           written))
+    (is (true? (:ok? result)))
+    (is (= ["A8" "00" "00" "00" "22" "FF" "6A" "04"] (get-in result [:request :hex])))
+    (is (= [{:address 0x22 :address-hex "000022" :value 0x80}
+            {:address 0xFF6A04 :address-hex "FF6A04" :value 0x3F}]
+           (:values result)))))
+
+(deftest ssm-read-reports-replies-of-the-wrong-length
+  (let [{:keys [result]}
+        (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 [0xE8 0x80])
+                              (ascii "aro\r\n"))
+                      [0x000022 0x000023])]
+    (is (= {:ok? false :error :unexpected-response}
+           (select-keys result [:ok? :error])))
+    (is (nil? (:values result)))))
+
+(deftest ssm-read-reports-negative-responses
+  (let [{:keys [result]}
+        (run-fake-ssm (concat (ascii "aro\r\naro\r\narf6 9 0\r\naro\r\n")
+                              (message-bytes 6 0x40 100 0x7E8 [0x7F 0xA8 0x31])
+                              (ascii "aro\r\n"))
+                      [0x000022])]
+    (is (= {:ok? false :error :negative-response :nrc 0x31}
+           (select-keys result [:ok? :error :nrc])))))
 
 (deftest decodes-common-mode-01-pids
   (are [data expected] (= expected (select-keys (device/decode-mode-01 data) [:ok? :name :value :unit]))

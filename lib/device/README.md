@@ -9,12 +9,14 @@ The library provides:
 
 - Device discovery and adapter checks that need no vehicle
 - Read-only OBD-II requests and decoding of mode 01 PIDs
+- Subaru SSM memory reads, for values such as knock correction
 - Recording of raw CAN traffic with polled PIDs
 - Live and replay data sources for the [engine server](../../services/engine-server/README.md)
 
 More detail:
 
 - [OBD-II requests and decoded PIDs](docs/obd-pids.md)
+- [Subaru SSM reads](docs/subaru-ssm.md)
 - [Recordings](docs/recordings.md)
 - [OpenPort serial protocol](docs/openport-protocol.md)
 
@@ -36,12 +38,14 @@ path use the first detected adapter when it is left out.
 | `obd <hex> [path]` | Send one read-only OBD-II request | Yes |
 | `pid <name-or-hex> [path]` | Read and decode one mode 01 PID | Yes |
 | `pids [path]` | Read every decodable PID the vehicle supports | Yes |
+| `ssm-read <addresses> [path]` | Read one byte at each comma-separated hex ECU address with Subaru SSM | Yes |
 | `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
 | `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
 
 `obd`, `pid`, and `pids` are covered in
-[OBD-II requests and decoded PIDs](docs/obd-pids.md); `record` and
-`export-recording` in [Recordings](docs/recordings.md).
+[OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-read` in
+[Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
+[Recordings](docs/recordings.md).
 
 Failures are returned as EDN with `:ok? false` and an `:error` keyword rather
 than thrown, for example when the device is unplugged, busy, or blocked by
@@ -153,6 +157,7 @@ The main entry points in `tactrix-reader.device`:
 | `vehicle-status`, `read-vbat` | Adapter and vehicle power checks |
 | `obd-request` | One read-only OBD-II request over ISO15765 |
 | `read-pid`, `read-all-pids`, `decode-mode-01` | Mode 01 PID reads and decoding |
+| `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) memory reads over ISO15765 |
 | `record`, `export-recording`, `recording-samples` | [Recordings](docs/recordings.md) |
 | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
 | `start-live-source!`, `start-replay-source!` | Data sources, below |

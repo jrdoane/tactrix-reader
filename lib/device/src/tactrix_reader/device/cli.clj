@@ -1,5 +1,6 @@
 (ns tactrix-reader.device.cli
   (:require [clojure.pprint :as pprint]
+            [clojure.string :as str]
             [tactrix-reader.device :as device]))
 
 (defn- print-edn [value]
@@ -25,6 +26,8 @@
            "clojure -M:run pid 05 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run pids"
            "clojure -M:run pids /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run ssm-read 000022"
+           "clojure -M:run ssm-read FF6A04,FF6A05,FF6A06,FF6A07 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run record recordings/my-drive"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run export-recording recordings/my-drive"]
@@ -39,6 +42,7 @@
               :obd "Send one read-only OBD-II request over ISO15765. Sends vehicle bus traffic."
               :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."
               :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."
+              :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :record "Record CAN traffic and polled PIDs to a folder (default 60 seconds). Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
@@ -48,6 +52,14 @@
   (if (and s (re-matches #"[0-9A-Fa-f]{1,2}" s))
     (Integer/parseInt s 16)
     (keyword s)))
+
+(defn- parse-ssm-addresses
+  "Reads comma-separated hex addresses such as `000022,000023`. Anything that
+  is not hex is kept as a string so `ssm-read` reports it."
+  [s]
+  (when s
+    (mapv #(if (re-matches #"[0-9A-Fa-f]{1,6}" %) (Integer/parseInt % 16) %)
+          (str/split s #","))))
 
 (defn- first-detected-path []
   (some :path (device/scan-devices)))
@@ -92,6 +104,11 @@
 
         "pids"
         (print-edn (device/read-all-pids (or arg (first-detected-path))))
+
+        "ssm-read"
+        (let [[addresses path] (rest args)]
+          (print-edn (device/ssm-read (or path (first-detected-path))
+                                      (parse-ssm-addresses addresses))))
 
         "record"
         (let [[out-dir seconds path] (rest args)]

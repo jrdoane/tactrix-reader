@@ -334,6 +334,7 @@
                  :obd-request
                  :read-pid
                  :read-all-pids
+                 :ssm-read
                  :can-session
                  :record
                  :export-recording
@@ -345,6 +346,7 @@
                  :operations [:obd-request
                               :read-pid
                               :read-all-pids
+                              :ssm-read
                               :record
                               :live-source]}
    :discovery-policy {:writes :explicit-request-only
@@ -828,6 +830,69 @@
       (finally
         (send-command! session close [] command-timeout-ms)))))
 
+(def ^:private iso15765-defaults
+  {:tx-id 0x7E0
+   :rx-id 0x7E8
+   :baud 500000
+   :timeout-ms default-obd-timeout-ms
+   :command-timeout-ms default-obd-command-timeout-ms
+   :drain? true})
+
+(defn- iso15765-request
+  "Opens the device, sends `request` bytes over ISO15765, and checks that the
+  reply's first byte is the request's plus 0x40. `base` is merged into every
+  result, and `failed-error` is the `:error` for unexpected exceptions."
+  [path request base failed-error {:keys [drain?] :as opts}]
+  (let [service (first request)
+        request-summary {:bytes request
+                         :hex (mapv byte->hex request)}]
+    (try
+      (let [session (open-session path)]
+        (try
+          (when drain?
+            (read-events! session)
+            (reset! (:events session) [])
+            (reset! (:remainder session) []))
+          (let [result (run-obd-request session request
+                                        (select-keys opts [:tx-id :rx-id :baud :timeout-ms
+                                                           :command-timeout-ms]))
+                {:keys [data status timestamp-us]} (:message result)
+                response {:bytes data
+                          :hex (mapv byte->hex data)
+                          :status status
+                          :timestamp-us timestamp-us}]
+            (cond
+              (not (:ok? result))
+              (merge base {:request request-summary} result)
+
+              (= 0x7F (first data))
+              (merge base {:ok? false
+                           :error :negative-response
+                           :nrc (get data 2)
+                           :request request-summary
+                           :response response})
+
+              (not= (+ service 0x40) (first data))
+              (merge base {:ok? false
+                           :error :unexpected-response
+                           :request request-summary
+                           :response response})
+
+              :else
+              (merge base {:ok? true
+                           :request request-summary
+                           :response response})))
+          (finally
+            (close-session session))))
+      (catch java.io.FileNotFoundException e
+        (merge base {:ok? false
+                     :error :not-found-or-permission-denied
+                     :message (.getMessage e)}))
+      (catch Throwable e
+        (merge base {:ok? false
+                     :error failed-error
+                     :message (.getMessage e)})))))
+
 (defn obd-request
   "Sends one read-only OBD-II request over ISO15765 and returns the ECU reply.
 
@@ -838,14 +903,9 @@
   Unlike the discovery helpers, this sends traffic on the vehicle bus."
   ([device-or-path request-hex]
    (obd-request device-or-path request-hex {}))
-  ([device-or-path request-hex {:keys [tx-id rx-id baud timeout-ms command-timeout-ms drain?]
-                                :or {tx-id 0x7E0
-                                     rx-id 0x7E8
-                                     baud 500000
-                                     timeout-ms default-obd-timeout-ms
-                                     command-timeout-ms default-obd-command-timeout-ms
-                                     drain? true}}]
-   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+  ([device-or-path request-hex opts]
+   (let [{:keys [tx-id rx-id] :as opts} (merge iso15765-defaults opts)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
          request (hex->bytes request-hex)
          service (first (:bytes request))
          base {:backend :mac-serial
@@ -864,57 +924,66 @@
        (assoc base :ok? false :error :service-not-read-only :service service)
 
        :else
-       (let [request-summary {:bytes (:bytes request)
-                              :hex (mapv byte->hex (:bytes request))}]
-         (try
-           (let [session (open-session path)]
-             (try
-               (when drain?
-                 (read-events! session)
-                 (reset! (:events session) [])
-                 (reset! (:remainder session) []))
-               (let [result (run-obd-request session (:bytes request)
-                                             {:tx-id tx-id
-                                              :rx-id rx-id
-                                              :baud baud
-                                              :timeout-ms timeout-ms
-                                              :command-timeout-ms command-timeout-ms})
-                     {:keys [data status timestamp-us]} (:message result)
-                     response {:bytes data
-                               :hex (mapv byte->hex data)
-                               :status status
-                               :timestamp-us timestamp-us}]
-                 (cond
-                   (not (:ok? result))
-                   (merge base {:request request-summary} result)
+       (iso15765-request path (:bytes request) base :obd-request-failed opts)))))
 
-                   (= 0x7F (first data))
-                   (merge base {:ok? false
-                                :error :negative-response
-                                :nrc (get data 2)
-                                :request request-summary
-                                :response response})
+(def ssm-read-addresses-command
+  "The Subaru Select Monitor (SSM) command that reads one byte at each of a list
+  of 3-byte ECU memory addresses. It is the only SSM command sent: `B0` and
+  `B8` write ECU memory and are never built."
+  0xA8)
 
-                   (not= (+ service 0x40) (first data))
-                   (merge base {:ok? false
-                                :error :unexpected-response
-                                :request request-summary
-                                :response response})
+(defn- ssm-address? [address]
+  (and (int? address) (<= 0 address 0xFFFFFF)))
 
-                   :else
-                   (merge base {:ok? true
-                                :request request-summary
-                                :response response})))
-               (finally
-                 (close-session session))))
-           (catch java.io.FileNotFoundException e
-             (merge base {:ok? false
-                          :error :not-found-or-permission-denied
-                          :message (.getMessage e)}))
-           (catch Throwable e
-             (merge base {:ok? false
-                          :error :obd-request-failed
-                          :message (.getMessage e)}))))))))
+(defn ssm-read
+  "Reads one byte at each ECU memory address with the Subaru Select Monitor
+  (SSM) `A8` command, sent over ISO15765 like `obd-request`.
+
+  `addresses` is a sequence of integers up to `0xFFFFFF`, such as `[0x000022]`.
+  The reply has one byte per address, in order, so a 4-byte value is read as
+  four consecutive addresses. Takes the same options as `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path addresses]
+   (ssm-read device-or-path addresses {}))
+  ([device-or-path addresses opts]
+   (let [{:keys [tx-id rx-id] :as opts} (merge iso15765-defaults opts)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         base {:backend :mac-serial
+               :path path
+               :protocol :iso15765
+               :tx-id tx-id
+               :rx-id rx-id}]
+     (cond
+       (not (seq path))
+       (assoc base :ok? false :error :missing-path)
+
+       (not (and (sequential? addresses)
+                 (seq addresses)
+                 (every? ssm-address? addresses)))
+       (assoc base :ok? false :error :invalid-ssm-addresses :addresses addresses)
+
+       :else
+       ;; The 00 after A8 selects a single read; SSM over CAN has no fast poll.
+       (let [request (into [ssm-read-addresses-command 0x00]
+                           (mapcat #(subvec (u32->bytes %) 1))
+                           addresses)
+             result (iso15765-request path request base :ssm-read-failed opts)
+             data (get-in result [:response :bytes])]
+         (cond
+           (not (:ok? result))
+           result
+
+           (not= (inc (count addresses)) (count data))
+           (assoc result :ok? false :error :unexpected-response)
+
+           :else
+           (assoc result :values (mapv (fn [address value]
+                                         {:address address
+                                          :address-hex (format "%06X" address)
+                                          :value value})
+                                       addresses
+                                       (rest data)))))))))
 
 (defn- supported-pids
   "Decodes a 4-byte supported-PIDs bitmap. Bit 7 of the first byte is PID

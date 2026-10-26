@@ -81,6 +81,7 @@ A single large namespace, layered roughly top to bottom:
 - **OpenPort command layer:** `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events. `openport-operations` maps J2534 operations (such as `:pass-thru-connect`) to their confirmed command prefixes (such as `"ato"`), and `known-operation?` and `unsupported-operation` read it. There is no general J2534 API yet.
 - **Two ways of talking to the ECU:**
   - `obd-request` (and `read-pid` and `read-all-pids` on top of it) opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly.
+  - `ssm-read` sends Subaru SSM `A8` memory reads over the same ISO15765 path, sharing `iso15765-request` with `obd-request`. It is not yet confirmed on a vehicle (`lib/device/docs/subaru-ssm.md`).
   - `run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
 - **PID decoding:** the `mode-01-pids` map (PID → name, byte count, unit, `:decode` fn). Add a PID there and in the table in `lib/device/docs/obd-pids.md`.
 - **Recordings:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`, and `frames.csv` is gitignored.
@@ -100,6 +101,8 @@ map should stay in sync with the command table in `lib/device/README.md`.
 
 - Only read-only OBD services are sent (`read-only-obd-services`). Never send
   service 04 (clear DTCs) or 08 (control on-board systems).
+- The only SSM command sent is `A8` (read addresses). Never send SSM `B0` or
+  `B8`: they write ECU memory.
 - Don't send the adapter's `atv` command: it may set programming voltage on a
   pin.
 - Protocol discovery writes only explicit bytes and never sweeps. Arbitrary
