@@ -6,11 +6,11 @@ Subaru ECUs expose them through Subaru Select Monitor (SSM) memory reads.
 same ISO15765 channel as [`obd`](obd-pids.md). Run these commands from
 `lib/device`.
 
-**Not yet confirmed on a vehicle.** The request formats below come from
-RomRaider's source (`io/protocol/ssm/iso15765/SSMProtocol.java`) and public
-forum notes, not from probing this project's 2015 Impreza. When it is tried, record what happens in
-[OpenPort serial protocol](openport-protocol.md#on-a-vehicle) and update this
-page.
+**These do not work on this project's 2015 Impreza.** Its ECU does not answer
+SSM over CAN; see [This project's 2015 Impreza](#this-projects-2015-impreza).
+The request formats below come from RomRaider's source
+(`io/protocol/ssm/iso15765/SSMProtocol.java`) and public forum notes, and have
+not been confirmed on any vehicle.
 
 ## Identifying the ECU: `ssm-init`
 
@@ -112,11 +112,54 @@ For FBKC and FLKC:
 Check the logger definition's conversion for each parameter rather than
 assuming a float.
 
-This project's 2015 Impreza has calibration ID `EA1T002C`. As of October 2026
-there is no public ROM definition for it, and its ECU ID has not been read
-yet. The `logger_STD_EN_v290.xml` logger definition does define FBKC and FLKC
-for other FB20 ECUs (ECU IDs `7334384107`, `73343C4207`, `73243C7507`, and
-`8424385107`).
+The `logger_STD_EN_v290.xml` logger definition defines FBKC and FLKC for
+2012-14 FB20 ECUs (ECU IDs `7334384107`, `73343C4207`, `73243C7507`, and
+`8424385107`), but not for this project's car.
+
+## This project's 2015 Impreza
+
+Observed on 2026-10-26.
+
+**Calibration ID.** `obd 0904` returns calibration ID `EA1T002C`, the same ID
+SubaruEdit reports:
+
+```
+49 04 01 45 41 31 54 30 30 32 43 00 00 00 00 00 00 00 00
+          E  A  1  T  0  0  2  C
+```
+
+`01` is the number of calibration IDs; the ID is ASCII padded with zeros to 16
+bytes.
+
+**No SSM reply.** `ssm-init` sent `AA` to `7E0` and got no reply within 5
+seconds, neither `EA` nor a `7F` negative response. This happened with the
+ignition on and the engine off (12.3V) and again with the engine running
+(14.2V). `obd 0100` on the same channel was answered normally, so the ECU was
+awake and the channel worked. RomRaider builds the same request (`7E0` then
+`AA`, with no session setup before it), so the request format is not the
+difference.
+
+**Research.** Reported elsewhere, not tested here:
+
+- A RomRaider forum thread on a 2015 NA Impreza reports SSM over CAN failing
+  the same way. RomRaider's developer said in March 2024 that the logger
+  cannot log that ECU over SSM on CAN or K-line, and guessed that it uses
+  OBD-II mode `23` (UDS ReadMemoryByAddress) instead.
+- RomRaider's "OBD CAN" mode reads that kind of ECU only through standard
+  mode `01` PIDs and `09 04`. It finds the ECU ID by looking up the
+  calibration ID in its ROM definitions. It reads no ECU memory, so it cannot
+  log FBKC or FLKC.
+- No ECU that EcuFlash flashes with the `subarubrz` method has logger
+  parameters in `logger_STD_EN_v290.xml`: every 2012-18 BRZ, the 2015 US
+  Legacy 2.0 (`EA1M702A`), and the 2016 Forester 2.5 (`EA1T400W`, the closest
+  published relative of `EA1T002C`).
+- There is no public ROM definition for `EA1T002C`, so its ECU ID and RAM
+  addresses are unknown.
+
+Mode `23` is the only lead. Whether this ECU supports it, whether it needs a
+diagnostic session or security access first, and which addresses hold FBKC
+and FLKC are all unknown. It would also need its own allowlist, with UDS `3D`
+(WriteMemoryByAddress) never sent.
 
 ## Safety
 
