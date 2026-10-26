@@ -15,20 +15,27 @@ Channel IDs are J2534 protocol IDs: 3 is ISO9141, 5 is CAN, and 6 is ISO15765.
 Open channels and filters live in the adapter and survive closing and reopening
 the serial port. Filter IDs count up across channels.
 
-| Request | Reply | Meaning |
-|---|---|---|
-| `ati` | `ari main code version : 1.17.4877` | Firmware version |
-| `ata` | `aro` | OK; likely PassThruOpen |
-| `atz` | `aro` | OK; likely reset or PassThruClose |
-| `atr <pin>` | `arr <pin> <millivolts>` | Pin voltage |
-| `ato<proto> <flags> <baud> [tag]` | `aro` | PassThruConnect |
-| `atc<chan>` | `aro` | PassThruDisconnect; also `aro` if already closed |
-| `atg<chan> <param> [tag]` | `arg<chan> <param> <value> <tag>` | GET_CONFIG |
-| `ats<chan> <param> <value>` | `aro` | SET_CONFIG |
-| `att<chan> <len> <flags>` + `len` raw bytes | `aro` | PassThruWriteMsgs |
-| `atf<chan> <type> <flags> <len> [tag]` + mask + pattern | `arf<chan> <filter-id> <tag>` | PassThruStartMsgFilter |
-| `atk<chan> <filter-id>` | `aro` | PassThruStopMsgFilter |
-| any | `are <code>` | Error |
+| Request | Reply | Meaning | Operation |
+|---|---|---|---|
+| `ati` | `ari main code version : 1.17.4877` | Firmware version | `:pass-thru-read-version` |
+| `ata` | `aro` | OK; likely PassThruOpen | |
+| `atz` | `aro` | OK; likely reset or PassThruClose | |
+| `atr <pin>` | `arr <pin> <millivolts>` | Pin voltage; pin 16 is READ_VBATT | `:read-vbatt` |
+| `ato<proto> <flags> <baud> [tag]` | `aro` | PassThruConnect | `:pass-thru-connect` |
+| `atc<chan>` | `aro` | PassThruDisconnect; also `aro` if already closed | `:pass-thru-disconnect` |
+| `atg<chan> <param> [tag]` | `arg<chan> <param> <value> <tag>` | GET_CONFIG | `:get-config` |
+| `ats<chan> <param> <value>` | `aro` | SET_CONFIG | `:set-config` |
+| `att<chan> <len> <flags>` + `len` raw bytes | `aro` | PassThruWriteMsgs | `:pass-thru-write-msgs` |
+| `atf<chan> <type> <flags> <len> [tag]` + mask + pattern | `arf<chan> <filter-id> <tag>` | PassThruStartMsgFilter | `:pass-thru-start-msg-filter` |
+| `atk<chan> <filter-id>` | `aro` | PassThruStopMsgFilter | `:pass-thru-stop-msg-filter` |
+| any | `are <code>` | Error | |
+
+The Operation column is the key in `openport-operations` in `device.clj`,
+which maps each J2534 operation to its confirmed command prefix.
+`known-operation?` and `unsupported-operation` read it. Commands whose meaning
+is only likely, such as `ata` and `atz`, and the ones under
+[Partly understood](#partly-understood) are left out. When probing confirms
+one, add it to the map and this table together.
 
 Examples:
 
