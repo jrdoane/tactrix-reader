@@ -6,13 +6,22 @@ vehicle. Run these commands from `lib/device`.
 
 ## Recording
 
-`record` sends traffic on the vehicle bus. It records for 60 seconds unless
-given a number of seconds:
+`record` sends traffic on the vehicle bus. It records until Ctrl-C, or for
+the given number of seconds:
 
 ```sh
 clojure -M:run record recordings/my-drive
 clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81
 ```
+
+It writes `raw.bin` to disk as bytes arrive. When it stops, whether at the
+time limit, on Ctrl-C, or because the adapter failed (for example, it was
+unplugged), it closes the channel and writes `meta.edn` and the CSVs from what
+it captured. `:stopped-by` in the result and in `meta.edn` says which:
+`:duration`, `:stop`, or `:error`. After an error the result has `:ok? false`,
+and `meta.edn` has the error message. If the process is killed outright,
+`raw.bin` is still on disk up to that point; run `export-recording` on it to
+get the CSVs. A recording that never opens the CAN channel writes no files.
 
 It opens CAN at 500 kbps with a pass-all filter and polls with the same
 schedule as the [live source](../README.md#live-and-replay-sources): one
@@ -20,15 +29,17 @@ read-only request to `7E0` every 15 ms, covering RPM, speed, load,
 temperatures, trims, lambda, throttle and pedal, voltage, and fuel level. Fast
 PIDs are sampled about every 135 ms and slow ones about every 1.35 seconds.
 
-From Clojure, `record` takes `:duration-ms`, `:pids`, `:interval-ms`,
-`:tx-id`, `:rx-id`, and `:baud`. Pass `:pids []` to only listen.
+From Clojure, `record` takes `:duration-ms`, `:stop`, `:pids`,
+`:interval-ms`, `:tx-id`, `:rx-id`, and `:baud`. It records for 60 seconds by
+default; `:duration-ms nil` removes the limit, and delivering the `:stop`
+promise ends the recording early. Pass `:pids []` to only listen.
 
 ## Files
 
 | File | Contents | Committed |
 |---|---|---|
 | `raw.bin` | Exact bytes the adapter sent, including command replies | Yes |
-| `meta.edn` | Firmware, bus settings, polling schedule, and counts | Yes |
+| `meta.edn` | Duration and why it stopped, firmware, bus settings, polling schedule, and counts | Yes |
 | `frames.csv` | Every CAN frame, including copies of the polling requests | No; large |
 | `pids.csv` | Decoded PID replies | Yes |
 

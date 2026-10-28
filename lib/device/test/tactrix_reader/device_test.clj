@@ -949,6 +949,7 @@
                                                           :pids [0x0C 0x05]
                                                           :interval-ms 10})]
         (is (true? (:ok? result)))
+        (is (= :duration (:stopped-by result)))
         (is (pos? (:request-count result)))
         (is (= (:request-count result) (get-in result [:counts :pid-samples])))
         (is (= "1.17.4877" (get-in (edn/read-string (slurp (java.io.File. dir "meta.edn")))
@@ -958,6 +959,67 @@
                     (drop 1)
                     (take 2)
                     (mapcat #(let [[_ _ _ name value] (str/split % #",")] [name value])))))))))
+
+(deftest record-streams-to-disk-until-stopped
+  (let [dir (temp-dir)
+        raw-file (java.io.File. dir "raw.bin")
+        stop (promise)]
+    (with-redefs [device/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [recording (future (device/record "/dev/fake" (str dir) {:duration-ms nil
+                                                                    :stop stop
+                                                                    :pids [0x0C]
+                                                                    :interval-ms 10}))]
+        (is (wait-for #(< 200 (.length raw-file)) 3000))
+        (is (not (.exists (java.io.File. dir "meta.edn"))))
+        (deliver stop true)
+        (let [result (deref recording 3000 nil)]
+          (is (true? (:ok? result)))
+          (is (= :stop (:stopped-by result)))
+          (is (pos? (get-in result [:counts :pid-samples])))
+          (is (= :stop (:stopped-by (edn/read-string (slurp (java.io.File. dir "meta.edn")))))))))))
+
+(defn- failing-input
+  "Wraps a fake session so reads throw, as when the adapter is unplugged,
+  once `failed?` is true."
+  [session failed?]
+  (let [^java.io.InputStream input (:input session)
+        check! #(when @failed? (throw (java.io.IOException. "Device not configured")))]
+    (assoc session :input (proxy [java.io.InputStream] []
+                            (available [] (check!) (.available input))
+                            (read
+                              ([] (check!) (.read input))
+                              ([^bytes buffer] (check!) (.read input buffer))
+                              ([^bytes buffer offset length] (check!) (.read input buffer offset length)))))))
+
+(deftest record-saves-what-it-captured-when-the-adapter-fails
+  (let [dir (temp-dir)
+        failed? (atom false)]
+    (with-redefs [device/open-session (fn [_] (failing-input (fake-adapter (fake-vehicle-responder)) failed?))]
+      (let [recording (future (device/record "/dev/fake" (str dir) {:duration-ms nil
+                                                                    :pids [0x0C]
+                                                                    :interval-ms 10}))]
+        (is (wait-for #(< 200 (.length (java.io.File. dir "raw.bin"))) 3000))
+        (reset! failed? true)
+        (let [result (deref recording 3000 nil)]
+          (is (false? (:ok? result)))
+          (is (= :record-failed (:error result)))
+          (is (= :error (:stopped-by result)))
+          (is (pos? (get-in result [:counts :pid-samples])))
+          (is (= "Device not configured"
+                 (:error (edn/read-string (slurp (java.io.File. dir "meta.edn"))))))
+          (is (< 1 (count (str/split-lines (slurp (java.io.File. dir "pids.csv")))))))))))
+
+(deftest record-writes-nothing-when-the-channel-does-not-open
+  (let [dir (java.io.File. (temp-dir) "never")
+        respond (fake-vehicle-responder)]
+    (with-redefs [device/open-session (fn [_] (fake-adapter (fn [line payload]
+                                                              (if (str/starts-with? line "ato")
+                                                                (ascii "are 8\r\n")
+                                                                (respond line payload)))))]
+      (let [result (device/record "/dev/fake" (str dir) {:duration-ms 100})]
+        (is (= {:ok? false :path "/dev/fake" :step :connect :reply "are 8" :error :connect-failed}
+               result))
+        (is (not (.exists dir)))))))
 
 (deftest live-source-emits-status-and-samples
   (let [events (atom [])]

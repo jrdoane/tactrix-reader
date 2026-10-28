@@ -33,6 +33,7 @@
            "clojure -M:run ssm-read 000022"
            "clojure -M:run ssm-read FF6A04,FF6A05,FF6A06,FF6A07 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run record recordings/my-drive"
+           "clojure -M:run record recordings/my-drive 120"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run export-recording recordings/my-drive"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
@@ -49,7 +50,7 @@
               :vehicle-info "Read the VIN, calibration IDs and verification numbers, ECU name, and SSM ECU ID. Sends vehicle bus traffic."
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
-              :record "Record CAN traffic and polled PIDs to a folder (default 60 seconds). Sends vehicle bus traffic."
+              :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
 (defn- parse-pid
@@ -130,11 +131,27 @@
                                       (parse-ssm-addresses addresses))))
 
         "record"
-        (let [[out-dir seconds path] (rest args)]
-          (print-edn (device/record (or path (first-detected-path))
-                                    out-dir
-                                    (cond-> {}
-                                      seconds (assoc :duration-ms (* 1000 (Long/parseLong seconds)))))))
+        (let [[out-dir seconds path] (rest args)
+              stop (promise)
+              done (promise)]
+          ;; Ctrl-C runs shutdown hooks; this one stops the recording and
+          ;; holds the JVM open until its files are written.
+          (try
+            (.addShutdownHook (Runtime/getRuntime)
+                              (Thread. ^Runnable (fn []
+                                                   (deliver stop true)
+                                                   @done)))
+            (binding [*out* *err*]
+              (println (str "Recording to " out-dir
+                            (if seconds (str " for " seconds " seconds") "")
+                            ". Press Ctrl-C to stop.")))
+            (print-edn (device/record (or path (first-detected-path))
+                                      out-dir
+                                      {:duration-ms (some-> seconds Long/parseLong (* 1000))
+                                       :stop stop}))
+            (flush)
+            (finally
+              (deliver done true))))
 
         "export-recording"
         (print-edn (device/export-recording arg))

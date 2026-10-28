@@ -1680,19 +1680,24 @@
 (defn record
   "Records raw CAN traffic to `out-dir` while polling mode 01 PIDs.
 
-  Writes raw.bin (the exact bytes the adapter sent), meta.edn, and the CSVs
-  from `export-recording`. Polling sends one read-only request every
-  `:interval-ms`, rotating through `:pids`; pass `:pids []` to only listen."
+  Streams raw.bin (the exact bytes the adapter sent) to disk as it arrives,
+  then writes meta.edn and the CSVs from `export-recording`. Records for
+  `:duration-ms` (60 seconds by default; nil for no limit), or until the
+  `:stop` promise is delivered. If the adapter fails partway through, the
+  files are still written from what was captured, and the result has
+  `:ok? false`. Polling sends one read-only request every `:interval-ms`,
+  rotating through `:pids`; pass `:pids []` to only listen."
   ([device-or-path out-dir]
    (record device-or-path out-dir {}))
-  ([device-or-path out-dir {:keys [duration-ms pids interval-ms tx-id rx-id baud]
-                            :or {duration-ms default-record-duration-ms
-                                 pids default-poll-schedule
+  ([device-or-path out-dir {:keys [pids interval-ms tx-id rx-id baud stop]
+                            :or {pids default-poll-schedule
                                  interval-ms default-poll-interval-ms
                                  tx-id 0x7E0
                                  rx-id 0x7E8
-                                 baud 500000}}]
-   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+                                 baud 500000}
+                            :as opts}]
+   (let [duration-ms (get opts :duration-ms default-record-duration-ms)
+         path (if (map? device-or-path) (:path device-or-path) device-or-path)
          dir (io/file out-dir)]
      (cond
        (not (seq path))
@@ -1707,53 +1712,84 @@
        :else
        (try
          (let [session (open-session path)
-               sink (java.io.ByteArrayOutputStream.)
+               raw-file (io/file dir "raw.bin")
+               ;; Bytes from before the channel opens are held back, so a
+               ;; failed connect leaves no files behind.
+               pending (java.io.ByteArrayOutputStream.)
+               raw (atom nil)
                started (java.time.Instant/now)
-               deadline (atom nil)]
-           (try
-             (let [result (run-can-session! session
-                                            {:pids pids
-                                             :interval-ms interval-ms
-                                             :tx-id tx-id
-                                             :baud baud
-                                             :continue? #(< (System/currentTimeMillis) @deadline)
-                                             :on-bytes #(.write sink ^bytes %)
-                                             :on-connected (fn [_]
-                                                             (reset! deadline (+ (System/currentTimeMillis)
-                                                                                 duration-ms)))})]
-               (if-not (:ok? result)
-                 (assoc result :path path)
-                 (do
-                   (.mkdirs dir)
-                   (io/copy (.toByteArray sink) (io/file dir "raw.bin"))
-                   (let [counts (assoc (export-recording dir rx-id) :raw-bytes (.size sink))
-                         recording-meta {:recorded-at (str started)
-                                         :duration-ms duration-ms
-                                         :adapter {:firmware (:firmware result)}
-                                         :bus {:channel can-channel
-                                               :protocol :can
-                                               :bitrate baud
-                                               :filter :pass-all
-                                               :loopback false}
-                                         :polling {:tx-id tx-id
-                                                   :rx-id rx-id
-                                                   :interval-ms interval-ms
-                                                   :request-count (:request-count result)
-                                                   :pids (mapv byte->hex pids)
-                                                   :request-frame "02 01 <pid> 00 00 00 00 00"}
-                                         :files {"raw.bin" "Exact bytes received from the adapter, including command replies."
-                                                 "frames.csv" "Every received CAN frame, including copies of the polling requests. Regenerate with export-recording."
-                                                 "pids.csv" "Decoded mode 01 replies. Regenerate with export-recording."}
-                                         :counts counts}]
-                     (spit (io/file dir "meta.edn") (with-out-str (pprint/pprint recording-meta)))
-                     {:ok? true
-                      :path path
-                      :out-dir (str dir)
-                      :duration-ms duration-ms
-                      :request-count (:request-count result)
-                      :counts counts}))))
-             (finally
-               (close-session session))))
+               connected-at (atom nil)
+               stop-reason (atom nil)
+               outcome (try
+                         (try
+                           (run-can-session! session
+                                             {:pids pids
+                                              :interval-ms interval-ms
+                                              :tx-id tx-id
+                                              :baud baud
+                                              :continue? #(cond
+                                                            (and stop (realized? stop))
+                                                            (do (reset! stop-reason :stop) false)
+
+                                                            (and duration-ms
+                                                                 (>= (System/currentTimeMillis)
+                                                                     (+ @connected-at duration-ms)))
+                                                            (do (reset! stop-reason :duration) false)
+
+                                                            :else true)
+                                              :on-bytes (fn [^bytes chunk]
+                                                          (if-let [^java.io.OutputStream out @raw]
+                                                            (.write out chunk)
+                                                            (.write pending chunk)))
+                                              :on-connected (fn [_]
+                                                              (.mkdirs dir)
+                                                              (let [out (java.io.FileOutputStream. raw-file)]
+                                                                (.writeTo pending out)
+                                                                (reset! raw out))
+                                                              (reset! connected-at (System/currentTimeMillis)))})
+                           (finally
+                             (close-session session)))
+                         (catch Throwable e
+                           {:ok? false
+                            :error :record-failed
+                            :message (.getMessage e)})
+                         (finally
+                           (when-let [^java.io.OutputStream out @raw]
+                             (.close out))))]
+           (if-not @raw
+             (assoc outcome :path path)
+             (let [elapsed-ms (- (System/currentTimeMillis) @connected-at)
+                   stopped-by (if (:ok? outcome) @stop-reason :error)
+                   counts (assoc (export-recording dir rx-id) :raw-bytes (.length raw-file))
+                   recording-meta (cond-> {:recorded-at (str started)
+                                           :duration-ms elapsed-ms
+                                           :stopped-by stopped-by
+                                           :adapter {:firmware (:firmware outcome)}
+                                           :bus {:channel can-channel
+                                                 :protocol :can
+                                                 :bitrate baud
+                                                 :filter :pass-all
+                                                 :loopback false}
+                                           :polling {:tx-id tx-id
+                                                     :rx-id rx-id
+                                                     :interval-ms interval-ms
+                                                     :request-count (:request-count outcome)
+                                                     :pids (mapv byte->hex pids)
+                                                     :request-frame "02 01 <pid> 00 00 00 00 00"}
+                                           :files {"raw.bin" "Exact bytes received from the adapter, including command replies."
+                                                   "frames.csv" "Every received CAN frame, including copies of the polling requests. Regenerate with export-recording."
+                                                   "pids.csv" "Decoded mode 01 replies. Regenerate with export-recording."}
+                                           :counts counts}
+                                    (not (:ok? outcome)) (assoc :error (:message outcome)))]
+               (spit (io/file dir "meta.edn") (with-out-str (pprint/pprint recording-meta)))
+               (merge {:ok? (:ok? outcome)
+                       :path path
+                       :out-dir (str dir)
+                       :duration-ms elapsed-ms
+                       :stopped-by stopped-by
+                       :request-count (:request-count outcome)
+                       :counts counts}
+                      (select-keys outcome [:error :message])))))
          (catch java.io.FileNotFoundException e
            {:ok? false
             :path path
