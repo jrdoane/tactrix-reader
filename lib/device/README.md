@@ -18,6 +18,7 @@ More detail:
 - [OBD-II requests and decoded PIDs](docs/obd-pids.md)
 - [Subaru SSM reads](docs/subaru-ssm.md)
 - [Recordings](docs/recordings.md)
+- [Broadcast CAN traffic](docs/can-broadcast.md)
 - [OpenPort serial protocol](docs/openport-protocol.md)
 
 ## Command line
