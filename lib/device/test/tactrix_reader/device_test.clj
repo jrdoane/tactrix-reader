@@ -925,6 +925,23 @@
                                         :data [2 1 0x0C 0 0 0 0 0]})))
   (is (nil? (device/reply-sample 0x7E8 {:type :line :text "aro"}))))
 
+(deftest broadcast-samples-decode-confirmed-signals
+  ;; Frames from the 2026-10-24-idle recording.
+  (is (= [{:pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm :can-id 0x140 :timestamp-us 5}]
+         (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
+                                    :data [0x00 0x0A 0x92 0x42 0x00 0x00 0x09 0x81]})))
+  (is (= [{:pid 0x5C :name :oil-temp :value 92 :unit :celsius :can-id 0x360 :timestamp-us 5}
+          {:pid 0x05 :name :coolant-temp :value 97 :unit :celsius :can-id 0x360 :timestamp-us 5}]
+         (device/broadcast-samples {:type :message :id 0x360 :timestamp-us 5
+                                    :data [0xAC 0x00 0x84 0x89 0x0E 0x00 0x01 0x00]})))
+  (is (empty? (device/broadcast-samples {:type :message :id 0x141 :timestamp-us 5
+                                         :data [0x65 0x26 0x3D 0x27 0x88 0xC2 0x27 0x00]})))
+  (is (empty? (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
+                                         :data [0x00 0x0A 0x92]})))
+  (is (empty? (device/broadcast-samples {:type :line :text "aro"})))
+  (is (empty? (device/broadcast-samples {} {:type :message :id 0x140 :timestamp-us 5
+                                            :data [0x00 0x0A 0x92 0x42 0x00 0x00 0x09 0x81]}))))
+
 (deftest record-captures-a-polling-session
   (let [dir (temp-dir)]
     (with-redefs [device/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
@@ -959,6 +976,23 @@
              (dissoc (first samples) :timestamp-us)))
       (is (= #{:engine-rpm :coolant-temp} (set (map :name samples)))))))
 
+(deftest live-source-emits-broadcast-samples
+  (let [events (atom [])
+        respond (fake-vehicle-responder)
+        broadcasting (fn [line payload]
+                       (concat (respond line payload)
+                               (when (str/starts-with? line "att")
+                                 (message-bytes 5 0 2000000 0x140 [0x00 0x0A 0x92 0x42 0x00 0x00 0x09 0x81]))))]
+    (with-redefs [device/open-session (fn [_] (fake-adapter broadcasting))]
+      (let [source (device/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x05]
+                                                          :interval-ms 10})]
+        (is (wait-for #(some :can-id @events) 3000))
+        ((:stop! source))))
+    (is (= {:type :sample :pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm
+            :can-id 0x140 :timestamp-us 2000000}
+           (first (filter :can-id @events))))))
+
 (deftest live-source-reports-a-missing-path
   (let [events (atom [])]
     ((:stop! (device/start-live-source! nil {:emit #(swap! events conj %)})))
@@ -986,6 +1020,22 @@
             {:type :sample :pid 0x05 :name :coolant-temp :value 45 :unit :celsius :timestamp-us 1011000}
             {:type :status :state :stopped :source :replay :recording (str dir)}]
            @events))))
+
+(deftest replay-source-includes-broadcast-signals
+  (let [dir (temp-dir)
+        frames [(message-bytes 5 0 1000000 0x360 [0xAC 0x00 0x84 0x89 0x0E 0x00 0x01 0x00])
+                (message-bytes 5 0 1001000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])]
+        replay (fn [opts]
+                 (let [events (atom [])
+                       source (device/start-replay-source! (str dir) (merge {:emit #(swap! events conj %)
+                                                                             :loop? false}
+                                                                            opts))]
+                   (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
+                   ((:stop! source))
+                   (keep :name @events)))]
+    (write-recording! dir frames)
+    (is (= [:oil-temp :coolant-temp :engine-rpm] (replay {})))
+    (is (= [:engine-rpm] (replay {:broadcast {}})))))
 
 (deftest replay-source-loops-with-increasing-timestamps
   (let [dir (temp-dir)

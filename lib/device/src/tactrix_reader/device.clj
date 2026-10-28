@@ -1527,6 +1527,41 @@
             (dissoc :ok?)
             (assoc :timestamp-us timestamp-us))))))
 
+(def broadcast-signals
+  "Signals the project's 2015 Impreza broadcasts on its CAN bus, by CAN ID.
+  Each was confirmed against the mode 01 PID it reports as; see
+  docs/can-broadcast.md. `:byte-count` is the data length a frame needs."
+  {0x140 [{:pid 0x0C :byte-count 4
+           :decode (fn [[_ _ low high]] (double (+ low (* 256 (bit-and high 0x3F)))))}]
+   0x360 [{:pid 0x5C :byte-count 4 :decode #(temperature [(nth % 2)])}
+          {:pid 0x05 :byte-count 4 :decode #(temperature [(nth % 3)])}]})
+
+(defn broadcast-samples
+  "Decodes a received message carrying signals in `signals` (by default
+  `broadcast-signals`) into samples shaped like `reply-sample`'s, with the
+  CAN ID under :can-id. Returns an empty sequence for any other message."
+  ([message]
+   (broadcast-samples broadcast-signals message))
+  ([signals {:keys [type id data timestamp-us]}]
+   (when (= :message type)
+     (for [{:keys [pid byte-count decode]} (get signals id)
+           :when (>= (count data) byte-count)
+           :let [{:keys [name unit]} (get mode-01-pids pid)]]
+       {:pid pid
+        :name name
+        :value (decode data)
+        :unit unit
+        :can-id id
+        :timestamp-us timestamp-us}))))
+
+(defn- message-samples
+  "Returns the samples in one received message: a mode 01 reply from `rx-id`,
+  or broadcast signals from `signals`."
+  [rx-id signals message]
+  (if-let [sample (reply-sample rx-id message)]
+    [sample]
+    (broadcast-samples signals message)))
+
 (defn- run-can-session!
   "Opens the raw CAN channel with a pass-all filter and polls `pids`
   round-robin, one request every `interval-ms`, while `continue?` returns true.
@@ -1599,12 +1634,16 @@
   (unsigned-bytes (java.nio.file.Files/readAllBytes (.toPath (io/file dir "raw.bin")))))
 
 (defn recording-samples
-  "Returns the decoded PID samples in a recording's raw.bin, in order."
-  [dir]
-  (let [rx-id (recording-rx-id dir)]
-    (into []
-          (keep #(reply-sample rx-id %))
-          (:events (parse-adapter-stream (recording-bytes dir))))))
+  "Returns the samples in a recording's raw.bin, in order: decoded PID
+  replies, plus broadcast signals from `signals` (by default
+  `broadcast-signals`)."
+  ([dir]
+   (recording-samples dir broadcast-signals))
+  ([dir signals]
+   (let [rx-id (recording-rx-id dir)]
+     (into []
+           (mapcat #(message-samples rx-id signals %))
+           (:events (parse-adapter-stream (recording-bytes dir)))))))
 
 (defn export-recording
   "Writes frames.csv and pids.csv in `dir` from its raw.bin.
@@ -1744,17 +1783,20 @@
 
 (defn start-live-source!
   "Polls the vehicle on a background thread and calls `emit` with each event:
-  `{:type :sample ...}` for every decoded PID reply, and `{:type :status ...}`
-  when the source is running, stopped, or failed. Returns a map whose :stop!
-  function stops polling and waits for the channel to close.
+  `{:type :sample ...}` for every decoded PID reply and broadcast signal in
+  `:broadcast` (by default `broadcast-signals`; `{}` turns them off), and
+  `{:type :status ...}` when the source is running, stopped, or failed.
+  Returns a map whose :stop! function stops polling and waits for the channel
+  to close.
 
   Sends read-only mode 01 requests on the vehicle bus."
-  [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud]
+  [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud broadcast]
                    :or {schedule default-poll-schedule
                         interval-ms default-poll-interval-ms
                         tx-id 0x7E0
                         rx-id 0x7E8
-                        baud 500000}}]
+                        baud 500000
+                        broadcast broadcast-signals}}]
   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
         running? (atom true)
         status (status-emitter emit {:source :live :path path})
@@ -1773,7 +1815,7 @@
                                         :continue? #(deref running?)
                                         :on-bytes (message-decoder
                                                    (fn [message]
-                                                     (when-let [sample (reply-sample rx-id message)]
+                                                     (doseq [sample (message-samples rx-id broadcast message)]
                                                        (emit (assoc sample :type :sample)))))
                                         :on-connected #(status :running :firmware %)})]
                            (if (:ok? result)
@@ -1789,19 +1831,21 @@
               nil)}))
 
 (defn start-replay-source!
-  "Replays a recording's PID samples on a background thread, paced by their
-  timestamps, calling `emit` with the same events as `start-live-source!`.
-  Loops by default, shifting timestamps so they keep increasing. `:speed`
-  scales playback. Returns a map whose :stop! function stops playback."
-  [dir {:keys [emit loop? speed]
+  "Replays a recording's samples on a background thread, paced by their
+  timestamps, calling `emit` with the same events as `start-live-source!`,
+  including broadcast signals in `:broadcast`. Loops by default, shifting
+  timestamps so they keep increasing. `:speed` scales playback. Returns a map
+  whose :stop! function stops playback."
+  [dir {:keys [emit loop? speed broadcast]
         :or {loop? true
-             speed 1.0}}]
+             speed 1.0
+             broadcast broadcast-signals}}]
   (let [running? (atom true)
         status (status-emitter emit {:source :replay :recording (str dir)})
         gap-us 25000
         worker (future
                  (try
-                   (let [samples (recording-samples dir)]
+                   (let [samples (recording-samples dir broadcast)]
                      (if (empty? samples)
                        (status :failed :error :no-samples)
                        (let [t0 (:timestamp-us (first samples))

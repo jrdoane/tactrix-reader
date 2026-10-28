@@ -20,7 +20,7 @@ clojure -M:run live /dev/cu.usbmodemTAlgJ3P81
 Open http://localhost:8080. Set `PORT` to use another port.
 
 The arguments choose the first source. `replay` plays a
-[recording's](../../lib/device/docs/recordings.md) PID samples back in real
+[recording's](../../lib/device/docs/recordings.md) samples back in real
 time, in a loop, and needs no hardware. `live` sends read-only requests on the
 vehicle bus. Both use the device library's
 [live and replay sources](../../lib/device/README.md#live-and-replay-sources).

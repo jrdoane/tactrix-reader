@@ -69,6 +69,24 @@ taking the latest broadcast frame before each reply:
 635-660), which opendbc calls Engine_RPM. It differs from PID `0C` by up to
 14.5 rpm, so it may be filtered or a target speed; not confirmed.
 
+### Decoding
+
+`broadcast-signals` maps these three signals to the PIDs they match, and
+`broadcast-samples` turns a received message into samples shaped like PID
+samples, with the CAN ID added:
+
+```clojure
+{:pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm :can-id 0x140 :timestamp-us 2181426917}
+```
+
+The live and replay sources emit them alongside polled PIDs, so consumers
+keyed by name or PID see one value for each. Broadcast RPM arrives every
+10 ms and the temperatures every 50 ms, so they usually carry the latest
+value. Only add a signal to `broadcast-signals` once it matches a polled PID.
+
+The IDs and layouts are this car's. On another vehicle the same IDs may carry
+something else, so pass `:broadcast {}` to the sources there.
+
 ## Message structure
 
 Confirmed from the frames alone:
