@@ -71,3 +71,12 @@ One minute of a warm 2015 Subaru Impreza (manual) idling in neutral: about
 
 It predates the current polling schedule. It polled 20 PIDs in turn, one every
 25 ms, so each value is sampled only every 500 ms.
+
+### `2026-10-28-drive`
+
+Nine minutes of driving the same car: about 561,000 frames and 37,000 PID
+samples. It starts with the ignition on and the engine off, with a cold
+engine (coolant 47 °C); the engine starts at 5 s. It covers town and highway
+driving through all five gears up to 139 km/h, a full-throttle pull to
+6,400 rpm, several stops, and a warm idle in neutral at the end. It was
+recorded with the current polling schedule and stopped with Ctrl-C.
