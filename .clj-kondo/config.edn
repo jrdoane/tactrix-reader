@@ -1,0 +1,15 @@
+;; Shared by every component: clj-kondo finds this directory by walking up
+;; from the directory it runs in. The linters below are off by default.
+{:output {:linter-name true}
+ :linters {:aliased-namespace-symbol {:level :warning}
+           :def-fn {:level :warning}
+           :docstring-leading-trailing-whitespace {:level :warning}
+           :equals-expected-position {:level :warning}
+           :redundant-call {:level :warning}
+           :redundant-fn-wrapper {:level :warning}
+           :redundant-str-call {:level :warning}
+           :reduce-without-init {:level :warning}
+           :single-key-in {:level :warning}
+           :unsorted-required-namespaces {:level :warning}
+           :unused-alias {:level :warning}
+           :used-underscored-binding {:level :warning}}}

@@ -9,4 +9,6 @@
  :aliases
  {:run {:main-opts ["-m" "tactrix-reader.engine-server.main"]}
   :test {:extra-paths ["test"]
-         :main-opts ["-m" "tactrix-reader.engine-server.test-runner"]}}}
+         :main-opts ["-m" "tactrix-reader.engine-server.test-runner"]}
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2026.04.15"}}
+         :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"]}}}

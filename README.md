@@ -43,3 +43,13 @@ ignition on, and run `clojure -M:run live` instead.
 (cd lib/device && clojure -M:test)
 (cd services/engine-server && clojure -M:test)
 ```
+
+## Linting
+
+clj-kondo runs with the shared config in `.clj-kondo/config.edn`:
+
+```sh
+(cd lib/device && clojure -M:lint)
+(cd services/engine-server && clojure -M:lint)
+(cd ui/dashboard && npm run lint)
+```

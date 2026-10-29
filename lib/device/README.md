@@ -228,4 +228,5 @@ and `:speed` scales playback.
 
 ```sh
 clojure -M:test
+clojure -M:lint    # clj-kondo
 ```

@@ -96,4 +96,5 @@ PEDESTAL_DEV_MODE=true clojure -M:run
 
 ```sh
 clojure -M:test
+clojure -M:lint    # clj-kondo
 ```

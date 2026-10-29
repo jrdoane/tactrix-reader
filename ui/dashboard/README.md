@@ -32,6 +32,7 @@ the server serves it. From this directory:
 npm install
 npx shadow-cljs release app    # one-off optimized build
 npx shadow-cljs watch app      # development build with hot reload
+npm run lint                   # clj-kondo
 ```
 
 When using `watch`, start the server with `PEDESTAL_DEV_MODE=true` so its

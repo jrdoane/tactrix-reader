@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "watch": "shadow-cljs watch app",
-    "release": "shadow-cljs release app"
+    "release": "shadow-cljs release app",
+    "lint": "clojure -Sdeps '{:deps {clj-kondo/clj-kondo {:mvn/version \"2026.04.15\"}}}' -M -m clj-kondo.main --lint src"
   },
   "dependencies": {
     "react": "19.3.1",

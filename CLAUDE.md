@@ -18,6 +18,7 @@ its own build. Run commands from the component's directory:
 ```sh
 # lib/device
 clojure -M:test                 # all tests
+clojure -M:lint                 # clj-kondo (also in engine-server)
 clojure -M:run <command>        # CLI; run with no matching command for usage
 
 # services/engine-server
@@ -29,6 +30,7 @@ PEDESTAL_DEV_MODE=true clojure -M:run   # needed with `shadow-cljs watch` (CSP a
 # ui/dashboard
 npm install
 npx shadow-cljs release app     # or `watch app`
+npm run lint                    # clj-kondo
 ```
 
 Run a single test (the `:test` aliases run fixed namespaces through `-main`, so
@@ -39,13 +41,17 @@ clojure -Sdeps '{:aliases {:t {:extra-paths ["test"]}}}' -M:t \
   -e "(require 'clojure.test 'tactrix-reader.device.codec-test) (clojure.test/run-test-var #'tactrix-reader.device.codec-test/parses-hex-request-bytes)"
 ```
 
-There is no linter or formatter configured. Tests use no hardware: they stub
-serial I/O with `with-redefs` and fakes in `device/test_support.clj` such as
-`fake-adapter` (an in-memory adapter that answers each `at...` command) and
-`fake-vehicle-responder` (canned ECU replies for it). Each device namespace
-has a matching `<name>_test.clj`; add new test namespaces to
-`device_test_runner.clj`. Redefine a var in the namespace that defines it,
-such as `openport/open-session` or `serial/serial-exchange`.
+clj-kondo uses the shared `.clj-kondo/config.edn` at the repo root, which
+turns on some opt-in linters (sorted requires, unused aliases, redundant
+calls, and others). `:shadowed-var` stays off, because locals such as
+`bytes` and `name` shadow core vars by design. There is no formatter.
+
+Tests use no hardware: they stub serial I/O with `with-redefs` and fakes in
+`device/test_support.clj` such as `fake-adapter` (an in-memory adapter that
+answers each `at...` command) and `fake-vehicle-responder` (canned ECU replies
+for it). Each device namespace has a matching `<name>_test.clj`; add new test
+namespaces to `device_test_runner.clj`. Redefine a var in the namespace that
+defines it, such as `openport/open-session` or `serial/serial-exchange`.
 Running the CLI or server against a device needs a real adapter, and vehicle
 commands need a vehicle with the ignition on.
 
