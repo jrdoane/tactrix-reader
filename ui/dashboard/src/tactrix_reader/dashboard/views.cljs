@@ -8,7 +8,7 @@
   {:rpm "rpm"
    :celsius "°C"
    :percent "%"
-   :kpa "kPa"
+   :kpa "bar"
    :km-per-hour "km/h"
    :degrees "°"
    :grams-per-second "g/s"
@@ -21,11 +21,14 @@
    :degrees-per-second "°/s"})
 
 (def ^:private unit-decimals
-  "Decimal places for values that are not whole numbers."
+  "Decimal places for each unit, so a value keeps its width as it updates."
   {:rpm 0
-   :kpa 0
    ;; Broadcast speed is finer than polled speed's whole km/h.
    :km-per-hour 0
+   :percent 1
+   :celsius 0
+   :degrees 1
+   :degrees-per-second 1
    :volts 2
    :grams-per-second 2
    :lambda 3
@@ -61,7 +64,10 @@
    :brake-pressure "Brake pressure"
    :parking-brake "Parking brake"
    :driver-seatbelt "Driver's seatbelt"
-   :wheel-speeds "Wheel speeds"
+   :wheel-front-left "Front left"
+   :wheel-front-right "Front right"
+   :wheel-rear-left "Rear left"
+   :wheel-rear-right "Rear right"
    :longitudinal-acceleration "Acceleration"
    :lateral-acceleration "Lateral acceleration"
    :yaw-rate "Yaw rate"
@@ -75,6 +81,13 @@
     :wheel-speeds :longitudinal-acceleration :lateral-acceleration :yaw-rate
     :fuel-flow :outside-temp})
 
+(def ^:private wheel-tiles
+  "Tiles for each wheel in the :wheel-speeds signal."
+  {:wheel-front-left :front-left
+   :wheel-front-right :front-right
+   :wheel-rear-left :rear-left
+   :wheel-rear-right :rear-right})
+
 (def ^:private primary-readouts
   [:engine-rpm :vehicle-speed :gear :coolant-temp :throttle-position])
 
@@ -87,13 +100,14 @@
    ["Temperatures" [:oil-temp :intake-air-temp :ambient-air-temp]]
    ["Fuel" [:short-term-fuel-trim-bank-1 :long-term-fuel-trim-bank-1
             :commanded-lambda :fuel-level]]
-   ["Electrical" [:control-module-voltage]]])
+   ["Electrical and gearbox" [:control-module-voltage :auxiliary-io-status]]])
 
 (def ^:private can-groups
   [["Driver" [:steering-angle :brake :brake-pressure :parking-brake
-              :driver-seatbelt :auxiliary-io-status]]
-   ["Motion" [:wheel-speeds :longitudinal-acceleration :lateral-acceleration
-              :yaw-rate]]
+              :driver-seatbelt]]
+   ["Motion" [:longitudinal-acceleration :lateral-acceleration :yaw-rate]]
+   ["Wheel speeds" [:wheel-front-left :wheel-front-right
+                    :wheel-rear-left :wheel-rear-right]]
    ["Engine and outside" [:fuel-flow :outside-temp]]])
 
 (def ^:private error-messages
@@ -108,10 +122,20 @@
 (defn- error-message [error]
   (get error-messages error (some-> error name (str/replace "-" " "))))
 
+(def ^:private unit-conversions
+  "Units shown converted, as [factor decimal-places]. The data keeps the
+  PIDs' units; kPa is shown as bar."
+  {:kpa [0.01 2]})
+
 (defn- format-value [value unit]
   (cond
+    (and (number? value) (contains? unit-conversions unit))
+    (let [[factor places] (get unit-conversions unit)]
+      (.toFixed (* value factor) places))
+
+    (and (number? value) (contains? unit-decimals unit)) (.toFixed value (get unit-decimals unit))
     (integer? value) (str value)
-    (number? value) (.toFixed value (get unit-decimals unit 1))
+    (number? value) (.toFixed value 1)
     (boolean? value) (if value "yes" "no")
     (keyword? value) (name value)
     (map? value) (str/join ", " (map (fn [[k v]] (str (name k) " " (format-value v nil))) value))
@@ -140,6 +164,11 @@
    :brake on-off
    :parking-brake on-off
    :driver-seatbelt name
+   :monitor-status (fn [{:keys [mil-on? dtc-count monitors]}]
+                     (str "check engine " (if mil-on? "on" "off")
+                          ", " dtc-count " stored codes, "
+                          (count (filter #{:complete} (vals monitors))) " of "
+                          (count monitors) " monitors complete"))
    :auxiliary-io-status #(case (:manual-transmission-in-gear? %)
                            true "in gear"
                            false "neutral"
@@ -275,62 +304,61 @@
      (field "Incomplete" (when (seq incomplete)
                            (str/replace (str/join ", " incomplete) "-" " ")))]))
 
-(defn- wheel-speeds [{:keys [front-left front-right rear-left rear-right]}]
-  (into [:div.wheels]
-        (for [[corner speed] [["FL" front-left] ["FR" front-right]
-                              ["RL" rear-left] ["RR" rear-right]]]
-          [:div.wheel
-           [:span.wheel-corner corner]
-           (if (some? speed) (.toFixed speed 1) "—")])))
+(def ^:private inferred-tag
+  [:span.tag.inferred {:title "Identified from CAN traffic, not confirmed against a PID"}
+   "inferred"])
 
 (defn- readout
-  "A PID sample or, for names in `inferred-signals`, an inferred CAN signal.
-  PIDs also decoded from the CAN bus are tagged with the CAN ID."
-  [class value-name]
-  (let [inferred? (contains? inferred-signals value-name)
-        {:keys [value unit]} @(rf/subscribe [(if inferred? ::subs/signal ::subs/sample) value-name])
+  "A PID sample or, for names in `inferred-signals` and `wheel-tiles`, an
+  inferred CAN signal. With `tags?`, inferred signals are tagged inferred and
+  PIDs also decoded from the CAN bus are tagged CAN."
+  [class value-name tags?]
+  (let [wheel (get wheel-tiles value-name)
+        inferred? (or (some? wheel) (contains? inferred-signals value-name))
+        sample @(rf/subscribe [(if inferred? ::subs/signal ::subs/sample)
+                               (if wheel :wheel-speeds value-name)])
+        {:keys [value unit]} (if wheel (update sample :value get wheel) sample)
         can-id @(rf/subscribe [::subs/can-id value-name])]
     [:div {:class class}
      [:div.readout-label
-      (label value-name)
-      " "
-      (cond
-        inferred? [:span.tag.inferred {:title "Identified from CAN traffic, not confirmed against a PID"}
-                   "inferred"]
-        can-id [:span.tag {:title (str "Also decoded from CAN ID " (can-id-hex can-id))}
-                "CAN"])]
-     (if (and (= :wheel-speeds value-name) (some? value))
-       [wheel-speeds value]
-       [:div.readout-value
-        (if (some? value) (display-value value-name value unit) "—")
-        (when-not (contains? formats-with-unit value-name)
-          [:span.readout-unit (get unit-labels unit "")])])]))
+      [:span (label value-name)]
+      (when tags?
+        (cond
+          inferred? inferred-tag
+          can-id [:span.tag {:title (str "Also decoded from CAN ID " (can-id-hex can-id))}
+                  "CAN"]))]
+     [:div.readout-value
+      (if (some? value) (display-value value-name value unit) "—")
+      (when-not (contains? formats-with-unit value-name)
+        [:span.readout-unit (get unit-labels unit "")])]]))
 
-(defn- groups [titled-names]
-  (into [:section.groups]
+(defn- groups [titled-names tags?]
+  (into [:div.groups]
         (for [[title value-names] titled-names]
           ^{:key title}
           [:section.group
            [:h2 title]
            (into [:div.tiles]
-                 (map (fn [value-name]
-                        ^{:key value-name}
-                        [readout (if (= :wheel-speeds value-name) "tile wide" "tile") value-name]))
+                 (map (fn [value-name] ^{:key value-name} [readout "tile" value-name tags?]))
                  value-names)])))
 
 (defn- readouts []
   [:<>
    (into [:section.readouts]
-         (map (fn [value-name] ^{:key value-name} [readout "readout" value-name]))
+         (map (fn [value-name] ^{:key value-name} [readout "readout" value-name true]))
          primary-readouts)
-   [groups readout-groups]
-   [:section.can
-    [:h2 "From the CAN bus"]
-    [:p.muted
-     "Signals identified from the car's own traffic by how they behave. "
-     "Values tagged inferred match no PID, so their scales and directions "
-     "are not confirmed."]
-    [groups can-groups]]])
+   [:section.block
+    [:div.block-head
+     [:h2 "OBD-II PIDs"]]
+    [groups readout-groups true]]
+   [:section.block
+    [:div.block-head
+     [:h2 "From the CAN bus"]
+     inferred-tag]
+    [:p.block-note
+     "Identified from the car's own traffic by how they behave, but matched "
+     "to no PID, so scales and directions are not confirmed."]
+    [groups can-groups false]]])
 
 (defn- sample-table []
   (let [samples @(rf/subscribe [::subs/sample-list])
@@ -345,11 +373,11 @@
          ^{:key pid}
          [:tr
           [:td.pid (hex-byte pid)]
-          [:td (label name)]
-          [:td.value (format-value value unit)]
-          [:td (get unit-labels unit "")]
+          [:td.name (label name)]
+          [:td.value (display-value name value unit)]
+          [:td.unit (get unit-labels unit "")]
           [:td.source (if-let [can-id (get can-ids name)]
-                        (str "CAN " (can-id-hex can-id) " and polled")
+                        (str "CAN " (can-id-hex can-id) ", polled")
                         "polled")]])]]]))
 
 (defn app []

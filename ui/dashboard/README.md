@@ -13,11 +13,13 @@ The page has:
   stored codes, readiness monitors).
 - Large readouts for RPM, speed, gear, coolant, and throttle, then grouped
   tiles for the other polled PIDs. PIDs also decoded from the car's broadcast
-  CAN traffic are tagged CAN.
-- A "From the CAN bus" section with signals identified from that traffic but
-  matched to no PID, each tagged inferred: steering angle, brake, brake
-  pressure, parking brake, driver's seatbelt, wheel speeds, accelerations,
-  yaw rate, fuel flow, and outside temperature. See
+  CAN traffic are tagged CAN. Pressures, which the PIDs report in kPa, are
+  shown in bar (absolute).
+- A "From the CAN bus" section, tagged inferred, with signals identified from
+  that traffic but matched to no PID: steering angle, brake, brake pressure,
+  parking brake, driver's seatbelt, accelerations, yaw rate, the four wheel
+  speeds, fuel flow, and outside temperature. Gear, shown with the main
+  readouts, is tagged inferred on its own. See
   [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
 - A table of every PID received, with where each came from.
 
