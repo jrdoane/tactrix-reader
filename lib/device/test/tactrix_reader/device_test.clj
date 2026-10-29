@@ -927,13 +927,23 @@
 
 (deftest broadcast-samples-decode-confirmed-signals
   ;; Frames from the 2026-10-24-idle recording.
-  (is (= [{:pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm :can-id 0x140 :timestamp-us 5}]
+  (is (= [{:pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm :can-id 0x140 :timestamp-us 5}
+          {:pid 0x11 :name :throttle-position :value 13.7 :unit :percent :can-id 0x140 :timestamp-us 5}]
          (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
                                     :data [0x00 0x0A 0x92 0x42 0x00 0x00 0x09 0x81]})))
   (is (= [{:pid 0x5C :name :oil-temp :value 92 :unit :celsius :can-id 0x360 :timestamp-us 5}
-          {:pid 0x05 :name :coolant-temp :value 97 :unit :celsius :can-id 0x360 :timestamp-us 5}]
+          {:pid 0x05 :name :coolant-temp :value 97 :unit :celsius :can-id 0x360 :timestamp-us 5}
+          {:pid 0x0B :name :intake-manifold-pressure :value 28 :unit :kpa :can-id 0x360 :timestamp-us 5}]
          (device/broadcast-samples {:type :message :id 0x360 :timestamp-us 5
                                     :data [0xAC 0x00 0x84 0x89 0x0E 0x00 0x01 0x00]})))
+  ;; Frames from the 2026-10-28-drive recording: 54 km/h, and wide-open throttle.
+  (is (= [{:pid 0x0D :name :vehicle-speed :value 54.0 :unit :km-per-hour :can-id 0x0D1 :timestamp-us 5}]
+         (device/broadcast-samples {:type :message :id 0x0D1 :timestamp-us 5
+                                    :data [0xC0 0x03 0x00 0x00]})))
+  (is (= 80.4 (:value (second (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
+                                                         :data [0xFF 0x0A 0x92 0x42 0x00 0xFF 0xFF 0x00]})))))
+  (is (= [:engine-rpm] (map :name (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
+                                                             :data [0x00 0x0A 0x92 0x42 0x00 0x00]}))))
   (is (empty? (device/broadcast-samples {:type :message :id 0x141 :timestamp-us 5
                                          :data [0x65 0x26 0x3D 0x27 0x88 0xC2 0x27 0x00]})))
   (is (empty? (device/broadcast-samples {:type :message :id 0x140 :timestamp-us 5
@@ -1096,7 +1106,7 @@
                    ((:stop! source))
                    (keep :name @events)))]
     (write-recording! dir frames)
-    (is (= [:oil-temp :coolant-temp :engine-rpm] (replay {})))
+    (is (= [:oil-temp :coolant-temp :intake-manifold-pressure :engine-rpm] (replay {})))
     (is (= [:engine-rpm] (replay {:broadcast {}})))))
 
 (deftest replay-source-loops-with-increasing-timestamps

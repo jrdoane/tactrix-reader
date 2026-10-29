@@ -45,7 +45,7 @@ second. The drive has the same 24 IDs at the same rates.
 | `0D2` | 20 ms | 8 | Brake_2 | Constant in both recordings |
 | `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; counter |
 | `0D4` | 20 ms | 8 | Wheel_Speeds | **Four wheel speeds** |
-| `140` | 10 ms | 8 | Throttle | **Engine RPM, pedal, throttle**; off-throttle flags; counter, parity |
+| `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; off-throttle flags; counter, parity |
 | `141` | 10 ms | 8 | Engine | Engine speed; two load-like fields; gear and flags; parity |
 | `144` | 20 ms | 8 | CruiseControl | Brake pedal; parity |
 | `152` | 20 ms | 8 | Stalk | Brake light, parking brake; counter, parity |
@@ -84,17 +84,24 @@ frame and reply, so they grow when a value is changing fast.
 | Signal | Encoding | Check (drive unless noted) |
 |---|---|---|
 | Engine RPM | `140`: bits 16-29 LE (byte 2, plus byte 3 & `3F`), 1 rpm per bit | 0-6,400 rpm, r = 0.9998; median error 2.75 rpm, 95th percentile 30. Idle: within 2.5 rpm in all 120 samples |
-| Vehicle speed | `0D1`: bytes 0-1 LE, 0.05625 km/h per bit | 0-139 km/h, slope 0.05625, r = 1.0000; median error 0.24 km/h, max 1.6. PID `0D` is whole km/h |
+| Vehicle speed | `0D1`: bytes 0-1 LE, 0.05625 km/h per bit | 0-139 km/h, slope 0.05625, r = 1.0000; median error 0.24 km/h, max 1.6. PID `0D` is whole km/h: rounded, the broadcast speed equals it in 96% of samples taken at a steady speed, and is 1 off in the rest |
 | Wheel speeds | `0D4`: four 16-bit LE values, 0.05625 km/h per bit | Each wheel against PID `0D`: r = 0.9999, slope 0.05618-0.05629. `0D1`'s speed is their mean, within half a km/h in 98% of frames |
-| Accelerator pedal | `140` byte 0, 0-255 | PID `5A` = 0.1755 × byte 0, median error 0.27 percentage points. Full pedal (255) is about 45% on PID `5A` |
-| Throttle | `140` byte 6, 0-255 | PID `11` = 0.270 × byte 6 + 11.4%, median error 0.13 points: 9 at idle (14%), 255 at wide-open throttle (80.4%) |
-| Manifold pressure | `360` byte 4, 2 kPa per bit | Slope 2.00, intercept 0, r = 0.999; within 1 kPa of PID `0B` in 91% of samples |
+| Throttle | `140` byte 6, 0-255 | PID `11`'s raw byte is 29 + byte 6 × 176/255, rounded: 9 at idle (14%), 255 at wide-open throttle (80.4%). Exact in 89% of samples at a steady throttle, and 1 off (0.4%) in the rest |
+| Manifold pressure | `360` byte 4, 2 kPa per bit | Slope 2.00, intercept 0, r = 0.999; within 1 kPa of PID `0B` in 91% of samples, and in 96% at a steady pressure |
 | Oil temperature | `360` byte 2, minus 40, in °C | 43-91 °C during warm-up; equal to PID `5C` in at least 95% of samples, never more than 1 °C off. Idle: equal in all 120 |
 | Coolant temperature | `360` byte 3, minus 40, in °C | 47-96 °C; equal to PID `05` in at least 95%, never more than 1 °C off. Idle: equal in 119 of 120 |
 
 opendbc's wheel speed scale, 0.0592 km/h per bit, reads about 5% high
-against both PID `0D` and `0D1`. `140` byte 5 (opendbc Throttle_Combo)
-equals byte 0 in 93% of frames and is otherwise 1-6 lower.
+against both PID `0D` and `0D1`.
+
+`140` byte 0 (opendbc Throttle_Pedal, 0-255) is the accelerator pedal, but
+it doesn't map exactly onto PID `5A`. They correlate closely (r = 0.997),
+and full pedal (255) is about 45% on PID `5A`, but the relation has a dead
+band. With the pedal held steady, PID `5A`'s raw byte is 0 when byte 0 is 0,
+and otherwise about 0.38 × byte 0 + 4.7 (14 gives 10, 137 gives 57). That
+matches after rounding in only 79% of steady samples, so it isn't decoded.
+`140` byte 5 (opendbc Throttle_Combo) equals byte 0 in 93% of frames and is
+otherwise 1-6 lower.
 
 Nothing broadcast matches engine load (`04`), MAF (`10`), timing advance
 (`0E`), intake air temperature (`0F`), battery voltage (`42`), the fuel trims
@@ -103,21 +110,32 @@ Nothing broadcast matches engine load (`04`), MAF (`10`), timing advance
 
 ### Decoding
 
-`broadcast-signals` maps engine RPM and the two temperatures to the PIDs they
-match, and `broadcast-samples` turns a received message into samples shaped
-like PID samples, with the CAN ID added:
+`broadcast-signals` maps engine RPM, vehicle speed, throttle, manifold
+pressure, and the two temperatures to the PIDs they match, and
+`broadcast-samples` turns a received message into samples shaped like PID
+samples, with the CAN ID added:
 
 ```clojure
 {:pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm :can-id 0x140 :timestamp-us 2181426917}
 ```
 
 The live and replay sources emit them alongside polled PIDs, so consumers
-keyed by name or PID see one value for each. Broadcast RPM arrives every
-10 ms and the temperatures every 50 ms, so they usually carry the latest
-value. Only add a signal to `broadcast-signals` once it matches a polled PID.
-Vehicle speed, pedal, throttle, and manifold pressure now qualify but are not
-decoded yet. `141`'s engine speed (below) is deliberately not decoded: it
-would report as PID `0C` too, and at idle it lags.
+keyed by name or PID see one value for each. Broadcast RPM and throttle
+arrive every 10 ms, speed every 20 ms, and manifold pressure and the
+temperatures every 50 ms, so they usually carry the latest value. Each is
+decoded onto the PID's own scale: throttle as PID `11`'s percent, to one
+decimal place. Speed keeps one decimal place, finer than PID `0D`'s whole
+km/h. Manifold pressure comes in 2 kPa steps, coarser than PID `0B`'s 1 kPa.
+Over the drive recording, the broadcast value just before each polled one
+differs from it by a median of 0.2 km/h, 0 throttle points, and 1 kPa.
+
+Only add a signal to `broadcast-signals` once it matches a polled PID. Not
+decoded:
+
+- **`141`'s engine speed (below):** it would report as PID `0C` too, and at
+  idle it lags.
+- **The pedal:** see above.
+- **The four wheel speeds:** no PID reports a single wheel's speed.
 
 The IDs and layouts are this car's. On another vehicle the same IDs may carry
 something else, so pass `:broadcast {}` to the sources there.
