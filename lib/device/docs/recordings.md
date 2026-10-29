@@ -26,9 +26,10 @@ get the CSVs. A recording that never opens the CAN channel writes no files.
 It opens CAN at 500 kbps with a pass-all filter and polls with the same
 schedule as the [live source](../README.md#live-and-replay-sources): one
 read-only request to `7E0` every 15 ms, covering RPM, speed, load,
-temperatures, trims, lambda, throttle and pedal, the neutral input, voltage,
-and fuel level. Fast PIDs are sampled about every 195 ms and slow ones about
-every 1.95 seconds.
+temperatures, trims, commanded and measured lambda, fuel system status, the
+rear oxygen sensor, throttle and pedal, the neutral input, voltage,
+barometric pressure, and fuel level. Fast PIDs are sampled about every 210 ms
+and slow ones about every 2.9 seconds.
 
 From Clojure, `record` takes `:duration-ms`, `:stop`, `:pids`,
 `:interval-ms`, `:tx-id`, `:rx-id`, and `:baud`. It records for 60 seconds by

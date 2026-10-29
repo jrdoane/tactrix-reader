@@ -51,6 +51,11 @@
    :short-term-fuel-trim-bank-1 "Short-term trim"
    :long-term-fuel-trim-bank-1 "Long-term trim"
    :commanded-lambda "Commanded λ"
+   :wideband-oxygen-sensor-1-current "Measured λ"
+   :fuel-system-status "Fuel system"
+   :oxygen-sensor-bank-1-sensor-2 "Rear O₂ sensor"
+   :catalyst-temp-bank-1-sensor-1 "Catalyst"
+   :barometric-pressure "Barometric pressure"
    :fuel-level "Fuel level"
    :control-module-voltage "ECU voltage"
    :relative-throttle-position "Relative throttle"
@@ -96,10 +101,12 @@
                           :relative-accelerator-pedal-position
                           :accelerator-pedal-position-d]]
    ["Air and load" [:engine-load :maf-air-flow :intake-manifold-pressure
-                    :timing-advance]]
-   ["Temperatures" [:oil-temp :intake-air-temp :ambient-air-temp]]
-   ["Fuel" [:short-term-fuel-trim-bank-1 :long-term-fuel-trim-bank-1
-            :commanded-lambda :fuel-level]]
+                    :barometric-pressure :timing-advance]]
+   ["Temperatures" [:oil-temp :intake-air-temp :ambient-air-temp
+                    :catalyst-temp-bank-1-sensor-1]]
+   ["Fuel" [:fuel-system-status :commanded-lambda :wideband-oxygen-sensor-1-current
+            :short-term-fuel-trim-bank-1 :long-term-fuel-trim-bank-1
+            :oxygen-sensor-bank-1-sensor-2 :fuel-level]]
    ["Electrical and gearbox" [:control-module-voltage :auxiliary-io-status]]])
 
 (def ^:private can-groups
@@ -172,11 +179,24 @@
    :auxiliary-io-status #(case (:manual-transmission-in-gear? %)
                            true "in gear"
                            false "neutral"
-                           nil "—")})
+                           nil "—")
+   :wideband-oxygen-sensor-1-current #(some-> (:lambda %) (.toFixed 3))
+   ;; The Impreza has one fuel system.
+   :fuel-system-status #(let [state (:system-1 %)]
+                          (if (keyword? state)
+                            (str/replace (name state) "-" " ")
+                            (str state)))
+   :oxygen-sensor-bank-1-sensor-2 #(some-> (:volts %) (.toFixed 3))})
 
 (def ^:private formats-with-unit
   "Names whose `value-formats` entry already shows the unit."
   #{:steering-angle})
+
+(def ^:private display-units
+  "Units for values whose PID gives none because it decodes to a map, for
+  the part `value-formats` shows."
+  {:wideband-oxygen-sensor-1-current :lambda
+   :oxygen-sensor-bank-1-sensor-2 :volts})
 
 (defn- display-value [value-name value unit]
   (if-let [format-named (get value-formats value-name)]
@@ -330,7 +350,7 @@
      [:div.readout-value
       (if (some? value) (display-value value-name value unit) "—")
       (when-not (contains? formats-with-unit value-name)
-        [:span.readout-unit (get unit-labels unit "")])]]))
+        [:span.readout-unit (get unit-labels (or unit (get display-units value-name)) "")])]]))
 
 (defn- groups [titled-names tags?]
   (into [:div.groups]
@@ -375,7 +395,7 @@
           [:td.pid (hex-byte pid)]
           [:td.name (label name)]
           [:td.value (display-value name value unit)]
-          [:td.unit (get unit-labels unit "")]
+          [:td.unit (get unit-labels (or unit (get display-units name)) "")]
           [:td.source (if-let [can-id (get can-ids name)]
                         (str "CAN " (can-id-hex can-id) ", polled")
                         "polled")]])]]]))

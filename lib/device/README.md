@@ -198,11 +198,13 @@ polls with the default schedule:
   (`default-poll-interval-ms`).
 - The schedule (`default-poll-schedule`) requests every fast-changing PID
   (RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing,
-  relative and commanded throttle, a second pedal position, and the neutral
-  input), then one slow PID (temperatures, voltage, fuel level, trims,
-  lambda, check-engine status), and repeats.
-- Each fast PID is sampled about every 195 ms and each slow PID about every
-  1.95 seconds.
+  relative and commanded throttle, a second pedal position, the neutral
+  input, and measured lambda), then one slow PID (temperatures including the
+  catalyst, voltage, fuel level, trims, commanded lambda, fuel system status,
+  the rear oxygen sensor, barometric pressure, check-engine status), and
+  repeats.
+- Each fast PID is sampled about every 210 ms and each slow PID about every
+  2.9 seconds.
 
 It also decodes the signals in `broadcast-signals` from the car's own traffic,
 as samples, and those in `inferred-signals` as
