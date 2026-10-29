@@ -1031,6 +1031,39 @@
                result))
         (is (not (.exists dir)))))))
 
+(deftest signal-samples-decode-inferred-signals
+  (let [decode (fn [id data]
+                 (into {} (map (juxt :signal :value))
+                       (device/signal-samples {:type :message :id id :timestamp-us 5 :data data})))]
+    ;; Frames from the 2026-10-28-drive recording, at 120 s in 5th gear at
+    ;; about 101 km/h.
+    (is (= {:steering-angle -1.3} (decode 0x002 [0xFF 0xF3 0x70 0x03 0x65 0x00 0x00 0x00])))
+    (is (= {:lateral-acceleration 0.01 :yaw-rate -0.7 :longitudinal-acceleration -0.04}
+           (decode 0x0D0 [0xFC 0xFF 0x01 0x00 0x0B 0x34 0xFF 0x04])))
+    (is (= {:brake-pressure 0} (decode 0x0D1 [0x05 0x07 0x00 0x00])))
+    (is (= {:brake false} (decode 0x0D3 [0x00 0x06 0xC0 0x0F 0x50 0x00 0x59])))
+    (is (= {:wheel-speeds {:front-left 101.1 :front-right 101.1 :rear-left 101.0 :rear-right 101.0}}
+           (decode 0x0D4 [0x05 0x07 0x06 0x07 0x03 0x07 0x03 0x07])))
+    (is (= {:gear 5} (decode 0x141 [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00])))
+    (is (= {:parking-brake false} (decode 0x152 [0xF9 0xA4 0x00 0x00 0x00 0x00 0x00 0x0C])))
+    (is (= {:outside-temp 12.2 :driver-seatbelt :buckled}
+           (decode 0x282 [0x64 0xC0 0x00 0x5E 0x5E 0x00 0x22 0x00])))
+    (is (= {:fuel-flow 0.74} (decode 0x360 [0x40 0x04 0x62 0x70 0x13 0x00 0x01 0x00])))
+    ;; Braking at 20 s.
+    (is (= {:brake-pressure 5} (decode 0x0D1 [0xA9 0x00 0x05 0x00])))
+    (is (= {:brake true} (decode 0x0D3 [0x00 0x06 0xE0 0x0F 0x00 0x00 0xDA])))
+    ;; Idling in neutral with the parking brake on at the end.
+    (is (= {:parking-brake true} (decode 0x152 [0xF9 0xD4 0x00 0x00 0x00 0x00 0x08 0x0C])))
+    (is (= {:gear :neutral} (decode 0x141 [0x65 0x26 0x2F 0x27 0xFE 0x82 0x27 0x00]))))
+  (is (= [{:signal :gear :value 5 :unit nil :can-id 0x141 :timestamp-us 5}]
+         (device/signal-samples {:type :message :id 0x141 :timestamp-us 5
+                                 :data [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00]})))
+  (is (empty? (device/signal-samples {:type :message :id 0x141 :timestamp-us 5
+                                      :data [0x3E 0x28 0x19 0x28 0x5D 0x0A]})))
+  (is (empty? (device/signal-samples {} {:type :message :id 0x141 :timestamp-us 5
+                                         :data [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00]})))
+  (is (empty? (device/signal-samples {:type :line :text "aro"}))))
+
 (deftest live-source-emits-status-and-samples
   (let [events (atom [])]
     (with-redefs [device/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
@@ -1064,6 +1097,22 @@
     (is (= {:type :sample :pid 0x0C :name :engine-rpm :value 658.0 :unit :rpm
             :can-id 0x140 :timestamp-us 2000000}
            (first (filter :can-id @events))))))
+
+(deftest live-source-emits-inferred-signals
+  (let [events (atom [])
+        respond (fake-vehicle-responder)
+        broadcasting (fn [line payload]
+                       (concat (respond line payload)
+                               (when (str/starts-with? line "att")
+                                 (message-bytes 5 0 2000000 0x141 [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00]))))]
+    (with-redefs [device/open-session (fn [_] (fake-adapter broadcasting))]
+      (let [source (device/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x05]
+                                                          :interval-ms 10})]
+        (is (wait-for #(some (comp #{:signal} :type) @events) 3000))
+        ((:stop! source))))
+    (is (= {:type :signal :signal :gear :value 5 :unit nil :can-id 0x141 :timestamp-us 2000000}
+           (first (filter (comp #{:signal} :type) @events))))))
 
 (deftest live-source-reports-a-missing-path
   (let [events (atom [])]
@@ -1106,8 +1155,22 @@
                    ((:stop! source))
                    (keep :name @events)))]
     (write-recording! dir frames)
-    (is (= [:oil-temp :coolant-temp :intake-manifold-pressure :engine-rpm] (replay {})))
-    (is (= [:engine-rpm] (replay {:broadcast {}})))))
+    (is (= [:oil-temp :coolant-temp :intake-manifold-pressure :engine-rpm] (replay {:signals {}})))
+    (is (= [:engine-rpm] (replay {:broadcast {} :signals {}})))))
+
+(deftest replay-source-includes-inferred-signals
+  (let [dir (temp-dir)
+        events (atom [])]
+    (write-recording! dir [(message-bytes 5 0 1000000 0x141 [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00])
+                           (message-bytes 5 0 1001000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])])
+    (let [source (device/start-replay-source! (str dir) {:emit #(swap! events conj %)
+                                                         :loop? false})]
+      (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
+      ((:stop! source)))
+    (is (= [{:type :signal :signal :gear :value 5 :unit nil :can-id 0x141 :timestamp-us 1000000}
+            {:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 1001000}]
+           (remove (comp #{:status} :type) @events)))
+    (is (= 1 (:sample-count (first @events))))))
 
 (deftest replay-source-loops-with-increasing-timestamps
   (let [dir (temp-dir)

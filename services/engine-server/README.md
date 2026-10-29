@@ -11,7 +11,7 @@ Build the [dashboard](../../ui/dashboard/README.md) first, then from this
 directory:
 
 ```sh
-clojure -M:run                              # replay the committed idle recording
+clojure -M:run                              # replay the committed drive recording
 clojure -M:run replay ../../lib/device/recordings/2026-10-24-idle
 clojure -M:run live                         # poll the vehicle on the first detected adapter
 clojure -M:run live /dev/cu.usbmodemTAlgJ3P81
@@ -50,7 +50,7 @@ with an `:error`.
 | `/` | Dashboard page |
 | `/assets/...` | Compiled ClojureScript and CSS from `resources/public/assets` |
 | `/stream` | Server-Sent Events with Transit JSON data |
-| `/api/snapshot` | Latest status, info, and samples, as Transit JSON |
+| `/api/snapshot` | Latest status, info, samples, and signals, as Transit JSON |
 | `GET /api/adapters` | `{:adapters [{:vendor :product :serial :path :paths}]}` from `scan-devices` |
 | `POST /api/source` | Switch source. Body: `{:type :live :path "..."}`, `{:type :replay}`, or `{:type :none}`. Replies 202 with `{:source ...}`; progress arrives on `/stream` |
 
@@ -63,8 +63,12 @@ otherwise), so a request cannot make the server write to any other file.
 
 `/stream` sends a `snapshot` event on connect, then:
 
-- `samples`: `{:samples [...]}` every 100 ms, with the latest sample of each
-  PID that changed. A sample is `{:pid :name :value :unit :timestamp-us}`.
+- `samples`: `{:samples [...] :signals [...]}` every 100 ms, with the latest
+  sample of each PID and the latest value of each inferred CAN signal that
+  arrived since the last batch. A sample is
+  `{:pid :name :value :unit :timestamp-us}`, plus `:can-id` when it was
+  decoded from broadcast traffic. A signal is
+  `{:signal :value :unit :can-id :timestamp-us}`.
 - `status`: the source's state, such as `{:source :replay :state :running}`,
   sent when it changes. A live source's `:running` status includes the
   adapter `:firmware`.

@@ -19,8 +19,31 @@
     (emit coolant)
     (emit rpm-2)
     (is (= {:event :samples
-            :data {:samples [(dissoc coolant :type) (dissoc rpm-2 :type)]}}
+            :data {:samples [(dissoc coolant :type) (dissoc rpm-2 :type)]
+                   :signals []}}
            (take-within subscription 1000)))
+    (hub/stop-hub hub)))
+
+(def ^:private gear-1 {:type :signal :signal :gear :value 2 :unit nil :can-id 0x141 :timestamp-us 1})
+(def ^:private gear-2 {:type :signal :signal :gear :value 3 :unit nil :can-id 0x141 :timestamp-us 3})
+(def ^:private brake {:type :signal :signal :brake :value true :unit nil :can-id 0x0D3 :timestamp-us 2})
+
+(deftest batches-the-latest-value-of-each-signal
+  (let [hub (hub/start-hub {:batch-ms 50})
+        subscription (hub/subscribe hub)
+        emit (hub/emit-fn hub)]
+    (emit gear-1)
+    (emit brake)
+    (emit coolant)
+    (emit gear-2)
+    (is (= {:event :samples
+            :data {:samples [(dissoc coolant :type)]
+                   :signals [(dissoc brake :type) (dissoc gear-2 :type)]}}
+           (take-within subscription 1000)))
+    (is (= [(dissoc brake :type) (dissoc gear-2 :type)]
+           (:signals (hub/snapshot hub))))
+    (emit {:type :reset})
+    (is (= [] (:signals (:data (take-within subscription 1000)))))
     (hub/stop-hub hub)))
 
 (deftest forwards-status-and-keeps-a-snapshot
@@ -35,7 +58,8 @@
     (is (= :samples (:event (take-within subscription 1000))))
     (is (= {:status {:source :replay :state :running}
             :info nil
-            :samples [(dissoc coolant :type)]}
+            :samples [(dissoc coolant :type)]
+            :signals []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 
@@ -52,11 +76,11 @@
     (emit rpm-1)
     (emit {:type :reset})
     (is (= {:event :snapshot
-            :data {:status nil :info nil :samples []}}
+            :data {:status nil :info nil :samples [] :signals []}}
            (take-within subscription 1000)))
     (is (= ::timeout (take-within subscription 200))
         "samples pending at the reset are dropped")
-    (is (= {:status nil :info nil :samples []}
+    (is (= {:status nil :info nil :samples [] :signals []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 

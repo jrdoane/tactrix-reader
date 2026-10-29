@@ -1,4 +1,7 @@
 {:recorded-at "2026-10-28T23:35:41.551806Z",
+ :vehicle
+ {:description "2015 Subaru Impreza, manual transmission",
+  :state "cold start, then town and highway driving"},
  :duration-ms 556547,
  :stopped-by :stop,
  :adapter {:firmware "1.17.4877"},

@@ -55,16 +55,17 @@ adapter --serial--> device.clj source --emit--> hub (core.async) --SSE/Transit--
 ```
 
 1. **Sources** (`start-live-source!`, `start-replay-source!` in `device.clj`)
-   call `:emit` with identical events: `{:type :sample :pid :name :value :unit :timestamp-us}`
-   and `{:type :status :source ... :state :running|:stopped|:failed}`.
+   call `:emit` with identical events: `{:type :sample :pid :name :value :unit :timestamp-us}`,
+   `{:type :signal :signal :value :unit :can-id :timestamp-us}` for inferred CAN
+   signals, and `{:type :status :source ... :state :running|:stopped|:failed}`.
    Consumers must not depend on which source is running.
 2. **Source manager** (`engine_server/sources.clj`): an agent that switches
    between replay, a live adapter, and no source, one switch at a time. Each
    switch stops the old source, emits `{:type :reset}`, and emits a
    `{:type :info ...}` event (adapter, vehicle identity from
    `read-vehicle-info`, or recording metadata) before starting the new one.
-3. **Hub** (`engine_server/hub.clj`): batches samples every 100 ms, keeping
-   only the latest per PID. It forwards status and info immediately and keeps
+3. **Hub** (`engine_server/hub.clj`): batches samples and signals every
+   100 ms, keeping only the latest per PID and per signal. It forwards status and info immediately and keeps
    a snapshot for new connections; `:reset` clears it and sends an empty
    snapshot. Every channel uses a sliding buffer, so slow browsers drop data
    instead of back-pressuring the source.
@@ -76,7 +77,8 @@ adapter --serial--> device.clj source --emit--> hub (core.async) --SSE/Transit--
    and server together.
 5. **Dashboard**: `stream.cljs` turns SSE events into `:stream/*` re-frame
    events and `http.cljs` calls the API. `events.cljs` stores samples keyed by
-   `:name`, not by PID number.
+   `:name`, not by PID number, and signals keyed by `:signal`. `views.cljs`
+   tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
 
 The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The
@@ -94,6 +96,7 @@ A single large namespace, layered roughly top to bottom:
   - `ssm-init` (ECU ID, SSM `AA`) and `ssm-read` (memory reads, SSM `A8`) use the same ISO15765 path, sharing `iso15765-request` with `obd-request`. The project's 2015 Impreza (calibration ID `EA1T002C`) does not answer SSM over CAN; see `lib/device/docs/subaru-ssm.md`.
   - `run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
 - **Broadcast decoding:** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.
+- **Inferred signals:** `inferred-signals` holds signals identified only from how they behave (gear, steering angle, brake, wheel speeds, accelerations, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
 - **PID decoding:** the `mode-01-pids` map (PID → name, byte count, unit, `:decode` fn). Add a PID there and in the table in `lib/device/docs/obd-pids.md`.
 - **Recordings:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`, and `frames.csv` is gitignored.
 

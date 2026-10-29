@@ -1564,6 +1564,69 @@
         :can-id id
         :timestamp-us timestamp-us}))))
 
+(defn- signed-byte [b]
+  (if (> b 127) (- b 256) b))
+
+(defn- signed-word [high low]
+  (let [n (+ (* 256 high) low)]
+    (if (> n 32767) (- n 65536) n)))
+
+(defn- wheel-speed [[low high]]
+  (round-to 1 (* 0.05625 (+ low (* 256 high)))))
+
+(def inferred-signals
+  "Signals the project's 2015 Impreza broadcasts that were identified from how
+  they behave in the 2026-10-28-drive recording but match no mode 01 PID, by
+  CAN ID. Scales marked approximate come from fits against quantities derived
+  from other signals; see docs/can-broadcast.md. Unlike `broadcast-signals`,
+  these are not confirmed."
+  {0x002 [{:signal :steering-angle :unit :degrees :byte-count 2
+           ;; Positive is a left turn, assuming opendbc's wheel order in 0D4.
+           :decode (fn [[high low]] (round-to 1 (* 0.1 (signed-word high low))))}]
+   0x0D0 [;; Approximate scales. Positive is to the left and forwards.
+          {:signal :lateral-acceleration :unit :g :byte-count 4
+           :decode (fn [[_ _ low high]] (round-to 2 (* 0.00734 (signed-word high low))))}
+          {:signal :yaw-rate :unit :degrees-per-second :byte-count 7
+           :decode #(round-to 1 (* 0.68 (signed-byte (nth % 6))))}
+          {:signal :longitudinal-acceleration :unit :g :byte-count 8
+           :decode #(round-to 2 (* -0.00907 (signed-byte (nth % 7))))}]
+   0x0D1 [{:signal :brake-pressure :byte-count 3 :decode #(nth % 2)}]
+   0x0D3 [{:signal :brake :byte-count 3 :decode #(bit-test (nth % 2) 5)}]
+   0x0D4 [{:signal :wheel-speeds :unit :km-per-hour :byte-count 8
+           :decode (fn [data]
+                     (zipmap [:front-left :front-right :rear-left :rear-right]
+                             (map wheel-speed (partition 2 data))))}]
+   0x141 [{:signal :gear :byte-count 7
+           ;; 1-5, or 7 with no gear engaged.
+           :decode #(let [gear (bit-and (nth % 6) 0x07)]
+                      (cond (<= 1 gear 5) gear
+                            (= 7 gear) :neutral))}]
+   0x152 [{:signal :parking-brake :byte-count 7 :decode #(bit-test (nth % 6) 3)}]
+   0x282 [{:signal :outside-temp :unit :celsius :byte-count 5
+           ;; Byte 4 is degrees Fahrenheit plus 40.
+           :decode #(round-to 1 (/ (* 5 (- (nth % 4) 72)) 9.0))}
+          {:signal :driver-seatbelt :byte-count 6
+           :decode #(if (bit-test (nth % 5) 0) :unbuckled :buckled)}]
+   0x360 [;; Approximate scale.
+          {:signal :fuel-flow :unit :grams-per-second :byte-count 2
+           :decode #(round-to 2 (* 0.185 (nth % 1)))}]})
+
+(defn signal-samples
+  "Decodes a received message carrying signals in `signals` (by default
+  `inferred-signals`) into `{:signal :value :unit :can-id :timestamp-us}`
+  maps. Returns an empty sequence for any other message."
+  ([message]
+   (signal-samples inferred-signals message))
+  ([signals {:keys [type id data timestamp-us]}]
+   (when (= :message type)
+     (for [{:keys [signal unit byte-count decode]} (get signals id)
+           :when (>= (count data) byte-count)]
+       {:signal signal
+        :value (decode data)
+        :unit unit
+        :can-id id
+        :timestamp-us timestamp-us}))))
+
 (defn- message-samples
   "Returns the samples in one received message: a mode 01 reply from `rx-id`,
   or broadcast signals from `signals`."
@@ -1571,6 +1634,13 @@
   (if-let [sample (reply-sample rx-id message)]
     [sample]
     (broadcast-samples signals message)))
+
+(defn- message-events
+  "Returns the source events for one received message: `:sample` events as
+  `message-samples` gives, then `:signal` events for `inferred`."
+  [rx-id broadcast inferred message]
+  (concat (map #(assoc % :type :sample) (message-samples rx-id broadcast message))
+          (map #(assoc % :type :signal) (signal-samples inferred message))))
 
 (defn- run-can-session!
   "Opens the raw CAN channel with a pass-all filter and polls `pids`
@@ -1830,19 +1900,21 @@
 (defn start-live-source!
   "Polls the vehicle on a background thread and calls `emit` with each event:
   `{:type :sample ...}` for every decoded PID reply and broadcast signal in
-  `:broadcast` (by default `broadcast-signals`; `{}` turns them off), and
-  `{:type :status ...}` when the source is running, stopped, or failed.
-  Returns a map whose :stop! function stops polling and waits for the channel
-  to close.
+  `:broadcast` (by default `broadcast-signals`), `{:type :signal ...}` for
+  each signal in `:signals` (by default `inferred-signals`), and
+  `{:type :status ...}` when the source is running, stopped, or failed. `{}`
+  turns either kind of broadcast decoding off. Returns a map whose :stop!
+  function stops polling and waits for the channel to close.
 
   Sends read-only mode 01 requests on the vehicle bus."
-  [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud broadcast]
+  [device-or-path {:keys [emit schedule interval-ms tx-id rx-id baud broadcast signals]
                    :or {schedule default-poll-schedule
                         interval-ms default-poll-interval-ms
                         tx-id 0x7E0
                         rx-id 0x7E8
                         baud 500000
-                        broadcast broadcast-signals}}]
+                        broadcast broadcast-signals
+                        signals inferred-signals}}]
   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
         running? (atom true)
         status (status-emitter emit {:source :live :path path})
@@ -1861,8 +1933,7 @@
                                         :continue? #(deref running?)
                                         :on-bytes (message-decoder
                                                    (fn [message]
-                                                     (doseq [sample (message-samples rx-id broadcast message)]
-                                                       (emit (assoc sample :type :sample)))))
+                                                     (run! emit (message-events rx-id broadcast signals message))))
                                         :on-connected #(status :running :firmware %)})]
                            (if (:ok? result)
                              (status :stopped)
@@ -1877,38 +1948,48 @@
               nil)}))
 
 (defn start-replay-source!
-  "Replays a recording's samples on a background thread, paced by their
-  timestamps, calling `emit` with the same events as `start-live-source!`,
-  including broadcast signals in `:broadcast`. Loops by default, shifting
-  timestamps so they keep increasing. `:speed` scales playback. Returns a map
-  whose :stop! function stops playback."
-  [dir {:keys [emit loop? speed broadcast]
+  "Replays a recording on a background thread, paced by its timestamps,
+  calling `emit` with the same events as `start-live-source!`, including
+  broadcast signals in `:broadcast` and inferred signals in `:signals`. Loops
+  by default, shifting timestamps so they keep increasing. `:speed` scales
+  playback. Returns a map whose :stop! function stops playback."
+  [dir {:keys [emit loop? speed broadcast signals]
         :or {loop? true
              speed 1.0
-             broadcast broadcast-signals}}]
+             broadcast broadcast-signals
+             signals inferred-signals}}]
   (let [running? (atom true)
         status (status-emitter emit {:source :replay :recording (str dir)})
         gap-us 25000
         worker (future
                  (try
-                   (let [samples (recording-samples dir broadcast)]
-                     (if (empty? samples)
+                   (let [rx-id (recording-rx-id dir)
+                         ;; Frames are decoded as they are played, so a long
+                         ;; recording's events are never all held at once.
+                         messages (filterv #(and (= :message (:type %)) (not (:malformed? %)))
+                                           (:events (parse-adapter-stream (recording-bytes dir))))
+                         sample-count (transduce (mapcat #(message-samples rx-id broadcast %))
+                                                 (completing (fn [n _] (inc n)))
+                                                 0
+                                                 messages)]
+                     (if (zero? sample-count)
                        (status :failed :error :no-samples)
-                       (let [t0 (:timestamp-us (first samples))
-                             span-us (- (:timestamp-us (peek samples)) t0)]
-                         (status :running :sample-count (count samples))
+                       (let [t0 (:timestamp-us (first messages))
+                             span-us (- (:timestamp-us (peek messages)) t0)]
+                         (status :running :sample-count sample-count)
                          (loop [pass 0]
                            (let [offset (* pass (+ span-us gap-us))
                                  started (System/nanoTime)]
-                             (doseq [sample samples
-                                     :while @running?]
-                               (let [due-ms (/ (- (:timestamp-us sample) t0) 1000.0 speed)
+                             (doseq [message messages
+                                     :while @running?
+                                     :let [events (message-events rx-id broadcast signals message)]
+                                     :when (seq events)]
+                               (let [due-ms (/ (- (:timestamp-us message) t0) 1000.0 speed)
                                      wait-ms (- due-ms (/ (- (System/nanoTime) started) 1e6))]
                                  (when (pos? wait-ms)
                                    (Thread/sleep (long wait-ms)))
-                                 (emit (assoc sample
-                                              :type :sample
-                                              :timestamp-us (+ (:timestamp-us sample) offset)))))
+                                 (doseq [event events]
+                                   (emit (update event :timestamp-us + offset)))))
                              (if (and loop? @running?)
                                (do
                                  (Thread/sleep (long (/ gap-us 1000.0 speed)))

@@ -11,9 +11,15 @@ The page has:
   voltage), the vehicle (VIN, calibration ID and CVN, ECU name, SSM ECU ID, or why
   each could not be read), and diagnostics from PID 01 (check-engine light,
   stored codes, readiness monitors).
-- Large readouts for RPM, speed, coolant, and throttle, then grouped tiles for
-  the other polled PIDs.
-- A table of every value received.
+- Large readouts for RPM, speed, gear, coolant, and throttle, then grouped
+  tiles for the other polled PIDs. PIDs also decoded from the car's broadcast
+  CAN traffic are tagged CAN.
+- A "From the CAN bus" section with signals identified from that traffic but
+  matched to no PID, each tagged inferred: steering angle, brake, brake
+  pressure, parking brake, driver's seatbelt, wheel speeds, accelerations,
+  yaw rate, fuel flow, and outside temperature. See
+  [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
+- A table of every PID received, with where each came from.
 
 ## Building
 
@@ -38,6 +44,6 @@ Namespaces are under `tactrix-reader.dashboard`:
 | `core` | Mounts the app with `reagent.dom.client` |
 | `stream` | `:stream/connect` effect: opens the `EventSource` and decodes Transit |
 | `http` | `:http` effect: calls `/api` with Transit and dispatches the reply |
-| `events` | App state: connection, source status and info, latest sample per PID, adapters |
+| `events` | App state: connection, source status and info, latest sample per PID and value per inferred signal, adapters |
 | `subs` | Subscriptions |
 | `views` | Page: source controls, info panels, readouts, and a table of every value |

@@ -6,7 +6,7 @@
             [tactrix-reader.engine-server.server :as server]
             [tactrix-reader.engine-server.sources :as sources]))
 
-(def default-recording "../../lib/device/recordings/2026-10-24-idle")
+(def default-recording "../../lib/device/recordings/2026-10-28-drive")
 
 (defn start-system
   "Starts the hub, the source manager, and the HTTP server. `source` is the
@@ -36,7 +36,7 @@
 (defn -main
   "Usage: clojure -M:run [replay [recording-dir] | live [device-path]]
 
-  Replays the committed idle recording when no arguments are given. The port
+  Replays the committed drive recording when no arguments are given. The port
   defaults to 8080 and can be set with the PORT environment variable."
   [& args]
   (let [source (parse-source args)

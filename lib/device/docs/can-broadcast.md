@@ -138,7 +138,35 @@ decoded:
 - **The four wheel speeds:** no PID reports a single wheel's speed.
 
 The IDs and layouts are this car's. On another vehicle the same IDs may carry
-something else, so pass `:broadcast {}` to the sources there.
+something else, so pass `:broadcast {}` and `:signals {}` to the sources
+there.
+
+### Inferred signals
+
+`inferred-signals` holds signals identified below by how they behave but
+matched to no PID, so their scales and directions aren't confirmed.
+`signal-samples` decodes them into `{:signal :value :unit :can-id
+:timestamp-us}` maps, and the live and replay sources emit them as
+`{:type :signal ...}` events (`:signals {}` turns them off). The dashboard
+shows them tagged inferred.
+
+| Signal | Encoding | Value |
+|---|---|---|
+| `:steering-angle` | `002` bytes 0-1, big-endian, signed, 0.1° per bit | Degrees, positive for a left turn |
+| `:lateral-acceleration` | `0D0` bytes 2-3, signed LE, about 0.0073 g per bit | g, positive to the left |
+| `:yaw-rate` | `0D0` byte 6, signed, about 0.68°/s per bit | Degrees per second, positive to the left; reads about 1 at rest |
+| `:longitudinal-acceleration` | `0D0` byte 7, signed, about −0.0091 g per bit | g, positive when speeding up |
+| `:brake-pressure` | `0D1` byte 2 | Raw count, 0-18 |
+| `:brake` | `0D3` b2.5 | Boolean |
+| `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
+| `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7 |
+| `:parking-brake` | `152` b6.3 | Boolean |
+| `:outside-temp` | `282` byte 4 minus 40, as °F | °C |
+| `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
+| `:fuel-flow` | `360` byte 1, about 0.185 g/s per bit | Grams per second |
+
+The left/right directions assume opendbc's wheel order. Move a signal to
+`broadcast-signals` only if it comes to match a polled PID.
 
 ## Message structure
 
@@ -317,8 +345,9 @@ idle, do move while driving.
   the start of the drive until 9.9 s, before the car pulled away, and again
   from 551 s, after the final stop. Inference from timing only.
 - **Driver's seatbelt:** `282` b5.0 (opendbc SEATBELT_FL, bit 40) is set
-  until 37 s and again from 554 s, so set probably means unbuckled. `282`
-  b5.1 cleared at 1.5 s. Inference from timing only.
+  until 1.5 s, before the engine started, and again from 554 s, after the
+  final stop, so set probably means unbuckled. `282` b5.1 cleared at 37 s,
+  while moving; unexplained. Inference from timing only.
 - **Outside temperature:** `282` byte 4 minus 40 looks like outside
   temperature in °F. It read 108 at the start (68 °F, 20 °C) when PID `46`
   read 21 °C, and 90 (50 °F, 10 °C) when PID `46` read 10 °C. `282` byte 3

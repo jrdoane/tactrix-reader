@@ -62,3 +62,25 @@
  :<- [::samples]
  (fn [samples _]
    (sort-by :pid (vals samples))))
+
+(rf/reg-sub
+ ::signals
+ (fn [db _]
+   (:signals db)))
+
+(rf/reg-sub
+ ::signal
+ :<- [::signals]
+ (fn [signals [_ signal-name]]
+   (get signals signal-name)))
+
+(rf/reg-sub
+ ::can-ids
+ (fn [db _]
+   (:can-ids db)))
+
+(rf/reg-sub
+ ::can-id
+ :<- [::can-ids]
+ (fn [can-ids [_ pid-name]]
+   (get can-ids pid-name)))

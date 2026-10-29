@@ -170,6 +170,8 @@ button.primary { color: #fff; background: var(--accent); border-color: var(--acc
   padding: 10px 12px;
 }
 
+.tile.wide { grid-column: span 2; }
+
 .tile .readout-value { font-size: 24px; }
 .tile .readout-unit { font-size: 13px; margin-left: 4px; }
 
@@ -214,3 +216,44 @@ button.primary { color: #fff; background: var(--accent); border-color: var(--acc
 .samples tr:last-child td { border-bottom: none; }
 .samples .pid { color: var(--muted); font-family: ui-monospace, monospace; }
 .samples .value { text-align: right; font-variant-numeric: tabular-nums; }
+
+.tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+  color: var(--muted);
+}
+
+.tag.inferred { color: var(--warn); border-color: var(--warn); }
+
+.can {
+  margin-bottom: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.can > p { margin: 0 0 14px; font-size: 14px; }
+
+.wheels {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-content: start;
+  gap: 2px 14px;
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wheel-corner {
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.samples .source { color: var(--muted); font-size: 13px; }

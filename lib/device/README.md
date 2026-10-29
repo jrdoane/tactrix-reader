@@ -163,7 +163,8 @@ The main entry points in `tactrix-reader.device`:
 | `read-vehicle-info`, `decode-mode-09` | VIN, calibration IDs and verification numbers, ECU name, and ECU ID; mode 09 decoding, including supported info types and in-use monitor counters |
 | `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
 | `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
-| `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) |
+| `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
+| `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
 | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
 | `start-live-source!`, `start-replay-source!` | Data sources, below |
 
@@ -203,14 +204,17 @@ polls with the default schedule:
 - Each fast PID is sampled about every 195 ms and each slow PID about every
   1.95 seconds.
 
-It also decodes the signals in `broadcast-signals` from the car's own traffic;
-pass `:broadcast {}` to turn them off.
+It also decodes the signals in `broadcast-signals` from the car's own traffic,
+as samples, and those in `inferred-signals` as
+`{:type :signal :signal :value :unit :can-id :timestamp-us}` events. Pass
+`:broadcast {}` or `:signals {}` to turn either off.
 
 `record` uses the same session code and schedule. Pass `:schedule`,
 `:interval-ms`, `:tx-id`, `:rx-id`, or `:baud` to change them.
 
-The replay source plays a recording's PID and broadcast samples (`:broadcast`
-as for the live source) paced by their timestamps.
+The replay source plays a recording's PID samples, broadcast samples, and
+inferred signals (`:broadcast` and `:signals` as for the live source), paced
+by their timestamps. It decodes each frame as it plays it.
 It loops by default (`:loop?`), shifting timestamps so they keep increasing,
 and `:speed` scales playback.
 

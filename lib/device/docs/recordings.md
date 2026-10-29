@@ -68,7 +68,7 @@ microsecond clock, so PID values line up with bus traffic. `id`, `status`,
 ### `2026-10-24-idle`
 
 One minute of a warm 2015 Subaru Impreza (manual) idling in neutral: about
-57,600 frames and 2,400 PID samples. The engine server replays it by default.
+57,600 frames and 2,400 PID samples.
 
 It predates the current polling schedule. It polled 20 PIDs in turn, one every
 25 ms, so each value is sampled only every 500 ms.
@@ -80,7 +80,7 @@ samples. It starts with the ignition on and the engine off, with a cold
 engine (coolant 47 °C); the engine starts at 5 s. It covers town and highway
 driving through all five gears up to 139 km/h, a full-throttle pull to
 6,400 rpm, several stops, and a warm idle in neutral at the end. It was
-stopped with Ctrl-C.
+stopped with Ctrl-C. The engine server replays it by default.
 
 It predates PIDs `45`, `49`, `4C`, and `65` in the polling schedule, so each
 fast PID was sampled about every 135 ms and each slow one every 1.35 s.
