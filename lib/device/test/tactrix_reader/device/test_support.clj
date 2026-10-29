@@ -67,6 +67,10 @@
   {0x0C [0x0C 0x80]
    0x05 [0x55]})
 
+(def ^:private fake-did-data
+  {0x10A5 [0x80]
+   0x1000 [0xFF 0xC0 0x00 0x0D]})
+
 (defn fake-vehicle-responder []
   (let [clock (atom 1000000)]
     (fn [line payload]
@@ -76,8 +80,11 @@
         (str/starts-with? line "atc") (ascii "aro\r\n")
         (str/starts-with? line "atf") (ascii "arf5 1 0\r\n")
         (str/starts-with? line "att")
-        (let [pid (nth payload 6)
-              reply (into [0x41 pid] (get fake-pid-data pid [0 0 0 0]))]
+        (let [reply (if (= 0x22 (nth payload 5))
+                      (let [[hi lo] (subvec payload 6 8)]
+                        (into [0x62 hi lo] (get fake-did-data (+ (* 256 hi) lo) [0])))
+                      (let [pid (nth payload 6)]
+                        (into [0x41 pid] (get fake-pid-data pid [0 0 0 0]))))]
           (concat (ascii "aro\r\n")
                   (message-bytes 5 0 (swap! clock + 1000) 0x7E8
                                  (take 8 (concat [(count reply)] reply (repeat 0))))))

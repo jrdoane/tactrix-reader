@@ -49,6 +49,8 @@
            "clojure -M:run record recordings/my-drive"
            "clojure -M:run record recordings/my-drive 120"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run record-dids recordings/my-drive scanned"
+           "clojure -M:run record-dids recordings/my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run export-recording recordings/my-drive"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
               :open "Open and close the first detected device, or the given path."
@@ -68,6 +70,7 @@
               :uds-read "Read each comma-separated hex data identifier with UDS ReadDataByIdentifier (22), one request each. Sends vehicle bus traffic."
               :uds-scan "Read every data identifier from start to end (hex, inclusive) with UDS 22 and report those not out of range. Sends one request per DID on the vehicle bus."
               :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
+              :record-dids "Record like record, alternating PID requests with UDS 22 requests for the comma-separated hex DIDs, or `scanned` for the DIDs found by uds-scan. Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
 (defn- parse-pid
@@ -111,6 +114,32 @@
 
 (defn- first-detected-path []
   (some :path (usb/scan-devices)))
+
+(defn- record!
+  "Runs `recording/record` with `opts` for `seconds`, or until Ctrl-C, and
+  prints the result."
+  [out-dir seconds path opts]
+  (let [stop (promise)
+        done (promise)]
+    ;; Ctrl-C runs shutdown hooks; this one stops the recording and holds the
+    ;; JVM open until its files are written.
+    (try
+      (.addShutdownHook (Runtime/getRuntime)
+                        (Thread. ^Runnable (fn []
+                                             (deliver stop true)
+                                             @done)))
+      (binding [*out* *err*]
+        (println (str "Recording to " out-dir
+                      (if seconds (str " for " seconds " seconds") "")
+                      ". Press Ctrl-C to stop.")))
+      (print-edn (recording/record (or path (first-detected-path))
+                                   out-dir
+                                   (assoc opts
+                                          :duration-ms (some-> seconds Long/parseLong (* 1000))
+                                          :stop stop)))
+      (flush)
+      (finally
+        (deliver done true)))))
 
 (defn -main [& args]
   (try
@@ -188,27 +217,14 @@
                                     {:on-result report-scan-progress})))
 
         "record"
-        (let [[out-dir seconds path] (rest args)
-              stop (promise)
-              done (promise)]
-          ;; Ctrl-C runs shutdown hooks; this one stops the recording and
-          ;; holds the JVM open until its files are written.
-          (try
-            (.addShutdownHook (Runtime/getRuntime)
-                              (Thread. ^Runnable (fn []
-                                                   (deliver stop true)
-                                                   @done)))
-            (binding [*out* *err*]
-              (println (str "Recording to " out-dir
-                            (if seconds (str " for " seconds " seconds") "")
-                            ". Press Ctrl-C to stop.")))
-            (print-edn (recording/record (or path (first-detected-path))
-                                         out-dir
-                                         {:duration-ms (some-> seconds Long/parseLong (* 1000))
-                                          :stop stop}))
-            (flush)
-            (finally
-              (deliver done true))))
+        (let [[out-dir seconds path] (rest args)]
+          (record! out-dir seconds path {}))
+
+        "record-dids"
+        (let [[out-dir dids seconds path] (rest args)]
+          (record! out-dir seconds path {:dids (if (= "scanned" dids)
+                                                 uds/scanned-dids
+                                                 (parse-dids dids))}))
 
         "export-recording"
         (print-edn (recording/export-recording arg))

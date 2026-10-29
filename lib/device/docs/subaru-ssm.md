@@ -244,7 +244,8 @@ yet known. Single bytes at `80` (`10A5`, `10BA`, `10BE`) would read as 0 with
 the `(x - 128) / 2` knock correction formula, and the matching pairs
 (`10B4`/`10B5`, `10B8`/`10B9`, `10EC`/`10ED`, `10EE`/`10EF`, `10F0`/`10F1`)
 could be per-bank values on the boxer engine, but both are inferences from
-one snapshot.
+one snapshot. To find out, record them alongside the PIDs while driving with
+`record-dids` (see [Recording UDS data identifiers](recordings.md#recording-uds-data-identifiers)).
 
 ```
 1000 FF C0 00 0D           1001 04 00                 1002 00 32

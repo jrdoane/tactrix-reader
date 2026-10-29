@@ -46,11 +46,12 @@ path use the first detected adapter when it is left out.
 | `uds-read <dids> [path]` | Read each comma-separated hex data identifier with UDS service 22 | Yes |
 | `uds-scan <start> <end> [path]` | Read every data identifier in a hex range with UDS service 22 and report those that exist | Yes, one request per DID |
 | `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
+| `record-dids <dir> <dids> [seconds] [path]` | Record like `record`, also polling comma-separated hex DIDs, or `scanned` | Yes |
 | `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
 
 `obd`, `pid`, `pids`, `vehicle-info`, and `trouble-codes` are covered in
 [OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init`,
-`ssm-read`, `uds-read`, and `uds-scan` in [Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
+`ssm-read`, `uds-read`, and `uds-scan` in [Subaru SSM reads](docs/subaru-ssm.md); `record`, `record-dids`, and `export-recording` in
 [Recordings](docs/recordings.md).
 
 Failures are returned as EDN with `:ok? false` and an `:error` keyword rather

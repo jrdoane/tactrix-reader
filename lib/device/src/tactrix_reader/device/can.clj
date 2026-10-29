@@ -1,13 +1,15 @@
 (ns tactrix-reader.device.can
   "A raw CAN session (channel 5) with a pass-all filter that polls mode 01 PIDs
   with single-frame requests, and decoding of the messages it receives into
-  PID samples and broadcast signals. Recording and the live source both use
-  it. Sends read-only mode 01 requests on the vehicle bus."
+  PID samples and broadcast signals. It can also poll UDS data identifiers
+  (service 22) between the PIDs. Recording and the live source both use it.
+  Sends read-only mode 01 and service 22 requests on the vehicle bus."
   (:require [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.codec :as codec]
             [tactrix-reader.device.openport :as openport]
             [tactrix-reader.device.pids :as pids]
-            [tactrix-reader.device.serial :as serial]))
+            [tactrix-reader.device.serial :as serial]
+            [tactrix-reader.device.uds :as uds]))
 
 (def can-channel
   "The adapter uses J2534 protocol IDs as channel IDs; 5 is raw CAN."
@@ -58,6 +60,34 @@
             (dissoc :ok?)
             (assoc :timestamp-us timestamp-us))))))
 
+(defn did-reply
+  "Decodes a received message carrying a single-frame service 22 reply from
+  `rx-id` into `{:did :did-hex :data :timestamp-us}`, with the data bytes
+  undecoded. Returns nil for any other message, including the first frame of
+  a multi-frame reply."
+  [rx-id {:keys [type id data timestamp-us]}]
+  (when (and (= :message type) (= rx-id id) (seq data) (<= 3 (first data) 7))
+    (let [[service hi lo & reply] (take (first data) (rest data))]
+      (when (= (+ uds/read-data-by-identifier-service 0x40) service)
+        (let [did (+ (* 256 hi) lo)]
+          {:did did
+           :did-hex (format "%04X" did)
+           :data (vec reply)
+           :timestamp-us timestamp-us})))))
+
+(defn- poll-request
+  "The request payload for the `i`th poll: mode 01 PIDs and service 22 DIDs
+  in turn when there are both, each rotating through its own list."
+  [pids dids i]
+  (let [pid-request #(vector 0x01 (nth pids (mod % (count pids))))
+        did-request #(into [uds/read-data-by-identifier-service]
+                           (subvec (codec/u32->bytes (nth dids (mod % (count dids)))) 2))]
+    (cond
+      (empty? dids) (pid-request i)
+      (empty? pids) (did-request i)
+      (even? i) (pid-request (quot i 2))
+      :else (did-request (quot i 2)))))
+
 (defn message-samples
   "Returns the samples in one received message: a mode 01 reply from `rx-id`,
   or broadcast signals from `signals`."
@@ -76,10 +106,13 @@
 (defn run-can-session!
   "Opens the raw CAN channel with a pass-all filter and polls `pids`
   round-robin, one request every `interval-ms`, while `continue?` returns true.
+  With `dids`, it alternates between a PID and a service 22 DID request, each
+  rotating through its own list. DIDs whose reply needs more than one frame
+  get no reply, because the channel sends no flow control.
   Every byte the adapter sends from the connect command on is passed to
   `on-bytes`. `on-connected` is called with the firmware version once the
   channel is open. Always closes the channel it opened."
-  [{:keys [input output]} {:keys [pids interval-ms tx-id baud continue? on-bytes on-connected]
+  [{:keys [input output]} {:keys [pids dids interval-ms tx-id baud continue? on-bytes on-connected]
                            :or {on-connected (fn [_])}}]
   (let [channel can-channel
         setup (java.io.ByteArrayOutputStream.)
@@ -107,11 +140,12 @@
                    next-request (System/currentTimeMillis)]
               (when (continue?)
                 (let [now (System/currentTimeMillis)]
-                  (if (and (seq pids) (>= now next-request))
-                    (do
+                  (if (and (or (seq pids) (seq dids)) (>= now next-request))
+                    (let [request (poll-request pids dids i)]
                       (openport/write-command! output (str "att" channel " 12 0")
                                                (concat (codec/u32->bytes tx-id)
-                                                       [0x02 0x01 (nth pids (mod i (count pids))) 0 0 0 0 0]))
+                                                       (take 8 (concat [(count request)] request
+                                                                       (repeat 0)))))
                       (swap! request-count inc)
                       ;; Never schedule in the past, so a stall does not
                       ;; cause a burst of catch-up requests.

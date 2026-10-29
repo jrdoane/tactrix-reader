@@ -9,7 +9,8 @@
             [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.codec :as codec]
-            [tactrix-reader.device.openport :as openport]))
+            [tactrix-reader.device.openport :as openport]
+            [tactrix-reader.device.uds :as uds]))
 
 (def default-record-duration-ms 60000)
 
@@ -55,8 +56,10 @@
   "Writes frames.csv and pids.csv in `dir` from its raw.bin.
 
   frames.csv lists every received CAN frame. pids.csv lists decoded mode 01
-  replies from `rx-id`, which defaults to the one in meta.edn. Times are
-  seconds since the first frame, plus the adapter's microsecond timestamp."
+  replies from `rx-id`, which defaults to the one in meta.edn. If there are
+  any single-frame service 22 replies, dids.csv lists them, with their data
+  undecoded. Times are seconds since the first frame, plus the adapter's
+  microsecond timestamp."
   ([dir]
    (export-recording dir (recording-rx-id dir)))
   ([dir rx-id]
@@ -64,7 +67,8 @@
          messages (filterv #(and (= :message (:type %)) (not (:malformed? %))) events)
          t0 (:timestamp-us (first messages))
          seconds (fn [timestamp-us] (format "%.6f" (/ (- timestamp-us t0) 1e6)))
-         pid-rows (keep #(can/reply-sample rx-id %) messages)]
+         pid-rows (keep #(can/reply-sample rx-id %) messages)
+         did-rows (keep #(can/did-reply rx-id %) messages)]
      (with-open [writer (io/writer (io/file dir "frames.csv"))]
        (.write writer "t_s,timestamp_us,channel,status,id,dlc,data\n")
        (doseq [{:keys [timestamp-us channel status id data]} messages]
@@ -79,9 +83,17 @@
                                             (clojure.core/name name) (csv-field value)
                                             (if unit (clojure.core/name unit) "")])
                              "\n"))))
-     {:frames (count messages)
-      :pid-samples (count pid-rows)
-      :reply-lines (frequencies (keep #(some-> (:text %) (str/split #" ") first) events))})))
+     (when (seq did-rows)
+       (with-open [writer (io/writer (io/file dir "dids.csv"))]
+         (.write writer "t_s,timestamp_us,did,data\n")
+         (doseq [{:keys [timestamp-us did-hex data]} did-rows]
+           (.write writer (str (str/join "," [(seconds timestamp-us) timestamp-us did-hex
+                                              (hex-string data)])
+                               "\n")))))
+     (cond-> {:frames (count messages)
+              :pid-samples (count pid-rows)
+              :reply-lines (frequencies (keep #(some-> (:text %) (str/split #" ") first) events))}
+       (seq did-rows) (assoc :did-samples (count did-rows))))))
 
 (defn record
   "Records raw CAN traffic to `out-dir` while polling mode 01 PIDs.
@@ -92,11 +104,14 @@
   `:stop` promise is delivered. If the adapter fails partway through, the
   files are still written from what was captured, and the result has
   `:ok? false`. Polling sends one read-only request every `:interval-ms`,
-  rotating through `:pids`; pass `:pids []` to only listen."
+  rotating through `:pids`; pass `:pids []` to only listen. With `:dids`, it
+  alternates between a PID and a service 22 DID request (see
+  `run-can-session!`)."
   ([device-or-path out-dir]
    (record device-or-path out-dir {}))
-  ([device-or-path out-dir {:keys [pids interval-ms tx-id rx-id baud stop]
+  ([device-or-path out-dir {:keys [pids dids interval-ms tx-id rx-id baud stop]
                             :or {pids can/default-poll-schedule
+                                 dids []
                                  interval-ms can/default-poll-interval-ms
                                  tx-id 0x7E0
                                  rx-id 0x7E8
@@ -115,6 +130,12 @@
         :path path
         :error :missing-out-dir}
 
+       (not (and (sequential? dids) (every? uds/did? dids)))
+       {:ok? false
+        :path path
+        :error :invalid-dids
+        :dids dids}
+
        :else
        (try
          (let [session (openport/open-session path)
@@ -130,6 +151,7 @@
                          (try
                            (can/run-can-session! session
                                                  {:pids pids
+                                                  :dids dids
                                                   :interval-ms interval-ms
                                                   :tx-id tx-id
                                                   :baud baud
@@ -186,6 +208,10 @@
                                                    "frames.csv" "Every received CAN frame, including copies of the polling requests. Regenerate with export-recording."
                                                    "pids.csv" "Decoded mode 01 replies. Regenerate with export-recording."}
                                            :counts counts}
+                                    (seq dids) (update :polling assoc
+                                                       :dids (mapv #(format "%04X" %) dids)
+                                                       :did-request-frame "03 22 <did> 00 00 00 00")
+                                    (:did-samples counts) (assoc-in [:files "dids.csv"] "Single-frame service 22 replies, undecoded. Regenerate with export-recording.")
                                     (not (:ok? outcome)) (assoc :error (:message outcome)))]
                (spit (io/file dir "meta.edn") (with-out-str (pprint/pprint recording-meta)))
                (merge {:ok? (:ok? outcome)

@@ -41,7 +41,34 @@
     (is (= {:ok? false :error :missing-path}
            (recording/record nil "recordings/x")))
     (is (= {:ok? false :path "/dev/cu.usbmodemTAlgJ3P81" :error :missing-out-dir}
-           (recording/record "/dev/cu.usbmodemTAlgJ3P81" nil)))))
+           (recording/record "/dev/cu.usbmodemTAlgJ3P81" nil)))
+    (doseq [dids [nil [0x10000] ["10A5"]]]
+      (is (= {:ok? false :path "/dev/cu.usbmodemTAlgJ3P81" :error :invalid-dids :dids dids}
+             (recording/record "/dev/cu.usbmodemTAlgJ3P81" "recordings/x" {:dids dids}))))))
+
+(deftest export-recording-writes-did-replies
+  (let [dir (temp-dir)
+        raw (concat (message-bytes 5 0 1000000 0x7E0 [3 0x22 0x10 0xA5 0 0 0 0])
+                    (message-bytes 5 0 1000500 0x7E8 [4 0x62 0x10 0xA5 0x80 0 0 0])
+                    (message-bytes 5 0 1001000 0x7E8 [0x10 0x09 0x62 0x10 0x1E 0x6E 0x98 0x00])
+                    (message-bytes 5 0 1002000 0x7E8 [7 0x62 0x10 0x00 0xFF 0xC0 0x00 0x0D]))]
+    (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))
+                               (byte-array (map unchecked-byte raw))
+                               (make-array java.nio.file.OpenOption 0))
+    (is (= 2 (:did-samples (recording/export-recording (str dir) 0x7E8))))
+    (is (= ["t_s,timestamp_us,did,data"
+            "0.000500,1000500,10A5,80"
+            "0.002000,1002000,1000,FF C0 00 0D"]
+           (str/split-lines (slurp (java.io.File. dir "dids.csv")))))))
+
+(deftest export-recording-writes-no-dids-csv-without-did-replies
+  (let [dir (temp-dir)]
+    (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))
+                               (byte-array (map unchecked-byte
+                                                (message-bytes 5 0 1000000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])))
+                               (make-array java.nio.file.OpenOption 0))
+    (is (nil? (:did-samples (recording/export-recording (str dir) 0x7E8))))
+    (is (not (.exists (java.io.File. dir "dids.csv"))))))
 
 (deftest record-captures-a-polling-session
   (let [dir (temp-dir)]
@@ -60,6 +87,25 @@
                     (drop 1)
                     (take 2)
                     (mapcat #(let [[_ _ _ name value] (str/split % #",")] [name value])))))))))
+
+(deftest record-alternates-pid-and-did-requests
+  (let [dir (temp-dir)]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [result (recording/record "/dev/fake" (str dir) {:duration-ms 150
+                                                             :pids [0x0C]
+                                                             :dids [0x10A5 0x1000]
+                                                             :interval-ms 10})
+            meta (edn/read-string (slurp (java.io.File. dir "meta.edn")))
+            did-rows (->> (str/split-lines (slurp (java.io.File. dir "dids.csv")))
+                          (drop 1)
+                          (mapv #(let [[_ _ did data] (str/split % #",")] [did data])))]
+        (is (true? (:ok? result)))
+        (is (= (:request-count result)
+               (+ (get-in result [:counts :pid-samples]) (get-in result [:counts :did-samples]))))
+        (is (#{0 1} (- (get-in result [:counts :pid-samples]) (get-in result [:counts :did-samples]))))
+        (is (= [["10A5" "80"] ["1000" "FF C0 00 0D"] ["10A5" "80"]] (take 3 did-rows)))
+        (is (= ["10A5" "1000"] (get-in meta [:polling :dids])))
+        (is (contains? (:files meta) "dids.csv"))))))
 
 (deftest record-streams-to-disk-until-stopped
   (let [dir (temp-dir)
