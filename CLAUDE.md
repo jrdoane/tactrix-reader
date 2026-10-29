@@ -108,6 +108,7 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
 - **Two ways of talking to the ECU:**
   - `iso15765/iso15765-request` opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly. `obd/obd-request` (and `read-pid`, `read-all-pids`, `read-vehicle-info`, and `read-trouble-codes` on top of it, also in `obd`) uses it.
   - `ssm/ssm-init` (ECU ID, SSM `AA`) and `ssm/ssm-read` (memory reads, SSM `A8`) use the same ISO15765 path. `obd/read-vehicle-info` calls `ssm-init` for the ECU ID. The project's 2015 Impreza (calibration ID `EA1T002C`) does not answer SSM over CAN; see `lib/device/docs/subaru-ssm.md`.
+  - `uds/read-did` sends UDS ReadDataByIdentifier (service `22`) on the same ISO15765 path and returns the data undecoded. It is being tried as a route to knock correction on that car.
   - `can/run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
 - **Broadcast decoding (`broadcast`):** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.
 - **Inferred signals (`broadcast`):** `inferred-signals` holds signals identified only from how they behave (gear, steering angle, brake, wheel speeds, accelerations, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
@@ -131,6 +132,9 @@ map should stay in sync with the command table in `lib/device/README.md`.
   service 04 (clear DTCs) or 08 (control on-board systems).
 - The only SSM commands sent are `AA` (identify the ECU) and `A8` (read
   addresses). Never send SSM `B0` or `B8`: they write ECU memory.
+- The only UDS service sent is `22` (ReadDataByIdentifier). Never send `2E`,
+  `3D`, `31`, `11`, `10`, or `27`: they write data or memory, run routines,
+  reset the ECU, or change session or security state.
 - Don't send the adapter's `atv` command: it may set programming voltage on a
   pin.
 - Protocol discovery writes only explicit bytes and never sweeps. Arbitrary

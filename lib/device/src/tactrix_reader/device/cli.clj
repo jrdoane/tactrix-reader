@@ -8,6 +8,7 @@
             [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.serial :as serial]
             [tactrix-reader.device.ssm :as ssm]
+            [tactrix-reader.device.uds :as uds]
             [tactrix-reader.device.usb :as usb]))
 
 (defn- print-edn [value]
@@ -41,6 +42,8 @@
            "clojure -M:run ssm-init /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run ssm-read 000022"
            "clojure -M:run ssm-read FF6A04,FF6A05,FF6A06,FF6A07 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run uds-read 1155"
+           "clojure -M:run uds-read 1155,1156,1157,0030 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run record recordings/my-drive"
            "clojure -M:run record recordings/my-drive 120"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
@@ -60,6 +63,7 @@
               :trouble-codes "Read stored, pending, and permanent trouble codes. Never clears them. Sends vehicle bus traffic."
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
+              :uds-read "Read each comma-separated hex data identifier with UDS ReadDataByIdentifier (22), one request each. Sends vehicle bus traffic."
               :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
@@ -76,6 +80,14 @@
   [s]
   (when s
     (mapv #(if (re-matches #"[0-9A-Fa-f]{1,6}" %) (Integer/parseInt % 16) %)
+          (str/split s #","))))
+
+(defn- parse-dids
+  "Reads comma-separated hex data identifiers such as `1155,0030`. Anything
+  that is not hex is kept as a string so `read-did` reports it."
+  [s]
+  (when s
+    (mapv #(if (re-matches #"[0-9A-Fa-f]{1,4}" %) (Integer/parseInt % 16) %)
           (str/split s #","))))
 
 (defn- first-detected-path []
@@ -143,6 +155,11 @@
         (let [[addresses path] (rest args)]
           (print-edn (ssm/ssm-read (or path (first-detected-path))
                                    (parse-ssm-addresses addresses))))
+
+        "uds-read"
+        (let [[dids path] (rest args)
+              path (or path (first-detected-path))]
+          (print-edn (mapv #(uds/read-did path %) (or (parse-dids dids) [nil]))))
 
         "record"
         (let [[out-dir seconds path] (rest args)

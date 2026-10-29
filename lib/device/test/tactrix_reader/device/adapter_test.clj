@@ -93,6 +93,7 @@
                           :read-trouble-codes
                           :ssm-init
                           :ssm-read
+                          :read-did
                           :can-session
                           :record
                           :export-recording
@@ -108,6 +109,7 @@
                                        :read-trouble-codes
                                        :ssm-init
                                        :ssm-read
+                                       :read-did
                                        :record
                                        :live-source]}
             :discovery-policy {:writes :explicit-request-only

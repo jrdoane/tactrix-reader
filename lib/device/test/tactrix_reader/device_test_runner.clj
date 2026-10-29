@@ -12,6 +12,7 @@
             [tactrix-reader.device.serial-test]
             [tactrix-reader.device.source-test]
             [tactrix-reader.device.ssm-test]
+            [tactrix-reader.device.uds-test]
             [tactrix-reader.device.usb-test]))
 
 (defn -main [& _]
@@ -27,6 +28,7 @@
                                              'tactrix-reader.device.serial-test
                                              'tactrix-reader.device.source-test
                                              'tactrix-reader.device.ssm-test
+                                             'tactrix-reader.device.uds-test
                                              'tactrix-reader.device.usb-test)]
     (when (pos? (+ fail error))
       (System/exit 1))))

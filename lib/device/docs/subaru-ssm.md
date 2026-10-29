@@ -156,15 +156,66 @@ difference.
 - There is no public ROM definition for `EA1T002C`, so its ECU ID and RAM
   addresses are unknown.
 
-Mode `23` is the only lead. Whether this ECU supports it, whether it needs a
-diagnostic session or security access first, and which addresses hold FBKC
-and FLKC are all unknown. It would also need its own allowlist, with UDS `3D`
-(WriteMemoryByAddress) never sent.
+There are two leads, both UDS (ISO 14229) services rather than SSM:
+
+- Service `22` (ReadDataByIdentifier) reads a value by a 2-byte data
+  identifier (DID). `uds-read` sends it; see
+  [Trying UDS service 22](#trying-uds-service-22).
+- Service `23` (ReadMemoryByAddress), the guess from RomRaider's developer,
+  is not built. It would need its own allowlist, with UDS `3D`
+  (WriteMemoryByAddress) never sent.
+
+For either, whether this ECU supports it, whether it needs a diagnostic
+session or security access first, and which identifiers or addresses hold
+FBKC and FLKC are all unknown.
+
+## Trying UDS service 22
+
+`uds-read` sends traffic on the vehicle bus. Give it one or more hex data
+identifiers, separated by commas; it sends one request for each:
+
+```sh
+clojure -M:run uds-read 1155
+clojure -M:run uds-read 1155,1156,1157,0030 /dev/cu.usbmodemTAlgJ3P81
+```
+
+From Clojure, pass the identifier as an integer:
+
+```clojure
+(uds/read-did path 0x1155)
+```
+
+It sends `22` and the 2-byte DID to `7E0` and expects `62`, the DID echoed
+back, and the data from `7E8`. The data is returned undecoded in `:data`,
+because the encoding of each DID is unknown. A reply that echoes a different
+DID returns `:unexpected-response`. A `7F` reply returns `:negative-response`
+with its `:nrc`, named in `:nrc-name` when known. It takes the same options
+as `obd-request`.
+
+How to read the result:
+
+| Result | Meaning |
+|---|---|
+| `:ok? true` with `:data` | The ECU has that DID. Its encoding still has to be worked out. |
+| `:nrc-name :request-out-of-range` (`31`) | The ECU supports service `22` but not that DID |
+| `:nrc-name :service-not-supported` (`11`) | The ECU does not support service `22` in its default session |
+| `:nrc-name :security-access-denied` (`33`) or `:conditions-not-correct` (`22`) | The DID exists but needs security access or a different session, which are never sent |
+| `:error :timeout` | No reply, as with SSM `AA` |
+
+DIDs to try first (2026-10-29): `1155` (FBKC), `1156` (FLKC), `1157` (IAM),
+and `0030` (knock sensor). These come from a Google AI overview that mixed up
+SSM and service `22`, gave the SSM `000022` formula `(A - 128) / 2` for all
+of them, and cited sources that do not contain them. Treat them as unverified
+guesses. Not yet tried on the car.
 
 ## Safety
 
 The only SSM commands built are `AA` (`ssm-init-command`) and `A8`
 (`ssm-read-addresses-command`), and neither caller can supply a command byte.
+The only UDS service built is `22` (`read-data-by-identifier-service`), and
+`read-did` takes only a DID. Never send UDS `2E` (WriteDataByIdentifier),
+`3D` (WriteMemoryByAddress), `31` (RoutineControl), `11` (ECUReset), `10`
+(DiagnosticSessionControl), or `27` (SecurityAccess).
 SSM also has commands that write ECU memory (`B0` and `B8`). Never send them:
 RomRaider resets the ECU by writing `40` to `000060` with `B8`.
 Forum notes say restricted addresses read back as `FF` rather than failing.

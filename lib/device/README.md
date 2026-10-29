@@ -9,7 +9,7 @@ The library provides:
 
 - Device discovery and adapter checks that need no vehicle
 - Read-only OBD-II requests and decoding of mode 01 PIDs
-- Subaru SSM memory reads, for values such as knock correction
+- Subaru SSM memory reads and UDS data identifier reads, for values such as knock correction
 - Recording of raw CAN traffic with polled PIDs
 - Live and replay data sources for the [engine server](../../services/engine-server/README.md)
 
@@ -43,12 +43,13 @@ path use the first detected adapter when it is left out.
 | `trouble-codes [path]` | Read stored, pending, and permanent trouble codes; never clears them | Yes |
 | `ssm-init [path]` | Read the ECU ID with Subaru SSM | Yes |
 | `ssm-read <addresses> [path]` | Read one byte at each comma-separated hex ECU address with Subaru SSM | Yes |
+| `uds-read <dids> [path]` | Read each comma-separated hex data identifier with UDS service 22 | Yes |
 | `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
 | `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
 
 `obd`, `pid`, `pids`, `vehicle-info`, and `trouble-codes` are covered in
-[OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init` and
-`ssm-read` in [Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
+[OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init`,
+`ssm-read`, and `uds-read` in [Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
 [Recordings](docs/recordings.md).
 
 Failures are returned as EDN with `:ok? false` and an `:error` keyword rather
@@ -164,6 +165,7 @@ The main entry points, by namespace under `tactrix-reader.device`:
 | `obd` | `read-vehicle-info`, `decode-mode-09` | VIN, calibration IDs and verification numbers, ECU name, and ECU ID; mode 09 decoding, including supported info types and in-use monitor counters |
 | `obd` | `read-trouble-codes`, `decode-dtc-reply` | Stored, pending, and permanent trouble codes (services 03, 07, 0A) |
 | `ssm` | `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
+| `uds` | `read-did` | [UDS ReadDataByIdentifier](docs/subaru-ssm.md#trying-uds-service-22) (service 22) over ISO15765 |
 | `recording` | `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
 | `broadcast` | `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
 | `broadcast` | `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
