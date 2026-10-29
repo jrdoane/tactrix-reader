@@ -6,8 +6,8 @@
   Each switch stops the old source and emits `{:type :reset}`, so the hub
   drops the old source's data, then reports the new source with `:status` and
   `:info` events. Info has the same shape for every source:
-  `{:source :adapter {...} :vehicle {...} :recording {...}}`, with only the
-  keys that source knows."
+  `{:source :adapter {...} :vehicle {...} :trouble-codes {...} :recording {...}}`,
+  with only the keys that source knows."
   (:require [tactrix-reader.device :as device]))
 
 (defn- adapter-description [path]
@@ -16,8 +16,8 @@
         (assoc :path path))))
 
 (defn- start-live!
-  "Checks vehicle power, reads the vehicle's identity, and starts polling.
-  Returns the live source, or nil when it was not started."
+  "Checks vehicle power, reads the vehicle's identity and trouble codes, and
+  starts polling. Returns the live source, or nil when it was not started."
   [emit path]
   (let [status #(emit (merge {:type :status :source :live :path path} %))]
     (if-not (seq path)
@@ -42,7 +42,9 @@
 
           :else
           (do (status {:state :identifying})
-              (emit (assoc info :vehicle (dissoc (device/read-vehicle-info path) :ok? :error :path)))
+              (emit (assoc info
+                           :vehicle (dissoc (device/read-vehicle-info path) :ok? :error :path)
+                           :trouble-codes (dissoc (device/read-trouble-codes path) :ok? :error :path)))
               (device/start-live-source! path {:emit emit})))))))
 
 (defn- start-replay! [emit recording]

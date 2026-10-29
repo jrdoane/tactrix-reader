@@ -63,7 +63,8 @@ adapter --serial--> device.clj source --emit--> hub (core.async) --SSE/Transit--
    between replay, a live adapter, and no source, one switch at a time. Each
    switch stops the old source, emits `{:type :reset}`, and emits a
    `{:type :info ...}` event (adapter, vehicle identity from
-   `read-vehicle-info`, or recording metadata) before starting the new one.
+   `read-vehicle-info` and trouble codes from `read-trouble-codes`, or
+   recording metadata) before starting the new one.
 3. **Hub** (`engine_server/hub.clj`): batches samples and signals every
    100 ms, keeping only the latest per PID and per signal. It forwards status and info immediately and keeps
    a snapshot for new connections; `:reset` clears it and sends an empty
@@ -92,7 +93,7 @@ A single large namespace, layered roughly top to bottom:
 - **Protocol discovery helpers:** `serial-exchange`, `run-probe`, `observe-device`. They write only the bytes they are given.
 - **OpenPort command layer:** `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events. `openport-operations` maps J2534 operations (such as `:pass-thru-connect`) to their confirmed command prefixes (such as `"ato"`), and `known-operation?` and `unsupported-operation` read it. There is no general J2534 API yet.
 - **Two ways of talking to the ECU:**
-  - `obd-request` (and `read-pid`, `read-all-pids`, and `read-vehicle-info` on top of it) opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly.
+  - `obd-request` (and `read-pid`, `read-all-pids`, `read-vehicle-info`, and `read-trouble-codes` on top of it) opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly.
   - `ssm-init` (ECU ID, SSM `AA`) and `ssm-read` (memory reads, SSM `A8`) use the same ISO15765 path, sharing `iso15765-request` with `obd-request`. The project's 2015 Impreza (calibration ID `EA1T002C`) does not answer SSM over CAN; see `lib/device/docs/subaru-ssm.md`.
   - `run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
 - **Broadcast decoding:** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.

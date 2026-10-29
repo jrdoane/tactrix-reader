@@ -36,16 +36,17 @@ path use the first detected adapter when it is left out.
 | `observe [path]` | Passively read bytes from the device | No |
 | `exchange <hex> [path]` | Write the given bytes and capture the reply | No, if no vehicle is connected |
 | `probe <name> <hex> [path]` | Like `exchange`, recorded as a named transcript | No, if no vehicle is connected |
-| `obd <hex> [path]` | Send one read-only OBD-II request; decodes mode 01 and 09 replies | Yes |
+| `obd <hex> [path]` | Send one read-only OBD-II request; decodes mode 01, mode 09, and trouble code replies | Yes |
 | `pid <name-or-hex> [path]` | Read and decode one mode 01 PID | Yes |
 | `pids [path]` | Read every decodable PID the vehicle supports | Yes |
 | `vehicle-info [path]` | Read the VIN, calibration IDs and verification numbers, ECU name, and SSM ECU ID | Yes |
+| `trouble-codes [path]` | Read stored, pending, and permanent trouble codes; never clears them | Yes |
 | `ssm-init [path]` | Read the ECU ID with Subaru SSM | Yes |
 | `ssm-read <addresses> [path]` | Read one byte at each comma-separated hex ECU address with Subaru SSM | Yes |
 | `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
 | `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
 
-`obd`, `pid`, `pids`, and `vehicle-info` are covered in
+`obd`, `pid`, `pids`, `vehicle-info`, and `trouble-codes` are covered in
 [OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init` and
 `ssm-read` in [Subaru SSM reads](docs/subaru-ssm.md); `record` and `export-recording` in
 [Recordings](docs/recordings.md).
@@ -161,6 +162,7 @@ The main entry points in `tactrix-reader.device`:
 | `obd-request` | One read-only OBD-II request over ISO15765 |
 | `read-pid`, `read-all-pids`, `decode-mode-01` | Mode 01 PID reads and decoding |
 | `read-vehicle-info`, `decode-mode-09` | VIN, calibration IDs and verification numbers, ECU name, and ECU ID; mode 09 decoding, including supported info types and in-use monitor counters |
+| `read-trouble-codes`, `decode-dtc-reply` | Stored, pending, and permanent trouble codes (services 03, 07, 0A) |
 | `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
 | `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
 | `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |

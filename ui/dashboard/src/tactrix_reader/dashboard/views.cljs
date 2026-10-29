@@ -313,12 +313,23 @@
      (field "ECU name" ecu-name (when live? (unread-reason (:ecu-name errors))))
      (field "ECU ID (SSM)" ecu-id (when live? (unread-reason (:ecu-id errors))))]))
 
+(defn- code-list [codes]
+  (when codes
+    (if (seq codes) (str/join ", " codes) "None")))
+
 (defn- diagnostics-panel []
   (let [{:keys [mil-on? dtc-count monitors]} (:value @(rf/subscribe [::subs/sample :monitor-status]))
+        {:keys [source trouble-codes]} @(rf/subscribe [::subs/info])
+        {:keys [stored pending permanent errors]} trouble-codes
+        live? (= :live source)
         incomplete (keep (fn [[monitor state]] (when (= :incomplete state) (name monitor))) monitors)]
     [panel "Diagnostics"
      (field "Check engine" (when (some? mil-on?) (if mil-on? "On" "Off")))
-     (field "Stored codes" dtc-count)
+     ;; The count updates while polling; the codes are read on connect.
+     (field "Code count" dtc-count)
+     (field "Stored codes" (code-list stored) (when live? (unread-reason (:stored errors))))
+     (field "Pending codes" (code-list pending) (when live? (unread-reason (:pending errors))))
+     (field "Permanent codes" (code-list permanent) (when live? (unread-reason (:permanent errors))))
      (field "Monitors" (when (seq monitors)
                          (str (- (count monitors) (count incomplete)) " of " (count monitors) " complete")))
      (field "Incomplete" (when (seq incomplete)

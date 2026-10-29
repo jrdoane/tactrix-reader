@@ -335,6 +335,7 @@
                  :read-pid
                  :read-all-pids
                  :read-vehicle-info
+                 :read-trouble-codes
                  :ssm-init
                  :ssm-read
                  :can-session
@@ -349,6 +350,7 @@
                               :read-pid
                               :read-all-pids
                               :read-vehicle-info
+                              :read-trouble-codes
                               :ssm-init
                               :ssm-read
                               :record
@@ -1413,6 +1415,24 @@
          :error :unknown-info-type
          :raw items}))))
 
+(defn- combine-reads
+  "Combines `results`, `[item result]` pairs in request order, into a map of
+  each item's `:value`, nil for an item that failed, with its error under
+  `:errors`. `:ok?` is true when at least one item was read; when none was,
+  `:error` is the first item's."
+  [path results]
+  (let [errors (into {}
+                     (for [[item result] results
+                           :when (not (:ok? result))]
+                       [item (select-keys result [:error :nrc])]))]
+    (merge {:ok? (boolean (some (comp :ok? second) results))
+            :path path
+            :errors errors}
+           (when (= (count errors) (count results))
+             {:error (get-in errors [(ffirst results) :error])})
+           (into {} (for [[item result] results]
+                      [item (when (:ok? result) (:value result))])))))
+
 (def ^:private vehicle-info-requests
   [[:vin "0902"]
    [:calibration-ids "0904"]
@@ -1436,24 +1456,85 @@
      (if-not (seq path)
        {:ok? false
         :error :missing-path}
-       (let [results (into {}
-                           (for [[item request-hex] vehicle-info-requests]
-                             (let [result (obd-request path request-hex opts)
-                                   decoded (when (:ok? result)
-                                             (decode-mode-09 (get-in result [:response :bytes])))]
-                               [item (if (:ok? result) decoded result)])))
-             ecu-id (ssm-init path opts)
-             results (assoc results :ecu-id (assoc ecu-id :value (:ecu-id ecu-id)))
-             errors (into {}
-                          (for [[item result] results
-                                :when (not (:ok? result))]
-                            [item (select-keys result [:error :nrc])]))]
-         (merge {:ok? (boolean (some :ok? (vals results)))
-                 :path path
-                 :errors errors}
-                (when (= (count errors) (count results))
-                  {:error (get-in errors [:vin :error])})
-                (update-vals results #(when (:ok? %) (:value %)))))))))
+       (let [results (vec (for [[item request-hex] vehicle-info-requests]
+                            (let [result (obd-request path request-hex opts)]
+                              [item (if (:ok? result)
+                                      (decode-mode-09 (get-in result [:response :bytes]))
+                                      result)])))
+             ecu-id (ssm-init path opts)]
+         (combine-reads path (conj results [:ecu-id (assoc ecu-id :value (:ecu-id ecu-id))])))))))
+
+(def ^:private dtc-systems
+  "A trouble code's first letter, from the top two bits of its first byte:
+  powertrain, chassis, body, or network."
+  ["P" "C" "B" "U"])
+
+(defn- dtc
+  "Decodes a 2-byte trouble code, such as `[0x01 0x33]`, into its SAE J2012
+  form, such as `\"P0133\"`."
+  [[a b]]
+  (str (nth dtc-systems (bit-shift-right a 6))
+       (bit-and (bit-shift-right a 4) 0x03)
+       (format "%X%02X" (bit-and a 0x0F) b)))
+
+(def ^:private dtc-replies
+  "The trouble code lists, by the first byte of the reply to the service that
+  reads them."
+  {0x43 :stored-trouble-codes
+   0x47 :pending-trouble-codes
+   0x4A :permanent-trouble-codes})
+
+(defn decode-dtc-reply
+  "Decodes a positive reply to service 03 (stored), 07 (pending), or 0A
+  (permanent trouble codes), such as `[0x43 0x01 0x01 0x33]`, into a list of
+  codes such as `[\"P0133\"]`. On CAN, the byte after the service is the
+  number of codes."
+  [data]
+  (let [[service code-count & code-bytes] data
+        reply-name (get dtc-replies service)]
+    (cond
+      (nil? reply-name)
+      {:ok? false
+       :error :not-dtc-reply}
+
+      (nil? code-count)
+      {:ok? false
+       :name reply-name
+       :error :short-reply}
+
+      :else
+      {:ok? true
+       :name reply-name
+       :value (mapv dtc (take code-count (partition 2 code-bytes)))})))
+
+(def ^:private trouble-code-requests
+  [[:stored "03"]
+   [:pending "07"]
+   [:permanent "0A"]])
+
+(defn read-trouble-codes
+  "Reads the engine ECU's stored (service 03), pending (07), and permanent
+  (0A) trouble codes, each a list such as `[\"P0133\"]`. It only reads them:
+  clearing codes (service 04) is never sent.
+
+  Each list the ECU does not answer is nil, with its error under `:errors`.
+  `:ok?` is true when at least one list was read. Takes the same options as
+  `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (read-trouble-codes device-or-path {}))
+  ([device-or-path opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)]
+     (if-not (seq path)
+       {:ok? false
+        :error :missing-path}
+       (combine-reads path
+                      (vec (for [[item request-hex] trouble-code-requests]
+                             (let [result (obd-request path request-hex opts)]
+                               [item (if (:ok? result)
+                                       (decode-dtc-reply (get-in result [:response :bytes]))
+                                       result)]))))))))
 
 (def can-channel
   "The adapter uses J2534 protocol IDs as channel IDs; 5 is raw CAN."

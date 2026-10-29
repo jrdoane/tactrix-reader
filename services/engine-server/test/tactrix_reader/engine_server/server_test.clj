@@ -158,6 +158,13 @@
                                             :ecu-id nil
                                             :errors {:ecu-name {:error :negative-response :nrc 0x12}
                                                      :ecu-id {:error :timeout}}})
+                device/read-trouble-codes (fn [path]
+                                            {:ok? true
+                                             :path path
+                                             :stored ["P0133"]
+                                             :pending []
+                                             :permanent nil
+                                             :errors {:permanent {:error :timeout}}})
                 device/start-live-source! fake-live-source]
     (let [port (free-port)
           system (main/start-system {:source {:type :replay :recording (recording-dir)}
@@ -203,7 +210,11 @@
                             :ecu-name nil
                             :ecu-id nil
                             :errors {:ecu-name {:error :negative-response :nrc 0x12}
-                                     :ecu-id {:error :timeout}}}}
+                                     :ecu-id {:error :timeout}}}
+                  :trouble-codes {:stored ["P0133"]
+                                  :pending []
+                                  :permanent nil
+                                  :errors {:permanent {:error :timeout}}}}
                  (event-where after-switch "info" (constantly true))))
           (is (= [:connecting :identifying :running]
                  (map :state (filter (comp #{:live} :source) (keep #(when (= "status" (:event %)) (:data %)) after-switch))))))

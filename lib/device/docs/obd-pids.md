@@ -28,9 +28,10 @@ clojure -M:run obd 0906 /dev/cu.usbmodemTAlgJ3P81    # calibration verification 
            :value ["9EB33551"]}}
 ```
 
-Mode 01 and mode 09 replies also get `:decoded`, from `decode-mode-01` (see
-[Decoded PIDs](#decoded-pids)) or `decode-mode-09` (see
-[Mode 09 info types](#mode-09-info-types)). Other replies are left raw.
+Mode 01, mode 09, and trouble code replies also get `:decoded`, from
+`decode-mode-01` (see [Decoded PIDs](#decoded-pids)), `decode-mode-09` (see
+[Mode 09 info types](#mode-09-info-types)), or `decode-dtc-reply` (see
+[Trouble codes](#trouble-codes-trouble-codes)). Other replies are left raw.
 
 Only read-only services are sent: 01, 02, 03, 05, 06, 07, 09, and 0A.
 Service 04 (clear DTCs) and 08 (control on-board systems) return
@@ -138,6 +139,43 @@ the 1-second timeout, so expect a few seconds when items are missing.
 The calibration verification number (CVN) is a checksum the ECU computes over
 its calibration. It changes when the ECU is reflashed, so a different CVN
 with the same calibration ID means the calibration was modified.
+
+## Trouble codes: `trouble-codes`
+
+`trouble-codes` reads the engine ECU's trouble codes. The engine server
+runs it when the dashboard connects to an adapter, after `vehicle-info`.
+
+```sh
+clojure -M:run trouble-codes
+```
+
+It sends these requests one at a time:
+
+| Request | Item | Codes |
+|---|---|---|
+| `03` | `:stored` | Confirmed codes, the ones that can turn on the check-engine light |
+| `07` | `:pending` | Faults seen once that aren't confirmed yet |
+| `0A` | `:permanent` | Codes that clearing doesn't erase; only the ECU removes them, once the monitor passes |
+
+```clojure
+{:ok? true
+ :path "/dev/cu.usbmodemTAlgJ3P81"
+ :stored ["P0133"]
+ :pending []
+ :permanent []
+ :errors {}}
+```
+
+Each reply is the service byte plus `0x40`, a count of codes, and two bytes
+per code; `decode-dtc-reply` turns them into SAE J2012 codes such as
+`P0133`. As with `vehicle-info`, a list the ECU does not answer is nil, with
+its error under `:errors`, and `:ok?` is false only when nothing answered.
+
+It only reads codes. Clearing them is service 04, which `obd-request`
+refuses to send.
+
+PID `01`'s code count, which the live source polls, shows when the stored
+codes change after connecting; reconnect to read them again.
 
 ## Mode 09 info types
 

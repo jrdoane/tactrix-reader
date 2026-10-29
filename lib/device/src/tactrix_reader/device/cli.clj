@@ -28,6 +28,8 @@
            "clojure -M:run pids /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run vehicle-info"
            "clojure -M:run vehicle-info /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run trouble-codes"
+           "clojure -M:run trouble-codes /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run ssm-init"
            "clojure -M:run ssm-init /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run ssm-read 000022"
@@ -44,10 +46,11 @@
               :observe "Passively read bytes from the device for protocol discovery."
               :exchange "Write explicit hex bytes to a disconnected adapter and capture response bytes."
               :probe "Run one named adapter-local probe and return a transcript."
-              :obd "Send one read-only OBD-II request over ISO15765 and decode mode 01 and 09 replies. Sends vehicle bus traffic."
+              :obd "Send one read-only OBD-II request over ISO15765 and decode mode 01, 09, and trouble code replies. Sends vehicle bus traffic."
               :pid "Read and decode one mode 01 PID by name or hex number. Sends vehicle bus traffic."
               :pids "Read every decodable PID the vehicle supports. Sends vehicle bus traffic."
               :vehicle-info "Read the VIN, calibration IDs and verification numbers, ECU name, and SSM ECU ID. Sends vehicle bus traffic."
+              :trouble-codes "Read stored, pending, and permanent trouble codes. Never clears them. Sends vehicle bus traffic."
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
@@ -108,6 +111,7 @@
               decoded (case (first reply)
                         0x41 (device/decode-mode-01 reply)
                         0x49 (device/decode-mode-09 reply)
+                        (0x43 0x47 0x4A) (device/decode-dtc-reply reply)
                         nil)]
           (print-edn (cond-> result
                        decoded (assoc :decoded decoded))))
@@ -121,6 +125,9 @@
 
         "vehicle-info"
         (print-edn (device/read-vehicle-info (or arg (first-detected-path))))
+
+        "trouble-codes"
+        (print-edn (device/read-trouble-codes (or arg (first-detected-path))))
 
         "ssm-init"
         (print-edn (device/ssm-init (or arg (first-detected-path))))

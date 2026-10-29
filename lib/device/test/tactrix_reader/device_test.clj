@@ -123,6 +123,7 @@
                           :read-pid
                           :read-all-pids
                           :read-vehicle-info
+                          :read-trouble-codes
                           :ssm-init
                           :ssm-read
                           :can-session
@@ -137,6 +138,7 @@
                                        :read-pid
                                        :read-all-pids
                                        :read-vehicle-info
+                                       :read-trouble-codes
                                        :ssm-init
                                        :ssm-read
                                        :record
@@ -703,6 +705,39 @@
                        :ecu-id {:error :timeout}}}
              (device/read-vehicle-info "/dev/cu.usbmodemTAlgJ3P81")))
       (is (= ["0902" "0904" "0906" "090A" "AA"] @requested)))))
+
+(deftest decodes-trouble-code-replies
+  (is (= {:ok? true :name :stored-trouble-codes :value ["P0133" "P0420"]}
+         (device/decode-dtc-reply [0x43 0x02 0x01 0x33 0x04 0x20])))
+  (is (= {:ok? true :name :pending-trouble-codes :value ["C0035" "B1A2F" "U0100"]}
+         (device/decode-dtc-reply [0x47 0x03 0x40 0x35 0x9A 0x2F 0xC1 0x00])))
+  (testing "the project's Impreza, with no codes"
+    (is (= {:ok? true :name :permanent-trouble-codes :value []}
+           (device/decode-dtc-reply [0x4A 0x00]))))
+  (is (= :short-reply (:error (device/decode-dtc-reply [0x43]))))
+  (is (= :not-dtc-reply (:error (device/decode-dtc-reply [0x41 0x0C 0x0C 0x80])))))
+
+(deftest read-trouble-codes-reads-each-list-and-never-clears
+  (let [requested (atom [])
+        replies {"03" {:ok? true :response {:bytes [0x43 0x01 0x01 0x33]}}
+                 "07" {:ok? true :response {:bytes [0x47 0x00]}}
+                 "0A" {:ok? false :error :negative-response :nrc 0x11}}]
+    (with-redefs [device/obd-request (fn [_path request-hex _opts]
+                                       (swap! requested conj request-hex)
+                                       (get replies request-hex))]
+      (is (= {:ok? true
+              :path "/dev/cu.usbmodemTAlgJ3P81"
+              :stored ["P0133"]
+              :pending []
+              :permanent nil
+              :errors {:permanent {:error :negative-response :nrc 0x11}}}
+             (device/read-trouble-codes "/dev/cu.usbmodemTAlgJ3P81")))
+      (is (= ["03" "07" "0A"] @requested))))
+  (with-redefs [device/obd-request (fn [& _] {:ok? false :error :timeout})]
+    (is (= {:ok? false :error :timeout}
+           (select-keys (device/read-trouble-codes "/dev/cu.usbmodemTAlgJ3P81") [:ok? :error]))))
+  (is (= {:ok? false :error :missing-path}
+         (device/read-trouble-codes nil))))
 
 (deftest read-vehicle-info-reports-when-nothing-answers
   (with-redefs [device/obd-request (fn [& _] {:ok? false :error :not-found-or-permission-denied})
