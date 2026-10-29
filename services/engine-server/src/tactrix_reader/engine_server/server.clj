@@ -10,7 +10,7 @@
             [io.pedestal.http.jetty :as jetty]
             [io.pedestal.http.sse :as sse]
             [io.pedestal.service.resources :as resources]
-            [tactrix-reader.device :as device]
+            [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.hub :as hub]
             [tactrix-reader.engine-server.sources :as sources]))
 
@@ -95,7 +95,7 @@
 
 (defn- adapters-handler [_request]
   (transit-response 200 {:adapters (mapv #(select-keys % [:vendor :product :serial :path :paths])
-                                         (device/scan-devices))}))
+                                         (usb/scan-devices))}))
 
 (defn- requested-source
   "Turns a request body into a source for `sources/switch!`, or an error. Only
@@ -107,7 +107,7 @@
     (= :replay type) {:type :replay}
     (= :none type) {:type :none}
     (not= :live type) {:error :unknown-source-type}
-    (some #{path} (mapcat :paths (device/scan-devices))) {:type :live :path path}
+    (some #{path} (mapcat :paths (usb/scan-devices))) {:type :live :path path}
     :else {:error :unknown-adapter}))
 
 (defn- source-handler [manager]

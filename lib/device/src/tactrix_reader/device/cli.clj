@@ -1,7 +1,14 @@
 (ns tactrix-reader.device.cli
   (:require [clojure.pprint :as pprint]
             [clojure.string :as str]
-            [tactrix-reader.device :as device]))
+            [tactrix-reader.device.adapter :as adapter]
+            [tactrix-reader.device.obd :as obd]
+            [tactrix-reader.device.pids :as pids]
+            [tactrix-reader.device.probe :as probe]
+            [tactrix-reader.device.recording :as recording]
+            [tactrix-reader.device.serial :as serial]
+            [tactrix-reader.device.ssm :as ssm]
+            [tactrix-reader.device.usb :as usb]))
 
 (defn- print-edn [value]
   (binding [*print-namespace-maps* false]
@@ -72,70 +79,70 @@
           (str/split s #","))))
 
 (defn- first-detected-path []
-  (some :path (device/scan-devices)))
+  (some :path (usb/scan-devices)))
 
 (defn -main [& args]
   (try
     (let [[command arg] args]
       (case (or command "scan")
         "scan"
-        (print-edn {:devices (device/scan-devices)})
+        (print-edn {:devices (usb/scan-devices)})
 
         "open"
-        (print-edn (device/open-device! (or arg (first-detected-path))))
+        (print-edn (usb/open-device! (or arg (first-detected-path))))
 
         "status"
-        (print-edn (device/vehicle-status (or arg (first (device/scan-devices)))))
+        (print-edn (adapter/vehicle-status (or arg (first (usb/scan-devices)))))
 
         "direct-info"
-        (print-edn (device/direct-backend-info))
+        (print-edn (adapter/direct-backend-info))
 
         "vbat"
-        (print-edn (device/read-vbat (or arg (first (device/scan-devices)))))
+        (print-edn (adapter/read-vbat (or arg (first (usb/scan-devices)))))
 
         "observe"
-        (print-edn (device/observe-device (or arg (first-detected-path))))
+        (print-edn (serial/observe-device (or arg (first-detected-path))))
 
         "exchange"
         (let [[request-hex path] (rest args)]
-          (print-edn (device/serial-exchange (or path (first-detected-path)) request-hex)))
+          (print-edn (serial/serial-exchange (or path (first-detected-path)) request-hex)))
 
         "probe"
         (let [[probe-name request-hex path] (rest args)]
-          (print-edn (device/run-probe (or path (first-detected-path)) probe-name request-hex)))
+          (print-edn (probe/run-probe (or path (first-detected-path)) probe-name request-hex)))
 
         "obd"
         (let [[request-hex path] (rest args)
-              result (device/obd-request (or path (first-detected-path)) request-hex)
+              result (obd/obd-request (or path (first-detected-path)) request-hex)
               reply (get-in result [:response :bytes])
               decoded (case (first reply)
-                        0x41 (device/decode-mode-01 reply)
-                        0x49 (device/decode-mode-09 reply)
-                        (0x43 0x47 0x4A) (device/decode-dtc-reply reply)
+                        0x41 (pids/decode-mode-01 reply)
+                        0x49 (obd/decode-mode-09 reply)
+                        (0x43 0x47 0x4A) (obd/decode-dtc-reply reply)
                         nil)]
           (print-edn (cond-> result
                        decoded (assoc :decoded decoded))))
 
         "pid"
         (let [[pid path] (rest args)]
-          (print-edn (device/read-pid (or path (first-detected-path)) (parse-pid pid))))
+          (print-edn (obd/read-pid (or path (first-detected-path)) (parse-pid pid))))
 
         "pids"
-        (print-edn (device/read-all-pids (or arg (first-detected-path))))
+        (print-edn (obd/read-all-pids (or arg (first-detected-path))))
 
         "vehicle-info"
-        (print-edn (device/read-vehicle-info (or arg (first-detected-path))))
+        (print-edn (obd/read-vehicle-info (or arg (first-detected-path))))
 
         "trouble-codes"
-        (print-edn (device/read-trouble-codes (or arg (first-detected-path))))
+        (print-edn (obd/read-trouble-codes (or arg (first-detected-path))))
 
         "ssm-init"
-        (print-edn (device/ssm-init (or arg (first-detected-path))))
+        (print-edn (ssm/ssm-init (or arg (first-detected-path))))
 
         "ssm-read"
         (let [[addresses path] (rest args)]
-          (print-edn (device/ssm-read (or path (first-detected-path))
-                                      (parse-ssm-addresses addresses))))
+          (print-edn (ssm/ssm-read (or path (first-detected-path))
+                                   (parse-ssm-addresses addresses))))
 
         "record"
         (let [[out-dir seconds path] (rest args)
@@ -152,16 +159,16 @@
               (println (str "Recording to " out-dir
                             (if seconds (str " for " seconds " seconds") "")
                             ". Press Ctrl-C to stop.")))
-            (print-edn (device/record (or path (first-detected-path))
-                                      out-dir
-                                      {:duration-ms (some-> seconds Long/parseLong (* 1000))
-                                       :stop stop}))
+            (print-edn (recording/record (or path (first-detected-path))
+                                         out-dir
+                                         {:duration-ms (some-> seconds Long/parseLong (* 1000))
+                                          :stop stop}))
             (flush)
             (finally
               (deliver done true))))
 
         "export-recording"
-        (print-edn (device/export-recording arg))
+        (print-edn (recording/export-recording arg))
 
         (print-edn (assoc (usage)
                           :error :unknown-command

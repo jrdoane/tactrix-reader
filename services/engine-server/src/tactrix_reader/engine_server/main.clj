@@ -1,7 +1,7 @@
 (ns tactrix-reader.engine-server.main
   "Starts the engine dashboard server with a live or replay source."
   (:require [io.pedestal.connector :as connector]
-            [tactrix-reader.device :as device]
+            [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.hub :as hub]
             [tactrix-reader.engine-server.server :as server]
             [tactrix-reader.engine-server.sources :as sources]))
@@ -30,7 +30,7 @@
 
 (defn- parse-source [[mode arg]]
   (case mode
-    "live" {:type :live :path (or arg (some :path (device/scan-devices)))}
+    "live" {:type :live :path (or arg (some :path (usb/scan-devices)))}
     {:type :replay :recording (or arg default-recording)}))
 
 (defn -main

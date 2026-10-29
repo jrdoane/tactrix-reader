@@ -30,7 +30,7 @@ the serial port. Filter IDs count up across channels.
 | `atk<chan> <filter-id>` | `aro` | PassThruStopMsgFilter | `:pass-thru-stop-msg-filter` |
 | any | `are <code>` | Error | |
 
-The Operation column is the key in `openport-operations` in `device.clj`,
+The Operation column is the key in `openport-operations` in `openport.clj`,
 which maps each J2534 operation to its confirmed command prefix.
 `known-operation?` and `unsupported-operation` read it. Commands whose meaning
 is only likely, such as `ata` and `atz`, and the ones under

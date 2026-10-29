@@ -36,13 +36,16 @@ use an inline alias instead):
 
 ```sh
 clojure -Sdeps '{:aliases {:t {:extra-paths ["test"]}}}' -M:t \
-  -e "(require 'clojure.test 'tactrix-reader.device-test) (clojure.test/run-test-var #'tactrix-reader.device-test/parses-hex-request-bytes)"
+  -e "(require 'clojure.test 'tactrix-reader.device.codec-test) (clojure.test/run-test-var #'tactrix-reader.device.codec-test/parses-hex-request-bytes)"
 ```
 
 There is no linter or formatter configured. Tests use no hardware: they stub
-serial I/O with `with-redefs` and fakes in `device_test.clj` such as
+serial I/O with `with-redefs` and fakes in `device/test_support.clj` such as
 `fake-adapter` (an in-memory adapter that answers each `at...` command) and
-`fake-vehicle-responder` (canned ECU replies for it).
+`fake-vehicle-responder` (canned ECU replies for it). Each device namespace
+has a matching `<name>_test.clj`; add new test namespaces to
+`device_test_runner.clj`. Redefine a var in the namespace that defines it,
+such as `openport/open-session` or `serial/serial-exchange`.
 Running the CLI or server against a device needs a real adapter, and vehicle
 commands need a vehicle with the ignition on.
 
@@ -51,10 +54,10 @@ commands need a vehicle with the ignition on.
 ### Data flow
 
 ```
-adapter --serial--> device.clj source --emit--> hub (core.async) --SSE/Transit--> re-frame db
+adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re-frame db
 ```
 
-1. **Sources** (`start-live-source!`, `start-replay-source!` in `device.clj`)
+1. **Sources** (`start-live-source!`, `start-replay-source!` in `device/source.clj`)
    call `:emit` with identical events: `{:type :sample :pid :name :value :unit :timestamp-us}`,
    `{:type :signal :signal :value :unit :can-id :timestamp-us}` for inferred CAN
    signals, and `{:type :status :source ... :state :running|:stopped|:failed}`.
@@ -85,23 +88,27 @@ The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The
 server serves it from there.
 
-### `lib/device/src/tactrix_reader/device.clj`
+### `lib/device/src/tactrix_reader/device/`
 
-A single large namespace, layered roughly top to bottom:
+Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
 
-- **Discovery and adapter checks:** `scan-devices` (via `ioreg`), `open-device!`, `read-vbat`, `vehicle-status`.
-- **Protocol discovery helpers:** `serial-exchange`, `run-probe`, `observe-device`. They write only the bytes they are given.
-- **OpenPort command layer:** `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events. `openport-operations` maps J2534 operations (such as `:pass-thru-connect`) to their confirmed command prefixes (such as `"ato"`), and `known-operation?` and `unsupported-operation` read it. There is no general J2534 API yet.
+- **`codec`:** hex parsing and formatting and big-endian integers, shared by the rest.
+- **`usb`:** `scan-devices` (via `ioreg`), `open-device!`.
+- **`serial`:** raw stream reads, plus the protocol discovery helpers `serial-exchange` and `observe-device`. They write only the bytes they are given.
+- **`adapter`:** adapter-local checks that send no bus traffic: `read-vbat`, `vehicle-status`, `direct-backend-info`.
+- **`openport`:** the OpenPort command layer. `parse-adapter-stream` splits the serial stream into ASCII reply lines (`aro`, `are <code>`, ...) and binary received messages (`ar<chan><len>...`). Sessions send `at...` commands and wait for typed events. `openport-operations` maps J2534 operations (such as `:pass-thru-connect`) to their confirmed command prefixes (such as `"ato"`), and `known-operation?` and `unsupported-operation` read it. There is no general J2534 API yet.
+- **`probe`:** `run-probe` wraps `serial-exchange` as a named discovery transcript.
+- **`pids`:** the `mode-01-pids` map (PID → name, byte count, unit, `:decode` fn) and `decode-mode-01`. Add a PID there and in the table in `lib/device/docs/obd-pids.md`.
 - **Two ways of talking to the ECU:**
-  - `obd-request` (and `read-pid`, `read-all-pids`, `read-vehicle-info`, and `read-trouble-codes` on top of it) opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly.
-  - `ssm-init` (ECU ID, SSM `AA`) and `ssm-read` (memory reads, SSM `A8`) use the same ISO15765 path, sharing `iso15765-request` with `obd-request`. The project's 2015 Impreza (calibration ID `EA1T002C`) does not answer SSM over CAN; see `lib/device/docs/subaru-ssm.md`.
-  - `run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
-- **Broadcast decoding:** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.
-- **Inferred signals:** `inferred-signals` holds signals identified only from how they behave (gear, steering angle, brake, wheel speeds, accelerations, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
-- **PID decoding:** the `mode-01-pids` map (PID → name, byte count, unit, `:decode` fn). Add a PID there and in the table in `lib/device/docs/obd-pids.md`.
-- **Recordings:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`, and `frames.csv` is gitignored.
+  - `iso15765/iso15765-request` opens an ISO15765 channel (6) for each request. The adapter handles flow control and multi-frame reassembly. `obd/obd-request` (and `read-pid`, `read-all-pids`, `read-vehicle-info`, and `read-trouble-codes` on top of it, also in `obd`) uses it.
+  - `ssm/ssm-init` (ECU ID, SSM `AA`) and `ssm/ssm-read` (memory reads, SSM `A8`) use the same ISO15765 path. `obd/read-vehicle-info` calls `ssm-init` for the ECU ID. The project's 2015 Impreza (calibration ID `EA1T002C`) does not answer SSM over CAN; see `lib/device/docs/subaru-ssm.md`.
+  - `can/run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it.
+- **Broadcast decoding (`broadcast`):** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.
+- **Inferred signals (`broadcast`):** `inferred-signals` holds signals identified only from how they behave (gear, steering angle, brake, wheel speeds, accelerations, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
+- **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`, and `frames.csv` is gitignored.
+- **`source`:** the live and replay sources, built on `can` and `recording`.
 
-The CLI (`device/cli.clj`) is a thin `case` over these functions. Its `usage`
+The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`
 map should stay in sync with the command table in `lib/device/README.md`.
 
 ### Conventions

@@ -51,7 +51,7 @@ clojure -M:run ssm-read FF6A04,FF6A05,FF6A06,FF6A07 /dev/cu.usbmodemTAlgJ3P81
 From Clojure, pass the addresses as integers:
 
 ```clojure
-(device/ssm-read path [0x000022])
+(ssm/ssm-read path [0x000022])
 ```
 
 It sends `A8 00` followed by each address to `7E0` and expects `E8` followed
@@ -104,7 +104,7 @@ For FBKC and FLKC:
    usually big-endian 32-bit floats in degrees:
 
 ```clojure
-(let [{:keys [values]} (device/ssm-read path (map #(+ address %) (range 4)))]
+(let [{:keys [values]} (ssm/ssm-read path (map #(+ address %) (range 4)))]
   (Float/intBitsToFloat
    (unchecked-int (reduce (fn [acc b] (+ (* acc 256) b)) 0 (map :value values)))))
 ```

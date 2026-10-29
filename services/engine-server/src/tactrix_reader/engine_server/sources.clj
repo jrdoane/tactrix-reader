@@ -8,10 +8,14 @@
   `:info` events. Info has the same shape for every source:
   `{:source :adapter {...} :vehicle {...} :trouble-codes {...} :recording {...}}`,
   with only the keys that source knows."
-  (:require [tactrix-reader.device :as device]))
+  (:require [tactrix-reader.device.adapter :as adapter]
+            [tactrix-reader.device.obd :as obd]
+            [tactrix-reader.device.recording :as recording]
+            [tactrix-reader.device.source :as source]
+            [tactrix-reader.device.usb :as usb]))
 
 (defn- adapter-description [path]
-  (let [adapter (some #(when (some #{path} (:paths %)) %) (device/scan-devices))]
+  (let [adapter (some #(when (some #{path} (:paths %)) %) (usb/scan-devices))]
     (-> (select-keys adapter [:vendor :product :serial])
         (assoc :path path))))
 
@@ -24,7 +28,7 @@
       (do (status {:state :failed :error :missing-path})
           nil)
       (let [_ (status {:state :connecting})
-            vbat (device/read-vbat path)
+            vbat (adapter/read-vbat path)
             info {:type :info
                   :source :live
                   :adapter (cond-> (adapter-description path)
@@ -43,12 +47,12 @@
           :else
           (do (status {:state :identifying})
               (emit (assoc info
-                           :vehicle (dissoc (device/read-vehicle-info path) :ok? :error :path)
-                           :trouble-codes (dissoc (device/read-trouble-codes path) :ok? :error :path)))
-              (device/start-live-source! path {:emit emit})))))))
+                           :vehicle (dissoc (obd/read-vehicle-info path) :ok? :error :path)
+                           :trouble-codes (dissoc (obd/read-trouble-codes path) :ok? :error :path)))
+              (source/start-live-source! path {:emit emit})))))))
 
 (defn- start-replay! [emit recording]
-  (let [{:keys [recorded-at duration-ms vehicle adapter]} (device/recording-meta recording)]
+  (let [{:keys [recorded-at duration-ms vehicle adapter]} (recording/recording-meta recording)]
     (emit {:type :info
            :source :replay
            :adapter (select-keys adapter [:product :firmware])
@@ -57,7 +61,7 @@
                        :recorded-at recorded-at
                        :duration-ms duration-ms
                        :state (:state vehicle)}})
-    (device/start-replay-source! recording {:emit emit})))
+    (source/start-replay-source! recording {:emit emit})))
 
 (defn- stop-current [{:keys [handle] :as state}]
   (when handle

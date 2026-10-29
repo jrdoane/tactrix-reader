@@ -153,22 +153,22 @@ arbitrary bytes can be adapter commands that transmit on the bus.
 
 ## Clojure API
 
-The main entry points in `tactrix-reader.device`:
+The main entry points, by namespace under `tactrix-reader.device`:
 
-| Function | Purpose |
-|---|---|
-| `scan-devices` | Detected adapters, as printed by `scan` |
-| `vehicle-status`, `read-vbat` | Adapter and vehicle power checks |
-| `obd-request` | One read-only OBD-II request over ISO15765 |
-| `read-pid`, `read-all-pids`, `decode-mode-01` | Mode 01 PID reads and decoding |
-| `read-vehicle-info`, `decode-mode-09` | VIN, calibration IDs and verification numbers, ECU name, and ECU ID; mode 09 decoding, including supported info types and in-use monitor counters |
-| `read-trouble-codes`, `decode-dtc-reply` | Stored, pending, and permanent trouble codes (services 03, 07, 0A) |
-| `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
-| `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
-| `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
-| `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
-| `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
-| `start-live-source!`, `start-replay-source!` | Data sources, below |
+| Namespace | Function | Purpose |
+|---|---|---|
+| `usb` | `scan-devices` | Detected adapters, as printed by `scan` |
+| `adapter` | `vehicle-status`, `read-vbat` | Adapter and vehicle power checks |
+| `obd` | `obd-request` | One read-only OBD-II request over ISO15765 |
+| `obd`, `pids` | `read-pid`, `read-all-pids`; `decode-mode-01` | Mode 01 PID reads and decoding |
+| `obd` | `read-vehicle-info`, `decode-mode-09` | VIN, calibration IDs and verification numbers, ECU name, and ECU ID; mode 09 decoding, including supported info types and in-use monitor counters |
+| `obd` | `read-trouble-codes`, `decode-dtc-reply` | Stored, pending, and permanent trouble codes (services 03, 07, 0A) |
+| `ssm` | `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
+| `recording` | `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
+| `broadcast` | `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
+| `broadcast` | `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
+| `openport` | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
+| `source` | `start-live-source!`, `start-replay-source!` | Data sources, below |
 
 Functions that take a device accept either a path string or a device map from
 `scan-devices`.
@@ -188,9 +188,11 @@ Each returns a map whose `:stop!` function stops the source and waits for it
 to finish.
 
 ```clojure
-(def source
-  (device/start-replay-source! "recordings/2026-10-24-idle" {:emit prn}))
-((:stop! source))
+(require '[tactrix-reader.device.source :as source])
+
+(def replay
+  (source/start-replay-source! "recordings/2026-10-24-idle" {:emit prn}))
+((:stop! replay))
 ```
 
 The live source keeps one adapter session open on the raw CAN channel and

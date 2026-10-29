@@ -3,7 +3,10 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [cognitect.transit :as transit]
-            [tactrix-reader.device :as device]
+            [tactrix-reader.device.adapter :as adapter]
+            [tactrix-reader.device.obd :as obd]
+            [tactrix-reader.device.source :as source]
+            [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.main :as main]
             [tactrix-reader.engine-server.server :as server]))
 
@@ -147,25 +150,25 @@
   (some #(when (and (= event-name (:event %)) (pred (:data %))) (:data %)) events))
 
 (deftest lists-adapters-and-switches-sources
-  (with-redefs [device/scan-devices (fn [] [fake-adapter])
-                device/read-vbat (fn [_] {:ok? true :volts 12.3 :state :present})
-                device/read-vehicle-info (fn [path]
-                                           {:ok? true
-                                            :path path
-                                            :vin "TESTVIN0123456789"
-                                            :calibration-ids ["EA1T002C"]
-                                            :ecu-name nil
-                                            :ecu-id nil
-                                            :errors {:ecu-name {:error :negative-response :nrc 0x12}
-                                                     :ecu-id {:error :timeout}}})
-                device/read-trouble-codes (fn [path]
-                                            {:ok? true
-                                             :path path
-                                             :stored ["P0133"]
-                                             :pending []
-                                             :permanent nil
-                                             :errors {:permanent {:error :timeout}}})
-                device/start-live-source! fake-live-source]
+  (with-redefs [usb/scan-devices (fn [] [fake-adapter])
+                adapter/read-vbat (fn [_] {:ok? true :volts 12.3 :state :present})
+                obd/read-vehicle-info (fn [path]
+                                        {:ok? true
+                                         :path path
+                                         :vin "TESTVIN0123456789"
+                                         :calibration-ids ["EA1T002C"]
+                                         :ecu-name nil
+                                         :ecu-id nil
+                                         :errors {:ecu-name {:error :negative-response :nrc 0x12}
+                                                  :ecu-id {:error :timeout}}})
+                obd/read-trouble-codes (fn [path]
+                                         {:ok? true
+                                          :path path
+                                          :stored ["P0133"]
+                                          :pending []
+                                          :permanent nil
+                                          :errors {:permanent {:error :timeout}}})
+                source/start-live-source! fake-live-source]
     (let [port (free-port)
           system (main/start-system {:source {:type :replay :recording (recording-dir)}
                                      :port port})
