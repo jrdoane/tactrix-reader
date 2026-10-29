@@ -165,9 +165,10 @@ There are two leads, both UDS (ISO 14229) services rather than SSM:
   is not built. It would need its own allowlist, with UDS `3D`
   (WriteMemoryByAddress) never sent.
 
-For either, whether this ECU supports it, whether it needs a diagnostic
-session or security access first, and which identifiers or addresses hold
-FBKC and FLKC are all unknown.
+The ECU answers service `22` in its default session, but the identifiers
+that hold FBKC and FLKC, if any do, are unknown. For service `23`, whether
+the ECU supports it, whether it needs a diagnostic session or security access
+first, and which addresses to read are all unknown.
 
 ## Trying UDS service 22
 
@@ -206,7 +207,66 @@ DIDs to try first (2026-10-29): `1155` (FBKC), `1156` (FLKC), `1157` (IAM),
 and `0030` (knock sensor). These come from a Google AI overview that mixed up
 SSM and service `22`, gave the SSM `000022` formula `(A - 128) / 2` for all
 of them, and cited sources that do not contain them. Treat them as unverified
-guesses. Not yet tried on the car.
+guesses.
+
+**Result on this project's 2015 Impreza.** Observed on 2026-10-29, engine
+running (14.3V). All four DIDs got `7F 22 31` (request out of range) from
+`7E8`, each within about 40 ms. Unlike SSM `AA`, the ECU answers service `22`
+in its default session, with no session change or security access, but none
+of these four DIDs exist on it.
+
+The standard UDS DID `F190` (VIN) returned `62 F1 90` and the 17-character
+VIN in ASCII, as a multi-frame reply the adapter reassembled. So the ECU
+implements at least the standard ISO 14229 identifiers, and positive replies
+work end to end.
+
+## Scanning for DIDs: `uds-scan`
+
+`uds-scan` reads every DID in a range, one request each, and reports the
+ones that are not out of range. Both ends are required, in hex and
+inclusive, so a scan is always bounded:
+
+```sh
+clojure -M:run uds-scan 1000 10FF
+```
+
+It prints each DID found, and a line every 256 DIDs, to stderr as it goes,
+then the result as EDN: `:found` (data, or the error for anything other than
+out of range), `:out-of-range` (a count), and `:scanned`. Each request takes
+about 40 ms, so 256 DIDs take about 10 seconds and the full `0000`-`FFFF`
+range about 45 minutes. It stops early with `:error :no-reply` once three
+requests in a row get no reply, such as when the ignition is turned off.
+
+**`1000`-`10FF` on this project's 2015 Impreza.** Observed on 2026-10-29,
+engine running (14.2V), one snapshot. 55 DIDs returned data and the other 201
+were out of range; no other negative responses. What each one means is not
+yet known. Single bytes at `80` (`10A5`, `10BA`, `10BE`) would read as 0 with
+the `(x - 128) / 2` knock correction formula, and the matching pairs
+(`10B4`/`10B5`, `10B8`/`10B9`, `10EC`/`10ED`, `10EE`/`10EF`, `10F0`/`10F1`)
+could be per-bank values on the boxer engine, but both are inferences from
+one snapshot.
+
+```
+1000 FF C0 00 0D           1001 04 00                 1002 00 32
+1003 00 0A                 1004 00 0A                 1005 03 FE
+1006 00 1E                 1007 04 00                 1008 00 05
+1009 00 05                 100A 00 FF                 101D 00
+101E 6E 98 00 00 0A 6A     1020 50 00 00 19           1022 00
+1024 00 00 00              103C 00 08                 103D 00 2A
+1040 00 00 00 01           1060 A0 00 00 01           1061 00 00 00 00 00
+1063 00 00 00 00 00        1080 01 80 00 01           1088 00
+1089 FF                    10A0 AC 04 DF D5           10A1 37
+10A3 09                    10A5 80                    10A6 00
+10AE 00                    10B1 00                    10B2 42
+10B4 32                    10B5 32                    10B6 91
+10B7 8D                    10B8 16                    10B9 16
+10BA 80                    10BC 32                    10BE 80
+10C0 80 00 00 07           10C1 40                    10DE 72
+10DF 43                    10E0 28 1F 80 01           10E3 00
+10E5 FF FF                 10EC 32                    10ED 32
+10EE 73                    10EF 73                    10F0 11
+10F1 11
+```
 
 ## Safety
 

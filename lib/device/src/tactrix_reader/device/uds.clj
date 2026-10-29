@@ -77,3 +77,71 @@
            :else
            (assoc result :data {:bytes data
                                 :hex (mapv codec/byte->hex data)})))))))
+
+(def default-scan-stop-after
+  "How many requests in a row may go unanswered before `scan-dids` stops."
+  3)
+
+(defn- scan-finding
+  "Trims a `read-did` result to what a scan reports. The raw response is kept
+  only when there is no decoded data."
+  [result]
+  (cond-> (select-keys result [:did :did-hex :ok? :error :step :nrc :nrc-name :data :response])
+    (:data result) (dissoc :response)))
+
+(defn scan-dids
+  "Reads every DID from `start` to `end`, inclusive, with `read-did`, one
+  request each. Only reads are sent, but a wide range is thousands of
+  requests, so both ends must be given.
+
+  Returns the DIDs whose reply was anything other than `request-out-of-range`
+  in `:found`, with their data or error, and counts the out-of-range ones.
+  Stops early, with `:stopped-early? true` and `:error :no-reply`, once
+  `:stop-after` requests in a row get no reply from the ECU, such as when the
+  ignition is turned off or the adapter is unplugged. `:on-result`, if given,
+  is called with each `read-did` result. Takes the same other options as
+  `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path start end]
+   (scan-dids device-or-path start end {}))
+  ([device-or-path start end {:keys [stop-after on-result]
+                              :or {stop-after default-scan-stop-after}
+                              :as opts}]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         base {:backend :mac-serial
+               :path path
+               :start start
+               :end end}
+         opts (dissoc opts :stop-after :on-result)]
+     (cond
+       (not (seq path))
+       (assoc base :ok? false :error :missing-path)
+
+       (not (and (did? start) (did? end) (<= start end)))
+       (assoc base :ok? false :error :invalid-did-range)
+
+       :else
+       (loop [did start
+              found []
+              out-of-range 0
+              unanswered 0]
+         (if (or (> did end) (>= unanswered stop-after))
+           (cond-> (assoc base
+                          :ok? (> did end)
+                          :start-hex (format "%04X" start)
+                          :end-hex (format "%04X" end)
+                          :scanned (- did start)
+                          :stopped-early? (<= did end)
+                          :out-of-range out-of-range
+                          :found found)
+             (<= did end) (assoc :error :no-reply))
+           (let [result (read-did path did opts)]
+             (when on-result
+               (on-result result))
+             (if (= :request-out-of-range (:nrc-name result))
+               (recur (inc did) found (inc out-of-range) 0)
+               (recur (inc did)
+                      (conj found (scan-finding result))
+                      out-of-range
+                      (if (:response result) 0 (inc unanswered)))))))))))

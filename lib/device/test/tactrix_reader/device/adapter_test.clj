@@ -94,6 +94,7 @@
                           :ssm-init
                           :ssm-read
                           :read-did
+                          :scan-dids
                           :can-session
                           :record
                           :export-recording
@@ -110,6 +111,7 @@
                                        :ssm-init
                                        :ssm-read
                                        :read-did
+                                       :scan-dids
                                        :record
                                        :live-source]}
             :discovery-policy {:writes :explicit-request-only

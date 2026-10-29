@@ -44,6 +44,8 @@
            "clojure -M:run ssm-read FF6A04,FF6A05,FF6A06,FF6A07 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run uds-read 1155"
            "clojure -M:run uds-read 1155,1156,1157,0030 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run uds-scan 1000 10FF"
+           "clojure -M:run uds-scan 1000 10FF /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run record recordings/my-drive"
            "clojure -M:run record recordings/my-drive 120"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
@@ -64,6 +66,7 @@
               :ssm-init "Read the ECU ID with Subaru SSM AA. Sends vehicle bus traffic."
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :uds-read "Read each comma-separated hex data identifier with UDS ReadDataByIdentifier (22), one request each. Sends vehicle bus traffic."
+              :uds-scan "Read every data identifier from start to end (hex, inclusive) with UDS 22 and report those not out of range. Sends one request per DID on the vehicle bus."
               :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
@@ -89,6 +92,22 @@
   (when s
     (mapv #(if (re-matches #"[0-9A-Fa-f]{1,4}" %) (Integer/parseInt % 16) %)
           (str/split s #","))))
+
+(defn- parse-did
+  "Reads one hex data identifier such as `10FF`, or nil if it is not one."
+  [s]
+  (when (and s (re-matches #"[0-9A-Fa-f]{1,4}" s))
+    (Integer/parseInt s 16)))
+
+(defn- report-scan-progress
+  "Prints each DID that is not out of range, and every 256 DIDs, to stderr
+  while `uds-scan` runs."
+  [{:keys [did did-hex nrc-name] :as result}]
+  (binding [*out* *err*]
+    (when-not (= :request-out-of-range nrc-name)
+      (println did-hex (or nrc-name (:error result) (get-in result [:data :hex]))))
+    (when (= 0xFF (bit-and did 0xFF))
+      (println "scanned through" did-hex))))
 
 (defn- first-detected-path []
   (some :path (usb/scan-devices)))
@@ -160,6 +179,13 @@
         (let [[dids path] (rest args)
               path (or path (first-detected-path))]
           (print-edn (mapv #(uds/read-did path %) (or (parse-dids dids) [nil]))))
+
+        "uds-scan"
+        (let [[start end path] (rest args)]
+          (print-edn (uds/scan-dids (or path (first-detected-path))
+                                    (parse-did start)
+                                    (parse-did end)
+                                    {:on-result report-scan-progress})))
 
         "record"
         (let [[out-dir seconds path] (rest args)
