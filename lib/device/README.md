@@ -196,11 +196,12 @@ polls with the default schedule:
 - One read-only mode 01 request to `7E0` every 15 ms
   (`default-poll-interval-ms`).
 - The schedule (`default-poll-schedule`) requests every fast-changing PID
-  (RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing), then one
-  slow PID (temperatures, voltage, fuel level, trims, lambda, check-engine
-  status), and repeats.
-- Each fast PID is sampled about every 135 ms and each slow PID about every
-  1.35 seconds.
+  (RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing,
+  relative and commanded throttle, a second pedal position, and the neutral
+  input), then one slow PID (temperatures, voltage, fuel level, trims,
+  lambda, check-engine status), and repeats.
+- Each fast PID is sampled about every 195 ms and each slow PID about every
+  1.95 seconds.
 
 It also decodes the signals in `broadcast-signals` from the car's own traffic;
 pass `:broadcast {}` to turn them off.

@@ -1466,8 +1466,11 @@
   15)
 
 (def ^:private fast-pids
-  "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing."
-  [0x0C 0x0D 0x04 0x11 0x5A 0x10 0x0B 0x0E])
+  "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing, plus
+  relative throttle, pedal position D, commanded throttle, and the manual
+  transmission's neutral input, which pin down broadcast signals; see
+  docs/can-broadcast.md."
+  [0x0C 0x0D 0x04 0x11 0x5A 0x10 0x0B 0x0E 0x45 0x49 0x4C 0x65])
 
 (def ^:private slow-pids
   "Temperatures, voltage, fuel level, trims, lambda, and check-engine status."
@@ -1476,7 +1479,7 @@
 (def default-poll-schedule
   "Request order for recording and the live source: all fast PIDs, then one
   slow PID, and repeat. At the default interval, each fast PID is sampled
-  about every 135 ms and each slow PID about every 1.35 seconds."
+  about every 195 ms and each slow PID about every 1.95 seconds."
   (vec (mapcat #(conj fast-pids %) slow-pids)))
 
 (defn- read-chunk

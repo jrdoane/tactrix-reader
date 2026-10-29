@@ -239,7 +239,8 @@ km/h in each gear, from polled RPM and speed above 15 km/h:
   idle recording, idling in neutral with the clutch out. Unexplained.
 
 PID `65` (auxiliary inputs, supported by this car) reports the gearbox's
-neutral switch; polling it would test the "7 is neutral" reading.
+neutral switch. It is in the polling schedule now, so the next recording
+will test the "7 is neutral" reading.
 
 ### Unexplained engine bytes
 
@@ -351,7 +352,8 @@ most of what's left:
    way; each door opened and closed; each blinker, the headlights, the high
    beams, and the wipers; the parking brake on and off; the clutch pressed
    and released in neutral; and a few throttle blips.
-2. Add PIDs `45` (relative throttle), `49` (pedal position D), `4C`
-   (commanded throttle), and `65` (neutral switch) to the polling schedule.
-   They would pin down the scales of `140` bytes 0 and 6 and test the gear
+2. A drive like `2026-10-28-drive`. The polling schedule now includes PIDs
+   `45` (relative throttle), `49` (pedal position D), `4C` (commanded
+   throttle), and `65` (neutral switch), which neither recording has. They
+   would pin down the scales of `140` bytes 0 and 6 and test the gear
    reading of 7.
