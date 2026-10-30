@@ -247,6 +247,26 @@ could be per-bank values on the boxer engine, but both are inferences from
 one snapshot. To find out, record them alongside the PIDs while driving with
 `record-dids` (see [Recording UDS data identifiers](recordings.md#recording-uds-data-identifiers)).
 
+**Idle trial with `record-dids`.** Observed on 2026-10-29: 10 seconds of
+`record-dids ... scanned` at a warm idle (about 725 rpm, coolant 94 °C,
+timing advance 10-12.5°). All 52 DIDs replied over the raw CAN channel, each
+read 6 or 7 times, with no negative responses and no other replies from
+`7E8`. Every request got a reply: 334 PID and 333 DID replies to 667
+requests. These changed during the 10 seconds:
+
+| DID | Values | Note (inferences from one idle) |
+|---|---|---|
+| `10DE` | `6E`-`74` | Moved while timing advance moved; `x / 2 - 45` gives 10-13°, which may be coincidence |
+| `10A1` | `38`-`3A` | Rising; `37` in the scan earlier that day, so possibly a temperature |
+| `10BE` | `80`, `7F` | A knock correction candidate; `7F` would be -0.5°, but it may as well be a trim |
+| `10B6` | `8F`, `90` | Near `80`, like a trim |
+| `10B9` | `15`, `16` | Its pair `10B8` held at `16` |
+
+`103D` (`2A` to `2D`) and `10B2` (`42` to `43`) also differed from the scan
+earlier that day but held steady during the trial. The rest, including
+`10A5` and `10BA` at `80`, held steady. Knock correction would be 0 at idle
+anyway, so a drive with load is needed to tell the candidates apart.
+
 ```
 1000 FF C0 00 0D           1001 04 00                 1002 00 32
 1003 00 0A                 1004 00 0A                 1005 03 FE

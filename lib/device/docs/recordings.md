@@ -62,6 +62,10 @@ needs more than one frame, such as `101E`, gets only a first frame: the raw
 CAN channel sends no flow control, so the ECU never sends the rest. Leave such
 DIDs out; the ECU may hold off other replies while it waits.
 
+In a 10-second trial at idle, all 52 `scanned` DIDs replied and every
+request got a reply; see
+[the trial results](subaru-ssm.md#scanning-for-dids-uds-scan).
+
 From Clojure, pass `:dids` to `record` as integers. `meta.edn` lists them
 under `:polling :dids`. The replay source and the dashboard ignore DID
 replies.
