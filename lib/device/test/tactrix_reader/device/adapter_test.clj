@@ -95,6 +95,7 @@
                           :ssm-read
                           :read-did
                           :scan-dids
+                          :supported-dids
                           :can-session
                           :record
                           :export-recording
@@ -112,6 +113,7 @@
                                        :ssm-read
                                        :read-did
                                        :scan-dids
+                                       :supported-dids
                                        :record
                                        :live-source]}
             :discovery-policy {:writes :explicit-request-only

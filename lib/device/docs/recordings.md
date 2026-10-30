@@ -121,3 +121,14 @@ stopped with Ctrl-C. The engine server replays it by default.
 
 It predates PIDs `45`, `49`, `4C`, and `65` in the polling schedule, so each
 fast PID was sampled about every 135 ms and each slow one every 1.35 s.
+
+### `2026-10-29-did-drive`
+
+4.9 minutes of town driving in the same car with
+`record-dids ... scanned`: about 19,400 polling requests, all answered, with
+9,713 PID samples and 9,712 DID samples in `dids.csv`. The engine was warm
+(coolant 92-99 °C). It covers 0-82 km/h, up to 5,040 rpm, several full-load
+pulls, coasting in fuel cut, and an idle at each end. It was stopped with
+Ctrl-C. Because half the requests are DIDs, each fast PID was sampled about
+every 420 ms. What the DIDs showed is in
+[What the DIDs hold](subaru-ssm.md#what-the-dids-hold).

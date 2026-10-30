@@ -157,3 +157,78 @@
                       (conj found (scan-finding result))
                       out-of-range
                       (if (:response result) 0 (inc unanswered)))))))))))
+
+(defn bitmap-dids
+  "Returns the DIDs a 4-byte supported-DID bitmap read from `base` marks as
+  supported: bit 7 of the first byte is `base + 1`, and the last bit is
+  `base + 32`, the next bitmap. This is the layout of OBD mode 01 PIDs `00`,
+  `20`, and so on."
+  [base data]
+  (vec (for [i (range 32)
+             :when (bit-test (nth data (quot i 8)) (- 7 (mod i 8)))]
+         (+ base 1 i))))
+
+(defn supported-dids
+  "Lists the DIDs the ECU supports by following its supported-DID bitmaps,
+  starting at `start` (`0x1000` by default). Each bitmap is a DID whose
+  4-byte value marks the next 32 DIDs, and the last of those is the next
+  bitmap, so the walk reads one DID for every 32 and stops at the first
+  bitmap whose last bit is clear.
+
+  Returns the bitmaps read in `:bitmaps` and every other supported DID in
+  `:dids`. If a read fails or a bitmap is not 4 bytes, it stops there with
+  `:ok? false`, keeping what it found. Takes the same options as
+  `obd-request`.
+
+  Sends traffic on the vehicle bus."
+  ([device-or-path]
+   (supported-dids device-or-path 0x1000 {}))
+  ([device-or-path start]
+   (supported-dids device-or-path start {}))
+  ([device-or-path start opts]
+   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+         base {:backend :mac-serial
+               :path path
+               :start start}
+         done (fn [bitmaps dids]
+                (assoc base
+                       :start-hex (format "%04X" start)
+                       :bitmaps bitmaps
+                       :dids dids
+                       :dids-hex (mapv #(format "%04X" %) dids)))]
+     (cond
+       (not (seq path))
+       (assoc base :ok? false :error :missing-path)
+
+       (not (did? start))
+       (assoc base :ok? false :error :invalid-did)
+
+       :else
+       (loop [bitmap start
+              bitmaps []
+              dids []]
+         (let [result (read-did path bitmap opts)
+               data (get-in result [:data :bytes])]
+           (cond
+             (not (:ok? result))
+             (merge (done bitmaps dids)
+                    {:ok? false :failed-at (:did-hex result)}
+                    (select-keys result [:error :nrc :nrc-name]))
+
+             (not= 4 (count data))
+             (assoc (done bitmaps dids)
+                    :ok? false
+                    :error :unexpected-bitmap
+                    :failed-at (:did-hex result)
+                    :data (:data result))
+
+             :else
+             (let [marked (bitmap-dids bitmap data)
+                   next-bitmap (+ bitmap 0x20)
+                   bitmaps (conj bitmaps {:did bitmap
+                                          :did-hex (:did-hex result)
+                                          :data (:data result)})]
+               (if (and (some #{next-bitmap} marked) (did? next-bitmap))
+                 (recur next-bitmap bitmaps (into dids (remove #{next-bitmap}) marked))
+                 (assoc (done bitmaps (into dids (remove #{next-bitmap}) marked))
+                        :ok? true))))))))))

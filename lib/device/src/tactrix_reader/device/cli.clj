@@ -46,6 +46,8 @@
            "clojure -M:run uds-read 1155,1156,1157,0030 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run uds-scan 1000 10FF"
            "clojure -M:run uds-scan 1000 10FF /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run uds-supported"
+           "clojure -M:run uds-supported 1000 /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run record recordings/my-drive"
            "clojure -M:run record recordings/my-drive 120"
            "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
@@ -70,6 +72,7 @@
               :uds-read "Read each comma-separated hex data identifier with UDS ReadDataByIdentifier (22), one request each. Sends vehicle bus traffic."
               :uds-scan "Read every data identifier from start to end (hex, inclusive) with UDS 22 and report those not out of range. Sends one request per DID on the vehicle bus."
               :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
+              :uds-supported "List the DIDs the ECU supports by following its supported-DID bitmaps from 1000, or the given hex DID. Sends one request per 32 DIDs on the vehicle bus."
               :record-dids "Record like record, alternating PID requests with UDS 22 requests for the comma-separated hex DIDs, or `scanned` for the DIDs found by uds-scan. Sends vehicle bus traffic."
               :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
 
@@ -215,6 +218,12 @@
                                     (parse-did start)
                                     (parse-did end)
                                     {:on-result report-scan-progress})))
+
+        "uds-supported"
+        (let [[start path] (rest args)
+              [start path] (if (parse-did start) [start path] [nil start])]
+          (print-edn (uds/supported-dids (or path (first-detected-path))
+                                         (if start (parse-did start) 0x1000))))
 
         "record"
         (let [[out-dir seconds path] (rest args)]

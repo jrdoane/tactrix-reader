@@ -239,13 +239,10 @@ requests in a row get no reply, such as when the ignition is turned off.
 
 **`1000`-`10FF` on this project's 2015 Impreza.** Observed on 2026-10-29,
 engine running (14.2V), one snapshot. 55 DIDs returned data and the other 201
-were out of range; no other negative responses. What each one means is not
-yet known. Single bytes at `80` (`10A5`, `10BA`, `10BE`) would read as 0 with
-the `(x - 128) / 2` knock correction formula, and the matching pairs
-(`10B4`/`10B5`, `10B8`/`10B9`, `10EC`/`10ED`, `10EE`/`10EF`, `10F0`/`10F1`)
-could be per-bank values on the boxer engine, but both are inferences from
-one snapshot. To find out, record them alongside the PIDs while driving with
-`record-dids` (see [Recording UDS data identifiers](recordings.md#recording-uds-data-identifiers)).
+were out of range; no other negative responses. The eight 4-byte DIDs at
+`1000`, `1020`, ... `10E0` are
+[supported-DID bitmaps](#listing-supported-dids-uds-supported). What a drive
+showed about the others is in [What the DIDs hold](#what-the-dids-hold).
 
 **Idle trial with `record-dids`.** Observed on 2026-10-29: 10 seconds of
 `record-dids ... scanned` at a warm idle (about 725 rpm, coolant 94 °C,
@@ -288,6 +285,87 @@ anyway, so a drive with load is needed to tell the candidates apart.
 10EE 73                    10EF 73                    10F0 11
 10F1 11
 ```
+
+## Listing supported DIDs: `uds-supported`
+
+`uds-supported` sends traffic on the vehicle bus. It lists the DIDs the ECU
+supports by reading its supported-DID bitmaps, one request for every 32 DIDs,
+instead of trying each DID:
+
+```sh
+clojure -M:run uds-supported
+clojure -M:run uds-supported 1000 /dev/cu.usbmodemTAlgJ3P81
+```
+
+The bitmaps use the layout of OBD mode 01 PIDs `00`, `20`, and so on. The DID
+at a bitmap address, such as `10A0`, returns 4 bytes. Bit 7 of the first byte
+says whether `10A1` is supported, and so on through the last bit, which says
+whether `10C0`, the next bitmap, is. `uds-supported` starts at `1000` (or the
+given DID), follows the chain, and stops at the first bitmap whose last bit
+is clear. It returns the bitmaps in `:bitmaps` and every other supported DID
+in `:dids` and `:dids-hex`. A failed read or a bitmap that is not 4 bytes
+stops it with `:ok? false` and `:failed-at`, keeping what it found.
+
+**Evidence on this project's 2015 Impreza.** The layout is inferred, not
+documented. Observed on 2026-10-29, from the `uds-scan` of `1000`-`10FF`:
+the eight 4-byte DIDs at `1000`, `1020`, ... `10E0` held the same value for
+the whole drive below, and their bits mark exactly the 54 other DIDs the scan
+found in `1001`-`10FF`, with none missing or extra. For example, `10A0`
+returns `AC 04 DF D5`, whose bits mark `10A1`, `10A3`, `10A5`, `10A6`, `10AE`,
+`10B1`, `10B2`, `10B4`-`10BA`, `10BC`, `10BE`, and `10C0`. The last bit of
+`10E0` (`28 1F 80 01`) is set, so `1100` should be another bitmap and there
+are supported DIDs past `10FF`. `uds-supported` has not yet been run on the
+car. Whether other chains start elsewhere, such as at `0000` or `F400`, is
+unknown.
+
+## What the DIDs hold
+
+Observed on 2026-10-29 in the
+[`2026-10-29-did-drive`](recordings.md#2026-10-29-did-drive) recording:
+`record-dids ... scanned`, 4.9 minutes of town driving with a warm engine
+(coolant 92-99 °C), 0-82 km/h, up to 5,040 rpm and 100% load, and timing
+advance from -12° to 46.5°. Every one of the 19,431 requests got a reply;
+each DID was read about 187 times, about every 1.6 seconds. Each DID was
+compared with the nearest PID reply (within 0.25 s, or 3 s for slow PIDs).
+
+These match a PID closely. The scales are fitted from this drive, not
+documented:
+
+| DID | Matches | Fit | r |
+|---|---|---|---|
+| `10DF` | Throttle position (PID `11`) | % = 0.8 × x - 40 | 0.999 |
+| `10BA` | Wideband sensor current (PID `34`) | mA = (x - 128) / 8 | 0.991 |
+| `10A6` | Relative accelerator pedal position (PID `5A`) | % = 0.178 × x | 0.984 |
+| `10BE` | Measured lambda (PID `34`) | lambda = x / 128; 177 in fuel cut, about 110 at full throttle | 0.977 |
+| `10A3` | Air per revolution (MAF / rpm) | g/rev = 0.019 × x, near 0 at x = 0 | 0.94 |
+| `10A1` | Mass airflow (PID `10`) | Tracks it, but with no clean scale | 0.92 |
+
+These change, but match no PID. What they are is unknown; the notes are
+inferences:
+
+| DIDs | Behavior |
+|---|---|
+| `10EC`, `10ED` | A matched pair. 50 at idle and in fuel cut, 70-77 under load. Slope 1.0 against timing advance, but loosely (r 0.82). Possibly cam timing for each bank. |
+| `10EE`, `10EF`; `10F0`, `10F1` | Matched pairs that loosely follow load and timing advance (r 0.64-0.72) |
+| `10B6`, `10B7`; `10B8`, `10B9` | Matched pairs, about 145 and 22 with fuel on. They drop to about 13 and 0 the moment fuel cut starts and recover as soon as it ends, too fast to be the rear oxygen sensor. |
+| `10A5` | 126-128 at light load. Above about 50% load it moves, mostly up: as high as 149 (at 100% load, 3,171 rpm), and down to 122 once. |
+| `10DE` | Follows load and timing advance (r 0.66) |
+| `10AE`, `10B1`, `10B4`, `10B5` | Vary under load; weak matches |
+| `1088`, `1089` | Opposite flags, `00` and `FF`. They swapped once, at 122 s, during a full-load pull at about 4,400 rpm. |
+| `10B2`, `10BC`, `10C1` | Drift by a count or two |
+
+The rest held one value for the whole drive: the bitmaps, `1001`-`100A`,
+`101D`, `1022`, `1024`, `103C`, `103D`, `10E3`, and `10E5`. `103D` was `2A`
+in the scan and `2D` from the idle trial on.
+
+**Knock correction is not identified.** Knock correction only ever removes
+timing, so it reads 0 or less. `10A5` is the only DID that moves only under
+load, but it rises above its resting value, and with RPM and load accounted
+for it barely tracks timing (r -0.25 over 46 samples above 40% load). It may
+be something else, such as an enrichment. A knock value that stayed at 0
+because the engine never knocked would look like `101D`, `1022`, or `10E3`,
+which held at `00`, so those are not ruled out. It may also be past `10FF`,
+where the bitmaps say more DIDs exist.
 
 ## Safety
 

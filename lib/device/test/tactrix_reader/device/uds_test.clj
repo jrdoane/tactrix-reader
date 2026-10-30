@@ -139,3 +139,62 @@
                 :stopped-early? true}
                (select-keys result [:ok? :error :scanned :stopped-early?])))
         (is (= [0x1001 0x1002 0x1004 0x1005 0x1006] (mapv :did (:found result))))))))
+
+(defn- fake-bitmaps
+  "Stands in for `uds/read-did`, answering each DID in `bitmaps` with its
+  bytes and any other with out of range. Records each DID read in `reads`."
+  [reads bitmaps]
+  (fn [_ did _]
+    (swap! reads conj did)
+    (merge {:did did :did-hex (format "%04X" did)}
+           (if-let [data (bitmaps did)]
+             {:ok? true :data {:bytes data :hex (mapv #(format "%02X" %) data)}}
+             {:ok? false :error :negative-response :nrc 0x31 :nrc-name :request-out-of-range}))))
+
+(deftest bitmap-dids-reads-bits-in-order
+  ;; The 10A0 bitmap from the 2015 Impreza.
+  (is (= [0x10A1 0x10A3 0x10A5 0x10A6 0x10AE 0x10B1 0x10B2 0x10B4 0x10B5 0x10B6
+          0x10B7 0x10B8 0x10B9 0x10BA 0x10BC 0x10BE 0x10C0]
+         (uds/bitmap-dids 0x10A0 [0xAC 0x04 0xDF 0xD5])))
+  (is (= [] (uds/bitmap-dids 0x1040 [0 0 0 0]))))
+
+(deftest supported-dids-follows-the-chain-until-the-last-bit-is-clear
+  (let [reads (atom [])]
+    (with-redefs [uds/read-did (fake-bitmaps reads {0x1000 [0xC0 0 0 0x01]
+                                                    0x1020 [0 0 0 0x01]
+                                                    0x1040 [0x80 0 0 0x02]})]
+      (let [result (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81")]
+        (is (= [0x1000 0x1020 0x1040] @reads))
+        (is (true? (:ok? result)))
+        (is (= ["1000" "1020" "1040"] (mapv :did-hex (:bitmaps result))))
+        (is (= ["1001" "1002" "1041" "105F"] (:dids-hex result)))))))
+
+(deftest supported-dids-keeps-what-it-found-when-a-read-fails
+  (let [reads (atom [])]
+    (with-redefs [uds/read-did (fake-bitmaps reads {0x1000 [0x80 0 0 0x01]})]
+      (is (= {:ok? false
+              :error :negative-response
+              :nrc-name :request-out-of-range
+              :failed-at "1020"
+              :dids-hex ["1001"]}
+             (select-keys (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81")
+                          [:ok? :error :nrc-name :failed-at :dids-hex]))))
+    (with-redefs [uds/read-did (fake-bitmaps reads {0x1000 [0x80 0 0x01]})]
+      (is (= {:ok? false :error :unexpected-bitmap :failed-at "1000" :dids-hex []}
+             (select-keys (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81")
+                          [:ok? :error :failed-at :dids-hex]))))))
+
+(deftest supported-dids-stops-at-the-end-of-the-did-range
+  (let [reads (atom [])]
+    (with-redefs [uds/read-did (fake-bitmaps reads {0xFFE0 [0 0 0 0x03]})]
+      (let [result (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81" 0xFFE0)]
+        (is (= [0xFFE0] @reads))
+        (is (true? (:ok? result)))
+        (is (= ["FFFF"] (:dids-hex result)))))))
+
+(deftest supported-dids-validates-before-reading
+  (let [reads (atom [])]
+    (with-redefs [uds/read-did (fake-bitmaps reads {})]
+      (is (= :missing-path (:error (uds/supported-dids nil))))
+      (is (= :invalid-did (:error (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81" 0x10000))))
+      (is (= [] @reads)))))
