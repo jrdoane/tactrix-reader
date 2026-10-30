@@ -133,3 +133,12 @@ pulls, coasting in fuel cut, and an idle at each end. It was stopped with
 Ctrl-C. Because half the requests are DIDs, each fast PID was sampled about
 every 420 ms. What the DIDs showed is in
 [What the DIDs hold](subaru-ssm.md#what-the-dids-hold).
+
+### `2026-10-30-did-drive`
+
+14.4 minutes of town and highway driving in the same car with
+`record-dids ... scanned`: 57,568 polling requests, with 28,772 PID samples
+and 28,771 DID samples (25 requests got no reply). Coolant was 84-96 °C and
+oil warmed from 74 to 98 °C. It covers 0-123 km/h, up to 5,463 rpm, full-load
+pulls, coasting in fuel cut, and an idle at each end. What it added is in
+[A second drive](subaru-ssm.md#a-second-drive-2026-10-30).

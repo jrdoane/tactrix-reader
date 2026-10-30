@@ -86,7 +86,8 @@
    :accelerator-pedal "Accelerator pedal"
    :wideband-current "Wideband current"
    :lambda "Measured λ"
-   :air-per-revolution "Air per revolution"})
+   :air-per-revolution "Air per revolution"
+   :charging-voltage-target "Charging target"})
 
 (def ^:private inferred-signals
   "Signals identified from the car's own CAN traffic by how they behave, but
@@ -146,8 +147,9 @@
    (paired-notes "Possibly cam timing" [0x10EC 0x10ED])
    (paired-notes "Loosely follows load and timing" [0x10EE 0x10EF] [0x10F0 0x10F1])
    (paired-notes "Drops at once in fuel cut" [0x10B6 0x10B7] [0x10B8 0x10B9])
-   (paired-notes "Opposite flags" [0x1088 0x1089])
-   {0x10A5 "Rises above about 50% load"
+   (paired-notes "Opposite flags that swap at the first full throttle" [0x1088 0x1089])
+   {0x103D "Changes between drives only: 2A, 2D, 2F"
+    0x10A5 "Rises above about 50% load"
     0x10DE "Follows load and timing advance"}))
 
 (def ^:private did-comparisons
@@ -162,7 +164,8 @@
                            (when (and maf (pos? rpm))
                              (/ maf (/ rpm 60))))
                         :grams-per-revolution]
-   :mass-air-flow [#(get-in % [:maf-air-flow :value]) :grams-per-second]})
+   :mass-air-flow [#(get-in % [:maf-air-flow :value]) :grams-per-second]
+   :charging-voltage-target [#(get-in % [:control-module-voltage :value]) :volts]})
 
 (def ^:private error-messages
   {:missing-path "No adapter was found."

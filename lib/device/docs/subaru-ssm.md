@@ -329,8 +329,9 @@ each DID was read about 187 times, about every 1.6 seconds. Each DID was
 compared with the nearest PID reply (within 0.25 s, or 3 s for slow PIDs).
 
 These match a PID closely. The scales are fitted from this drive, not
-documented. `uds/did-signals` holds them, and the dashboard shows each
-beside the value it was matched against:
+documented, and [held on a second drive](#a-second-drive-2026-10-30), which
+also added `10B2` and a better fit for `10A1`. `uds/did-signals` holds them,
+and the dashboard shows each beside the value it was matched against:
 
 | DID | Matches | Fit | r |
 |---|---|---|---|
@@ -339,7 +340,8 @@ beside the value it was matched against:
 | `10A6` | Relative accelerator pedal position (PID `5A`) | % = 0.178 × x | 0.984 |
 | `10BE` | Measured lambda (PID `34`) | lambda = x / 128; 177 in fuel cut, about 110 at full throttle | 0.977 |
 | `10A3` | Air per revolution (MAF / rpm) | g/rev = 0.019 × x, near 0 at x = 0 | 0.94 |
-| `10A1` | Mass airflow (PID `10`) | Tracks it, but with no clean scale | 0.92 |
+| `10A1` | Mass airflow (PID `10`) | g/s = (0.0177 × x + 0.186)⁴, from the second drive | 0.995 against MAF^¼ |
+| `10B2` | ECU voltage (PID `42`) | V = 0.05 × x + 10.73 once the voltage settles, from the second drive | 0.92 |
 
 These change, but match no PID. What they are is unknown; the notes are
 inferences:
@@ -352,12 +354,12 @@ inferences:
 | `10A5` | 126-128 at light load. Above about 50% load it moves, mostly up: as high as 149 (at 100% load, 3,171 rpm), and down to 122 once. |
 | `10DE` | Follows load and timing advance (r 0.66) |
 | `10AE`, `10B1`, `10B4`, `10B5` | Vary under load; weak matches |
-| `1088`, `1089` | Opposite flags, `00` and `FF`. They swapped once, at 122 s, during a full-load pull at about 4,400 rpm. |
-| `10B2`, `10BC`, `10C1` | Drift by a count or two |
+| `1088`, `1089` | Opposite flags, `00` and `FF`. They swapped once, at 122 s, during a full-load pull at about 4,400 rpm. The second drive suggests they mark the first full throttle since the engine started. |
+| `10BC`, `10C1` | Drift by a count or two |
 
 The rest held one value for the whole drive: the bitmaps, `1001`-`100A`,
 `101D`, `1022`, `1024`, `103C`, `103D`, `10E3`, and `10E5`. `103D` was `2A`
-in the scan and `2D` from the idle trial on.
+in the scan and `2D` from the idle trial on. `10B2` drifted between 66 and 68.
 
 **Knock correction is not identified.** Knock correction only ever removes
 timing, so it reads 0 or less. `10A5` is the only DID that moves only under
@@ -367,6 +369,62 @@ be something else, such as an enrichment. A knock value that stayed at 0
 because the engine never knocked would look like `101D`, `1022`, or `10E3`,
 which held at `00`, so those are not ruled out. It may also be past `10FF`,
 where the bitmaps say more DIDs exist.
+
+### A second drive (2026-10-30)
+
+Observed on 2026-10-30 in the
+[`2026-10-30-did-drive`](recordings.md#2026-10-30-did-drive) recording, made
+the same way: 14.4 minutes of town and highway driving, 0-123 km/h, up to
+5,463 rpm and 100% load, timing advance from -12° to 49°, coolant 84-96 °C,
+and oil warming from 74 to 98 °C. Each DID was read about 553 times.
+
+**The fits held.** Applied unchanged, the first drive's scales matched this
+drive: throttle (`10DF`) to a median of 0.1%, measured lambda (`10BE`) to
+0.003, wideband current (`10BA`) to 0.02 mA, with r from 0.94 to 0.997.
+Refitting changed each slope by 1-5%.
+
+**`10A1` is airflow on a fourth-root scale.** It rises with mass airflow in
+the same order every time (rank correlation 0.99), but not in a straight
+line. MAF^¼ fits it with r 0.995, and the fit was the same on both drives:
+MAF^¼ = 0.0177 × x + 0.186 on the first and 0.0177 × x + 0.185 on this one.
+Fitted on the first drive, it predicts this drive's MAF to a median of 3.7%.
+A hot-film MAF sensor's output rises with about the fourth root of the flow,
+so `10A1` is probably the sensor's own output, before the ECU converts it.
+That is an inference: the sensor's real voltage is unknown.
+
+**`10B2` follows the charging system.** In the first drive it barely moved
+(66-68) and ECU voltage stayed at 13.4-14.4 V. In this one it ranged from 28
+to 69 and voltage from 11.7 to 14.5 V, and the two correlate (r 0.91 at the
+nearest sample, falling with lag). Where `10B2` had been steady for 4
+seconds, V = 0.05 × x + 10.73 (r 0.92, residual 0.25 V). It sits at three
+levels:
+
+| `10B2` | Voltage | When |
+|---|---|---|
+| 68-69 | about 14.2 V | Idle, most deceleration, and some driving |
+| 50-53 | about 13.3 V | Deceleration and light driving |
+| 28-31 | about 12.2 V | Under power; only twice in 85 readings was the load 0 |
+
+One value covers a wide range of measured voltage (68 at 13.3-14.5 V), so it
+is not a measurement. It looks like a charging voltage target, which the ECU
+lowers under acceleration to take load off the engine, as charge control
+does. Why it stayed high through the first drive is unknown; the battery may
+have needed charging.
+
+**`1088` and `1089` mark the first full throttle.** In both drives they
+swapped once, about a second after throttle first reached 80%, the most this
+car's throttle reads, and held. Before that, throttle had reached 47% on the
+first drive and 33% on this one. Engine load had already reached 100% within
+20 seconds of starting on both drives, so the trigger is the throttle, not
+the load. What the ECU uses the flag for is unknown.
+
+**`103D` changes only between drives.** It held one value through every
+drive: `2A` in the first scan, `2D` from the idle trial on, and `2F` in this
+drive. `103C` changed once, from 8 to 9, 11 minutes in.
+
+**Knock correction is still not identified.** `101D`, `1022`, and `10E3`
+held at `00` again, now with timing advance up to 49° and full-load pulls
+past 5,000 rpm. `10A5` again rose under load (126-152).
 
 ## Safety
 

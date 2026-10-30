@@ -207,9 +207,11 @@
     0x10BE [0x80] 1.0
     0x10BA [0x70] -2.0
     0x10A6 [0x00] 0.0
-    0x10A3 [0x09] 0.171)
-  (is (= {:did 0x10A1 :data [0x37] :name :mass-air-flow :matches 0x10}
-         (uds/did-sample {:did 0x10A1 :data [0x37]}))
-      "a DID with no fitted scale is named but not decoded")
+    0x10A3 [0x09] 0.171
+    0x10A1 [0x34] 1.5
+    0x10B2 [0x44] 14.13)
+  (is (= {:did 0x10DF :data [0x43 0x00] :name :throttle-position :matches 0x11}
+         (uds/did-sample {:did 0x10DF :data [0x43 0x00]}))
+      "a reply of another length is named but not decoded")
   (is (= {:did 0x10A5 :data [0x80]}
          (uds/did-sample {:did 0x10A5 :data [0x80]}))))

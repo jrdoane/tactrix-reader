@@ -43,13 +43,20 @@
   "Single-byte DIDs the project's 2015 Impreza returns that track a PID, by
   DID, with the PID in `:matches`. `10A3` matches air per revolution, MAF
   over rpm, rather than one PID. The scales were fitted from the
-  2026-10-29-did-drive recording, not documented; see docs/subaru-ssm.md.
-  `10A1` tracks mass airflow with no clean scale, so it has no `:decode`."
-  {0x10A1 {:name :mass-air-flow :matches 0x10}
+  2026-10-29-did-drive and 2026-10-30-did-drive recordings, not documented;
+  see docs/subaru-ssm.md. `10B2` behaves like a charging voltage target
+  rather than a measurement, so it matches ECU voltage only once the
+  alternator catches up."
+  {0x10A1 {:name :mass-air-flow :matches 0x10 :unit :grams-per-second
+           ;; Probably the MAF sensor's own output, which rises with about
+           ;; the fourth root of the flow.
+           :decode #(round-to 2 (Math/pow (+ (* 0.0177 %) 0.186) 4))}
    0x10A3 {:name :air-per-revolution :unit :grams-per-revolution
            :decode #(round-to 3 (* 0.019 %))}
    0x10A6 {:name :accelerator-pedal :matches 0x5A :unit :percent
            :decode #(round-to 1 (* 0.178 %))}
+   0x10B2 {:name :charging-voltage-target :matches 0x42 :unit :volts
+           :decode #(round-to 2 (+ (* 0.05 %) 10.73))}
    0x10BA {:name :wideband-current :matches 0x34 :unit :milliamps
            :decode #(round-to 3 (/ (- % 128) 8.0))}
    0x10BE {:name :lambda :matches 0x34 :unit :lambda
