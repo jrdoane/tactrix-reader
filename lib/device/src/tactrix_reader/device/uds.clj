@@ -4,7 +4,8 @@
   services that write, reset, or unlock the ECU are never built. See
   docs/subaru-ssm.md."
   (:require [tactrix-reader.device.codec :as codec]
-            [tactrix-reader.device.iso15765 :as iso15765]))
+            [tactrix-reader.device.iso15765 :as iso15765]
+            [tactrix-reader.device.pids :refer [round-to]]))
 
 (def read-data-by-identifier-service
   "The UDS service that reads the value behind a 2-byte data identifier (DID).
@@ -37,6 +38,34 @@
    0x10A0 0x10A1 0x10A3 0x10A5 0x10A6 0x10AE 0x10B1 0x10B2 0x10B4 0x10B5 0x10B6
    0x10B7 0x10B8 0x10B9 0x10BA 0x10BC 0x10BE 0x10C0 0x10C1 0x10DE 0x10DF 0x10E0
    0x10E3 0x10E5 0x10EC 0x10ED 0x10EE 0x10EF 0x10F0 0x10F1])
+
+(def did-signals
+  "Single-byte DIDs the project's 2015 Impreza returns that track a PID, by
+  DID, with the PID in `:matches`. `10A3` matches air per revolution, MAF
+  over rpm, rather than one PID. The scales were fitted from the
+  2026-10-29-did-drive recording, not documented; see docs/subaru-ssm.md.
+  `10A1` tracks mass airflow with no clean scale, so it has no `:decode`."
+  {0x10A1 {:name :mass-air-flow :matches 0x10}
+   0x10A3 {:name :air-per-revolution :unit :grams-per-revolution
+           :decode #(round-to 3 (* 0.019 %))}
+   0x10A6 {:name :accelerator-pedal :matches 0x5A :unit :percent
+           :decode #(round-to 1 (* 0.178 %))}
+   0x10BA {:name :wideband-current :matches 0x34 :unit :milliamps
+           :decode #(round-to 3 (/ (- % 128) 8.0))}
+   0x10BE {:name :lambda :matches 0x34 :unit :lambda
+           :decode #(round-to 3 (/ % 128.0))}
+   0x10DF {:name :throttle-position :matches 0x11 :unit :percent
+           :decode #(round-to 1 (- (* 0.8 %) 40))}})
+
+(defn did-sample
+  "Adds what `did-signals` knows to a DID reply such as `can/did-reply`
+  returns: its `:name` and the PID it `:matches`, and, for a one-byte reply
+  with a fitted scale, its `:value` and `:unit`. Other replies are returned
+  unchanged."
+  [{:keys [did data] :as reply}]
+  (let [{:keys [decode unit] :as known} (get did-signals did)]
+    (cond-> (merge reply (select-keys known [:name :matches]))
+      (and decode (= 1 (count data))) (assoc :value (decode (first data)) :unit unit))))
 
 (defn read-did
   "Reads one data identifier with UDS ReadDataByIdentifier (service `22`), sent

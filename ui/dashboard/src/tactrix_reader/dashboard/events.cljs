@@ -16,6 +16,12 @@
    :signals {}
    ;; The CAN ID each PID has also been decoded from, keyed by PID name.
    :can-ids {}
+   ;; Latest reply for each UDS data identifier, keyed by DID such as 0x10DF,
+   ;; with its data bytes also read as one unsigned :number.
+   :dids {}
+   ;; The [lowest highest] :number of each DID since the page connected or
+   ;; the source changed, keyed by DID.
+   :did-ranges {}
    ;; Adapters the server detected, and the one chosen to connect to.
    :adapters nil
    :selected-path nil
@@ -27,6 +33,19 @@
 
 (defn- index-by-signal [signals]
   (into {} (map (juxt :signal identity)) signals))
+
+(defn- index-by-did [dids]
+  (into {}
+        (map (fn [{:keys [did data] :as reply}]
+               [did (assoc reply :number (reduce #(+ (* 256 %1) %2) 0 data))]))
+        dids))
+
+(defn- widen-ranges [ranges dids-by-did]
+  (reduce-kv (fn [ranges did {:keys [number]}]
+               (update ranges did (fn [[low high]]
+                                    [(min (or low number) number) (max (or high number) number)])))
+             ranges
+             dids-by-did))
 
 (defn- can-ids [samples]
   (into {} (keep (fn [{:keys [name can-id]}] (when can-id [name can-id]))) samples))
@@ -51,22 +70,28 @@
 (rf/reg-event-db
  :stream/snapshot
  ;; Sent on connect, and again with empty data whenever the source changes.
- (fn [db [_ {:keys [status info samples signals]}]]
-   (assoc db
-          :status status
-          :info info
-          :firmware (:firmware status)
-          :samples (index-by-name samples)
-          :signals (index-by-signal signals)
-          :can-ids (can-ids samples))))
+ (fn [db [_ {:keys [status info samples signals dids]}]]
+   (let [dids (index-by-did dids)]
+     (assoc db
+            :status status
+            :info info
+            :firmware (:firmware status)
+            :samples (index-by-name samples)
+            :signals (index-by-signal signals)
+            :can-ids (can-ids samples)
+            :dids dids
+            :did-ranges (widen-ranges {} dids)))))
 
 (rf/reg-event-db
  :stream/samples
- (fn [db [_ {:keys [samples signals]}]]
-   (-> db
-       (update :samples merge (index-by-name samples))
-       (update :signals merge (index-by-signal signals))
-       (update :can-ids merge (can-ids samples)))))
+ (fn [db [_ {:keys [samples signals dids]}]]
+   (let [dids (index-by-did dids)]
+     (-> db
+         (update :samples merge (index-by-name samples))
+         (update :signals merge (index-by-signal signals))
+         (update :can-ids merge (can-ids samples))
+         (update :dids merge dids)
+         (update :did-ranges widen-ranges dids)))))
 
 (rf/reg-event-db
  :stream/status

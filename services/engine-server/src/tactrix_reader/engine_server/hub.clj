@@ -1,13 +1,13 @@
 (ns tactrix-reader.engine-server.hub
   "Collects source events and fans them out to stream subscribers.
 
-  Samples and signals are batched: every `batch-ms`, subscribers get the
-  latest sample of each PID and the latest value of each inferred signal that
+  Samples, signals, and DID replies are batched: every `batch-ms`,
+  subscribers get the latest sample of each PID, the latest value of each
+  inferred signal, and the latest reply for each UDS data identifier that
   arrived since the last batch. Status and info events are forwarded
-  immediately. A
-  `:reset` event, sent when the source changes, clears everything kept so far
-  and sends subscribers an empty snapshot. A subscriber that falls behind drops
-  old messages instead of slowing the source."
+  immediately. A `:reset` event, sent when the source changes, clears
+  everything kept so far and sends subscribers an empty snapshot. A subscriber
+  that falls behind drops old messages instead of slowing the source."
   (:require [clojure.core.async :as async]))
 
 (defn- sorted-samples [samples-by-key]
@@ -17,14 +17,16 @@
   {:status nil
    :info nil
    :samples {}
-   :signals {}})
+   :signals {}
+   :dids {}})
 
 (def ^:private no-pending
-  {:samples {} :signals {}})
+  {:samples {} :signals {} :dids {}})
 
-(defn- batch [{:keys [samples signals]}]
+(defn- batch [{:keys [samples signals dids]}]
   {:samples (sorted-samples samples)
-   :signals (sorted-samples signals)})
+   :signals (sorted-samples signals)
+   :dids (sorted-samples dids)})
 
 (defn- state->snapshot [{:keys [status info] :as state}]
   (merge {:status status
@@ -63,6 +65,11 @@
              (swap! state assoc-in [:signals (:signal signal)] signal)
              (recur (assoc-in pending [:signals (:signal signal)] signal) ticker))
 
+           (= :did (:type event))
+           (let [reply (dissoc event :type)]
+             (swap! state assoc-in [:dids (:did reply)] reply)
+             (recur (assoc-in pending [:dids (:did reply)] reply) ticker))
+
            (= :status (:type event))
            (let [status (dissoc event :type)]
              (swap! state assoc :status status)
@@ -97,8 +104,8 @@
     (async/put! (:in hub) event)))
 
 (defn snapshot
-  "The latest status and info, and the latest sample of every PID and value
-  of every signal seen since the last reset."
+  "The latest status and info, and the latest sample of every PID, value of
+  every signal, and reply for every DID seen since the last reset."
   [hub]
   (state->snapshot @(:state hub)))
 

@@ -329,7 +329,8 @@ each DID was read about 187 times, about every 1.6 seconds. Each DID was
 compared with the nearest PID reply (within 0.25 s, or 3 s for slow PIDs).
 
 These match a PID closely. The scales are fitted from this drive, not
-documented:
+documented. `uds/did-signals` holds them, and the dashboard shows each
+beside the value it was matched against:
 
 | DID | Matches | Fit | r |
 |---|---|---|---|

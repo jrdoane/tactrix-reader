@@ -199,7 +199,7 @@
                (post-transit client (str base "/api/source") "application/transit+json"
                              {:type :live :path "/dev/cu.usbmodemTAlgJ3P81"})))
         (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
-        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :samples [] :signals []}} %)
+        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :samples [] :signals [] :dids []}} %)
                                        @events)]
           (is (seq after-switch) "the switch resets the dashboard")
           (is (= {:source :live

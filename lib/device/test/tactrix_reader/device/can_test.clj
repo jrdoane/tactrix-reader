@@ -19,6 +19,15 @@
     0x7E9 [4 0x62 0x10 0xA5 0x80 0 0 0])
   (is (nil? (can/did-reply 0x7E8 {:type :line :text "aro"}))))
 
+(deftest message-events-include-did-replies
+  (is (= [{:type :did :did 0x10DF :did-hex "10DF" :data [0x43] :timestamp-us 5
+           :name :throttle-position :matches 0x11 :value 13.6 :unit :percent}]
+         (can/message-events 0x7E8 {} {} {:type :message :id 0x7E8 :timestamp-us 5
+                                         :data [4 0x62 0x10 0xDF 0x43 0 0 0]})))
+  (is (= [:sample]
+         (map :type (can/message-events 0x7E8 {} {} {:type :message :id 0x7E8 :timestamp-us 5
+                                                      :data [4 0x41 0x0C 0x0C 0x80 0 0 0]})))))
+
 (deftest reply-sample-decodes-single-frame-mode-01-replies
   (is (= {:pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 5}
          (can/reply-sample 0x7E8 {:type :message :id 0x7E8 :timestamp-us 5

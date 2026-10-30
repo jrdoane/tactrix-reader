@@ -66,7 +66,10 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
 1. **Sources** (`start-live-source!`, `start-replay-source!` in `device/source.clj`)
    call `:emit` with identical events: `{:type :sample :pid :name :value :unit :timestamp-us}`,
    `{:type :signal :signal :value :unit :can-id :timestamp-us}` for inferred CAN
-   signals, and `{:type :status :source ... :state :running|:stopped|:failed}`.
+   signals, `{:type :did :did :did-hex :data :timestamp-us}` for single-frame
+   UDS service 22 replies (only recordings made with `record-dids` have them;
+   `uds/did-sample` adds `:name`, `:matches`, `:value`, and `:unit` for the DIDs
+   in `uds/did-signals`), and `{:type :status :source ... :state :running|:stopped|:failed}`.
    Consumers must not depend on which source is running.
 2. **Source manager** (`engine_server/sources.clj`): an agent that switches
    between replay, a live adapter, and no source, one switch at a time. Each
@@ -74,8 +77,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    `{:type :info ...}` event (adapter, vehicle identity from
    `read-vehicle-info` and trouble codes from `read-trouble-codes`, or
    recording metadata) before starting the new one.
-3. **Hub** (`engine_server/hub.clj`): batches samples and signals every
-   100 ms, keeping only the latest per PID and per signal. It forwards status and info immediately and keeps
+3. **Hub** (`engine_server/hub.clj`): batches samples, signals, and DID
+   replies every 100 ms, keeping only the latest per PID, signal, and DID. It forwards status and info immediately and keeps
    a snapshot for new connections; `:reset` clears it and sends an empty
    snapshot. Every channel uses a sliding buffer, so slow browsers drop data
    instead of back-pressuring the source.
@@ -87,7 +90,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    and server together.
 5. **Dashboard**: `stream.cljs` turns SSE events into `:stream/*` re-frame
    events and `http.cljs` calls the API. `events.cljs` stores samples keyed by
-   `:name`, not by PID number, and signals keyed by `:signal`. `views.cljs`
+   `:name`, not by PID number, signals keyed by `:signal`, and DID replies
+   keyed by `:did`, with the range each has read. `views.cljs`
    tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
 
 The dashboard build writes into

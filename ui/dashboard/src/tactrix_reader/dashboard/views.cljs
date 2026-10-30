@@ -18,7 +18,9 @@
    :minutes "min"
    :km "km"
    :g "g"
-   :degrees-per-second "°/s"})
+   :degrees-per-second "°/s"
+   :milliamps "mA"
+   :grams-per-revolution "g/rev"})
 
 (def ^:private unit-decimals
   "Decimal places for each unit, so a value keeps its width as it updates."
@@ -32,7 +34,9 @@
    :volts 2
    :grams-per-second 2
    :lambda 3
-   :g 2})
+   :g 2
+   :milliamps 3
+   :grams-per-revolution 3})
 
 (def ^:private labels
   "Shorter labels than the PID names give."
@@ -77,7 +81,12 @@
    :lateral-acceleration "Lateral acceleration"
    :yaw-rate "Yaw rate"
    :fuel-flow "Fuel flow"
-   :outside-temp "Outside"})
+   :outside-temp "Outside"
+   ;; UDS data identifiers.
+   :accelerator-pedal "Accelerator pedal"
+   :wideband-current "Wideband current"
+   :lambda "Measured λ"
+   :air-per-revolution "Air per revolution"})
 
 (def ^:private inferred-signals
   "Signals identified from the car's own CAN traffic by how they behave, but
@@ -116,6 +125,44 @@
    ["Wheel speeds" [:wheel-front-left :wheel-front-right
                     :wheel-rear-left :wheel-rear-right]]
    ["Engine and outside" [:fuel-flow :outside-temp]]])
+
+(defn- did-hex [did]
+  (.padStart (.toUpperCase (.toString did 16)) 4 "0"))
+
+(defn- paired-notes
+  "Notes for DIDs that move together, each naming the other in its pair."
+  [note & pairs]
+  (into {} (for [[a b] pairs
+                 [did other] [[a b] [b a]]]
+             [did (str note "; pairs with " (did-hex other))])))
+
+(def ^:private did-notes
+  "What the 2026-10-29-did-drive recording showed about DIDs that match no
+  PID. These are inferences; see lib/device/docs/subaru-ssm.md."
+  (merge
+   (zipmap (range 0x1000 0x1100 0x20) (repeat "Supported-DID bitmap"))
+   (zipmap [0x101D 0x1022 0x10E3] (repeat "Held at 00; knock correction is not ruled out"))
+   (zipmap [0x10AE 0x10B1 0x10B4 0x10B5] (repeat "Varies under load"))
+   (paired-notes "Possibly cam timing" [0x10EC 0x10ED])
+   (paired-notes "Loosely follows load and timing" [0x10EE 0x10EF] [0x10F0 0x10F1])
+   (paired-notes "Drops at once in fuel cut" [0x10B6 0x10B7] [0x10B8 0x10B9])
+   (paired-notes "Opposite flags" [0x1088 0x1089])
+   {0x10A5 "Rises above about 50% load"
+    0x10DE "Follows load and timing advance"}))
+
+(def ^:private did-comparisons
+  "For each DID in `uds/did-signals`, by name, the polled value it was
+  matched against, from the PID samples by name, and that value's unit."
+  {:throttle-position [#(get-in % [:throttle-position :value]) :percent]
+   :accelerator-pedal [#(get-in % [:relative-accelerator-pedal-position :value]) :percent]
+   :wideband-current [#(get-in % [:wideband-oxygen-sensor-1-current :value :milliamps]) :milliamps]
+   :lambda [#(get-in % [:wideband-oxygen-sensor-1-current :value :lambda]) :lambda]
+   :air-per-revolution [#(let [maf (get-in % [:maf-air-flow :value])
+                               rpm (get-in % [:engine-rpm :value])]
+                           (when (and maf (pos? rpm))
+                             (/ maf (/ rpm 60))))
+                        :grams-per-revolution]
+   :mass-air-flow [#(get-in % [:maf-air-flow :value]) :grams-per-second]})
 
 (def ^:private error-messages
   {:missing-path "No adapter was found."
@@ -391,6 +438,67 @@
      "to no PID, so scales and directions are not confirmed."]
     [groups can-groups false]]])
 
+(defn- did-tile
+  "A DID matched to a PID: its fitted value, or its raw number when it has no
+  scale, over the polled value it was matched against."
+  [{:keys [did name value unit number matches]} samples]
+  (let [[polled polled-unit] (get did-comparisons name)
+        polled-value (when polled (polled samples))]
+    [:div.tile
+     [:div.readout-label
+      [:span (label name)]
+      [:span.tag {:title (str "UDS data identifier " (did-hex did))} (did-hex did)]]
+     [:div.readout-value
+      (if (some? value) (format-value value unit) number)
+      [:span.readout-unit (if (some? value) (get unit-labels unit "") "raw")]]
+     [:div.readout-compare
+      (str (if matches (str "PID " (hex-byte matches)) "MAF ÷ rpm") ": "
+           (if (some? polled-value)
+             (str (format-value polled-value polled-unit) " " (get unit-labels polled-unit ""))
+             "—"))]]))
+
+(defn- did-table [dids]
+  (let [ranges @(rf/subscribe [::subs/did-ranges])]
+    [:details.all-samples
+     [:summary (str "All DIDs (" (count dids) ")")]
+     [:table.samples
+      [:thead
+       [:tr [:th "DID"] [:th "Data"] [:th.value "Value"] [:th.value "Range seen"] [:th "What it is"]]]
+      [:tbody
+       (for [{:keys [did name data number]} dids
+             :let [[low high] (get ranges did)]]
+         ^{:key did}
+         [:tr
+          [:td.pid (did-hex did)]
+          [:td.data (str/join " " (map hex-byte data))]
+          [:td.value number]
+          [:td.value {:class (when (not= low high) "varies")}
+           (if (= low high) (str low) (str low "–" high))]
+          [:td.note (if name
+                      (str (label name) ", fitted")
+                      (get did-notes did ""))]])]]]))
+
+(defn- did-block
+  "UDS data identifiers, which only recordings made with record-dids have."
+  []
+  (let [dids @(rf/subscribe [::subs/did-list])
+        samples @(rf/subscribe [::subs/samples])]
+    (when (seq dids)
+      [:section.block
+       [:div.block-head
+        [:h2 "UDS data identifiers"]
+        [:span.tag.inferred {:title "Scales fitted from one drive, not documented"} "fitted"]]
+       [:p.block-note
+        "Read with service 22 alongside the PIDs. Each tile is a DID matched to a "
+        "PID, with a scale fitted from one drive, over the polled value it was "
+        "matched against. What the others hold is unknown; ranges count from when "
+        "the source started or the page connected."]
+       (into [:div.tiles.did-tiles]
+             (comp (filter :name)
+                   (map (fn [reply] ^{:key (:did reply)} [did-tile reply samples])))
+             dids)
+       [did-table dids]])))
+
 (defn- sample-table []
   (let [samples @(rf/subscribe [::subs/sample-list])
         can-ids @(rf/subscribe [::subs/can-ids])]
@@ -423,4 +531,5 @@
     [vehicle-panel]
     [diagnostics-panel]]
    [readouts]
+   [did-block]
    [sample-table]])

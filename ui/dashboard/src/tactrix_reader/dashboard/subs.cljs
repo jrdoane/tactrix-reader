@@ -84,3 +84,19 @@
  :<- [::can-ids]
  (fn [can-ids [_ pid-name]]
    (get can-ids pid-name)))
+
+(rf/reg-sub
+ ::dids
+ (fn [db _]
+   (:dids db)))
+
+(rf/reg-sub
+ ::did-list
+ :<- [::dids]
+ (fn [dids _]
+   (sort-by :did (vals dids))))
+
+(rf/reg-sub
+ ::did-ranges
+ (fn [db _]
+   (:did-ranges db)))

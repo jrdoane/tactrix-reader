@@ -198,3 +198,18 @@
       (is (= :missing-path (:error (uds/supported-dids nil))))
       (is (= :invalid-did (:error (uds/supported-dids "/dev/cu.usbmodemTAlgJ3P81" 0x10000))))
       (is (= [] @reads)))))
+
+(deftest did-sample-decodes-fitted-single-byte-dids
+  (is (= {:did 0x10DF :did-hex "10DF" :data [0x43] :timestamp-us 5
+          :name :throttle-position :matches 0x11 :value 13.6 :unit :percent}
+         (uds/did-sample {:did 0x10DF :did-hex "10DF" :data [0x43] :timestamp-us 5})))
+  (are [did data value] (= value (:value (uds/did-sample {:did did :data data})))
+    0x10BE [0x80] 1.0
+    0x10BA [0x70] -2.0
+    0x10A6 [0x00] 0.0
+    0x10A3 [0x09] 0.171)
+  (is (= {:did 0x10A1 :data [0x37] :name :mass-air-flow :matches 0x10}
+         (uds/did-sample {:did 0x10A1 :data [0x37]}))
+      "a DID with no fitted scale is named but not decoded")
+  (is (= {:did 0x10A5 :data [0x80]}
+         (uds/did-sample {:did 0x10A5 :data [0x80]}))))

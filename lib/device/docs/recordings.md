@@ -67,8 +67,9 @@ request got a reply; see
 [the trial results](subaru-ssm.md#scanning-for-dids-uds-scan).
 
 From Clojure, pass `:dids` to `record` as integers. `meta.edn` lists them
-under `:polling :dids`. The replay source and the dashboard ignore DID
-replies.
+under `:polling :dids`. The replay source emits each single-frame reply as a
+`:did` event, decoded as far as `uds/did-signals` knows, and the dashboard
+shows them under "UDS data identifiers".
 
 ## Files
 

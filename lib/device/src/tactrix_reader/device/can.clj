@@ -98,10 +98,13 @@
 
 (defn message-events
   "Returns the source events for one received message: `:sample` events as
-  `message-samples` gives, then `:signal` events for `inferred`."
+  `message-samples` gives, then `:signal` events for `inferred`, then a
+  `:did` event for a single-frame service 22 reply from `rx-id`, decoded as
+  far as `uds/did-sample` can."
   [rx-id broadcast inferred message]
   (concat (map #(assoc % :type :sample) (message-samples rx-id broadcast message))
-          (map #(assoc % :type :signal) (broadcast/signal-samples inferred message))))
+          (map #(assoc % :type :signal) (broadcast/signal-samples inferred message))
+          (some-> (did-reply rx-id message) uds/did-sample (assoc :type :did) vector)))
 
 (defn run-can-session!
   "Opens the raw CAN channel with a pass-all filter and polls `pids`

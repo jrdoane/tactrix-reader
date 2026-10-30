@@ -1,7 +1,8 @@
 (ns tactrix-reader.device.source
   "Live and replay data sources. Both run on a background thread and call
   `:emit` with the same events, so consumers cannot tell them apart:
-  `{:type :sample ...}`, `{:type :signal ...}`, and `{:type :status ...}`."
+  `{:type :sample ...}`, `{:type :signal ...}`, `{:type :did ...}`, and
+  `{:type :status ...}`."
   (:require [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.codec :as codec]
@@ -28,8 +29,10 @@
   "Polls the vehicle on a background thread and calls `emit` with each event:
   `{:type :sample ...}` for every decoded PID reply and broadcast signal in
   `:broadcast` (by default `broadcast-signals`), `{:type :signal ...}` for
-  each signal in `:signals` (by default `inferred-signals`), and
-  `{:type :status ...}` when the source is running, stopped, or failed. `{}`
+  each signal in `:signals` (by default `inferred-signals`), `{:type :did ...}`
+  for each single-frame service 22 reply (it polls no DIDs, so there are none
+  unless something else on the bus asks), and `{:type :status ...}` when the
+  source is running, stopped, or failed. `{}`
   turns either kind of broadcast decoding off. Returns a map whose :stop!
   function stops polling and waits for the channel to close.
 
@@ -77,7 +80,8 @@
 (defn start-replay-source!
   "Replays a recording on a background thread, paced by its timestamps,
   calling `emit` with the same events as `start-live-source!`, including
-  broadcast signals in `:broadcast` and inferred signals in `:signals`. Loops
+  broadcast signals in `:broadcast`, inferred signals in `:signals`, and the
+  DID replies of a recording made with `:dids`. Loops
   by default, shifting timestamps so they keep increasing. `:speed` scales
   playback. Returns a map whose :stop! function stops playback."
   [dir {:keys [emit loop? speed broadcast signals]

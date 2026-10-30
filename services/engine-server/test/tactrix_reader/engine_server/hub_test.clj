@@ -20,7 +20,8 @@
     (emit rpm-2)
     (is (= {:event :samples
             :data {:samples [(dissoc coolant :type) (dissoc rpm-2 :type)]
-                   :signals []}}
+                   :signals []
+                   :dids []}}
            (take-within subscription 1000)))
     (hub/stop-hub hub)))
 
@@ -38,12 +39,38 @@
     (emit gear-2)
     (is (= {:event :samples
             :data {:samples [(dissoc coolant :type)]
-                   :signals [(dissoc brake :type) (dissoc gear-2 :type)]}}
+                   :signals [(dissoc brake :type) (dissoc gear-2 :type)]
+                   :dids []}}
            (take-within subscription 1000)))
     (is (= [(dissoc brake :type) (dissoc gear-2 :type)]
            (:signals (hub/snapshot hub))))
     (emit {:type :reset})
     (is (= [] (:signals (:data (take-within subscription 1000)))))
+    (hub/stop-hub hub)))
+
+(def ^:private throttle-did-1 {:type :did :did 0x10DF :did-hex "10DF" :data [0x43] :timestamp-us 1
+                               :name :throttle-position :matches 0x11 :value 13.6 :unit :percent})
+(def ^:private throttle-did-2 {:type :did :did 0x10DF :did-hex "10DF" :data [0x44] :timestamp-us 3
+                               :name :throttle-position :matches 0x11 :value 14.4 :unit :percent})
+(def ^:private lambda-did {:type :did :did 0x10BE :did-hex "10BE" :data [0x80] :timestamp-us 2
+                           :name :lambda :matches 0x34 :value 1.0 :unit :lambda})
+
+(deftest batches-the-latest-reply-for-each-did
+  (let [hub (hub/start-hub {:batch-ms 50})
+        subscription (hub/subscribe hub)
+        emit (hub/emit-fn hub)]
+    (emit throttle-did-1)
+    (emit lambda-did)
+    (emit throttle-did-2)
+    (is (= {:event :samples
+            :data {:samples []
+                   :signals []
+                   :dids [(dissoc lambda-did :type) (dissoc throttle-did-2 :type)]}}
+           (take-within subscription 1000)))
+    (is (= [(dissoc lambda-did :type) (dissoc throttle-did-2 :type)]
+           (:dids (hub/snapshot hub))))
+    (emit {:type :reset})
+    (is (= [] (:dids (:data (take-within subscription 1000)))))
     (hub/stop-hub hub)))
 
 (deftest forwards-status-and-keeps-a-snapshot
@@ -59,7 +86,8 @@
     (is (= {:status {:source :replay :state :running}
             :info nil
             :samples [(dissoc coolant :type)]
-            :signals []}
+            :signals []
+            :dids []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 
@@ -76,11 +104,11 @@
     (emit rpm-1)
     (emit {:type :reset})
     (is (= {:event :snapshot
-            :data {:status nil :info nil :samples [] :signals []}}
+            :data {:status nil :info nil :samples [] :signals [] :dids []}}
            (take-within subscription 1000)))
     (is (= ::timeout (take-within subscription 200))
         "samples pending at the reset are dropped")
-    (is (= {:status nil :info nil :samples [] :signals []}
+    (is (= {:status nil :info nil :samples [] :signals [] :dids []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 
