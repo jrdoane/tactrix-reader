@@ -26,4 +26,5 @@
      (listen! source "samples" :stream/samples)
      (listen! source "status" :stream/status)
      (listen! source "info" :stream/info)
+     (listen! source "recording" :stream/recording)
      (reset! event-source source))))

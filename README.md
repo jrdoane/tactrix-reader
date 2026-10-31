@@ -15,7 +15,8 @@ dashboard.
 
 ## Quick start
 
-No vehicle needed; this replays a committed recording:
+No vehicle needed if you have a recording; this replays the newest one in
+`~/.tactrix-reader/recordings`:
 
 ```sh
 cd ui/dashboard && npm install && npx shadow-cljs release app

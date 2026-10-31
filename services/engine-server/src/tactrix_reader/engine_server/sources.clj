@@ -7,11 +7,18 @@
   drops the old source's data, then reports the new source with `:status` and
   `:info` events. Info has the same shape for every source:
   `{:source :adapter {...} :vehicle {...} :trouble-codes {...} :recording {...}}`,
-  with only the keys that source knows."
-  (:require [tactrix-reader.device.adapter :as adapter]
+  with only the keys that source knows.
+
+  While a live source runs, the manager can save what it receives as a new
+  recording in the configured recordings directory, tagged with the vehicle
+  the live source identified."
+  (:require [clojure.java.io :as io]
+            [tactrix-reader.device.adapter :as adapter]
+            [tactrix-reader.device.config :as config]
             [tactrix-reader.device.obd :as obd]
             [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.source :as source]
+            [tactrix-reader.device.uds :as uds]
             [tactrix-reader.device.usb :as usb]))
 
 (defn- adapter-description [path]
@@ -21,8 +28,10 @@
 
 (defn- start-live!
   "Checks vehicle power, reads the vehicle's identity and trouble codes, and
-  starts polling. Returns the live source, or nil when it was not started."
-  [emit path]
+  starts polling, with the DIDs `uds/scanned-dids` too when `dids?`. Returns
+  the live source with the vehicle's identity under `:vehicle`, or nil when
+  it was not started."
+  [emit path dids?]
   (let [status #(emit (merge {:type :status :source :live :path path} %))]
     (if-not (seq path)
       (do (status {:state :failed :error :missing-path})
@@ -45,22 +54,28 @@
               nil)
 
           :else
-          (do (status {:state :identifying})
-              (emit (assoc info
-                           :vehicle (dissoc (obd/read-vehicle-info path) :ok? :error :path)
-                           :trouble-codes (dissoc (obd/read-trouble-codes path) :ok? :error :path)))
-              (source/start-live-source! path {:emit emit})))))))
+          (let [_ (status {:state :identifying})
+                vehicle-info (obd/read-vehicle-info path)]
+            (emit (assoc info
+                         :vehicle (dissoc vehicle-info :ok? :error :path)
+                         :trouble-codes (dissoc (obd/read-trouble-codes path) :ok? :error :path)))
+            (some-> (source/start-live-source! path (cond-> {:emit emit}
+                                                      dids? (assoc :dids uds/scanned-dids)))
+                    (assoc :vehicle (recording/vehicle-meta vehicle-info)))))))))
 
-(defn- start-replay! [emit recording]
-  (let [{:keys [recorded-at duration-ms vehicle adapter]} (recording/recording-meta recording)]
+(defn- start-replay! [emit cfg recording]
+  (let [{:keys [recorded-at duration-ms vehicle adapter note]} (recording/recording-meta recording)
+        description (config/vehicle-description cfg vehicle)]
     (emit {:type :info
            :source :replay
            :adapter (select-keys adapter [:product :firmware])
-           :vehicle (select-keys vehicle [:description])
-           :recording {:dir recording
+           :vehicle (cond-> (dissoc vehicle :state)
+                      description (assoc :description description))
+           :recording {:dir (str recording)
+                       :name (.getName (io/file recording))
                        :recorded-at recorded-at
                        :duration-ms duration-ms
-                       :state (:state vehicle)}})
+                       :note (or note (:state vehicle))}})
     (source/start-replay-source! recording {:emit emit})))
 
 (defn- stop-current [{:keys [handle] :as state}]
@@ -73,8 +88,11 @@
     (emit {:type :reset})
     (let [handle (try
                    (case (:type source)
-                     :replay (start-replay! emit (or (:recording source) recording))
-                     :live (start-live! emit (:path source))
+                     :replay (if-let [dir (or (:recording source) recording)]
+                               (start-replay! emit (:config state) dir)
+                               (do (emit {:type :status :source :replay :state :failed :error :no-recording})
+                                   nil))
+                     :live (start-live! emit (:path source) (:dids? source))
                      :none (do (emit {:type :status :source :none :state :stopped})
                                nil))
                    (catch Throwable e
@@ -87,25 +105,69 @@
       (assoc state :handle handle :source source))))
 
 (defn switch!
-  "Queues a switch to `source`: `{:type :replay}` (the manager's recording,
-  unless `:recording` is given), `{:type :live :path device-path}`, or
+  "Queues a switch to `source`: `{:type :replay :recording dir}` (the
+  manager's recording when `:recording` is absent), `{:type :live :path
+  device-path}` (with `:dids? true` to poll `uds/scanned-dids` too), or
   `{:type :none}`. Returns immediately; progress arrives as hub events."
   [manager source]
   (send-off manager switch source)
   nil)
 
+(defn- on-manager
+  "Runs `f` with the manager's state after any queued switches, and returns
+  its result, or `{:ok? false :error :timeout}`."
+  [manager f]
+  (let [result (promise)]
+    (send-off manager (fn [state]
+                        (deliver result (try (f state)
+                                             (catch Throwable e
+                                               {:ok? false :error :record-failed :message (.getMessage e)})))
+                        state))
+    (deref result 30000 {:ok? false :error :timeout})))
+
+(defn start-recording!
+  "Starts saving the live source's data as a new recording in the recordings
+  directory, named from the date and time, with the vehicle's identity and
+  `note` in its meta.edn. Returns `{:ok? true :name :dir}`, or `{:ok? false
+  :error :not-live|:not-running|:already-recording}`. The live source emits
+  `{:type :recording ...}` events as the recording starts and is saved."
+  [manager {:keys [note]}]
+  (on-manager manager
+              (fn [{:keys [handle source] :as state}]
+                (if-not (and handle (= :live (:type source)))
+                  {:ok? false :error :not-live}
+                  ((:start-recording! handle)
+                   (str (io/file (get-in state [:config :recordings-dir]) (config/new-recording-name)))
+                   (cond-> {}
+                     (:vehicle handle) (assoc :vehicle (:vehicle handle))
+                     (seq note) (assoc :note note)))))))
+
+(defn stop-recording!
+  "Finishes the live source's recording. Returns `{:ok? true ...}` with the
+  recording's result, or `{:ok? false :error :not-recording}`."
+  [manager]
+  (on-manager manager
+              (fn [{:keys [handle]}]
+                (if-let [result (some-> (:stop-recording! handle) (apply []))]
+                  (assoc result :ok? true)
+                  {:ok? false :error :not-recording}))))
+
 (defn start-manager
   "Starts a manager that emits events with `emit` and switches to `source`.
-  `recording` is the directory `{:type :replay}` replays."
-  [{:keys [emit recording source]}]
+  `recording` is the directory `{:type :replay}` replays when it names none,
+  and `config` (from `config/read-config`) gives the recordings directory and
+  vehicle descriptions."
+  [{:keys [emit recording source config]}]
   (doto (agent {:emit emit
                 :recording recording
+                :config config
                 :handle nil
                 :source nil})
     (switch! source)))
 
 (defn stop-manager
-  "Stops the running source and waits for queued switches to finish."
+  "Stops the running source, finishing any recording, and waits for queued
+  switches to finish."
   [manager]
   (send-off manager stop-current)
   (await manager))

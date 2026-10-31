@@ -93,7 +93,7 @@ h2 {
 
 .control-row label { color: var(--muted); font-size: 14px; }
 
-select, button {
+select, button, input[type="text"] {
   font: inherit;
   font-size: 14px;
   color: var(--text);
@@ -104,10 +104,16 @@ select, button {
 }
 
 select { flex: 1 1 260px; min-width: 0; }
+input[type="text"] { flex: 1 1 260px; min-width: 0; }
+
+.controls .control-row + .control-row { margin-top: 8px; }
+.control-row label.check { display: flex; align-items: center; gap: 6px; color: var(--text); }
 
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.5; }
 button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+button.record { color: var(--bad); border-color: var(--bad); font-variant-numeric: tabular-nums; }
+button.record.active { color: #fff; background: var(--bad); }
 
 .panels {
   display: grid;
@@ -285,3 +291,12 @@ button.primary { color: #fff; background: var(--accent); border-color: var(--acc
 .samples .data { font-family: ui-monospace, monospace; font-size: 13px; white-space: nowrap; }
 .samples .varies { color: var(--accent); }
 .samples .note { color: var(--muted); font-size: 13px; }
+
+.all-samples + .block { margin-top: 28px; }
+.recordings { display: grid; gap: 20px; }
+.vehicle-recordings .block-head { flex-wrap: wrap; margin-bottom: 8px; }
+.vehicle-recordings h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.vehicle-recordings .block-head .muted { font-size: 13px; }
+.samples tr.playing td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.samples td button { padding: 3px 10px; font-size: 13px; }
+.block-note code { font-family: ui-monospace, monospace; font-size: 12px; }

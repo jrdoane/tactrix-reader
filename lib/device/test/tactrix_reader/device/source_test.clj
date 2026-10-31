@@ -1,7 +1,9 @@
 (ns tactrix-reader.device.source-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [tactrix-reader.device.openport :as openport]
+            [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.source :as source]
             [tactrix-reader.device.test-support :refer [ascii fake-adapter fake-vehicle-responder
                                                         message-bytes temp-dir wait-for]]))
@@ -61,6 +63,84 @@
     ((:stop! (source/start-live-source! nil {:emit #(swap! events conj %)})))
     (is (= [{:type :status :state :failed :source :live :path nil :error :missing-path}]
            @events))))
+
+(deftest live-source-polls-dids
+  (let [events (atom [])]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [source (source/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x0C]
+                                                          :dids [0x10A5]
+                                                          :interval-ms 10})]
+        (is (wait-for #(some (comp #{:did} :type) @events) 3000))
+        ((:stop! source))))
+    (is (= {:type :did :did 0x10A5 :did-hex "10A5" :data [0x80]}
+           (select-keys (first (filter (comp #{:did} :type) @events)) [:type :did :did-hex :data])))))
+
+(deftest live-source-records-without-interrupting-polling
+  (let [events (atom [])
+        dir (java.io.File. (temp-dir) "drive")]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [source (source/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x0C 0x05]
+                                                          :interval-ms 10})
+            sample-count #(count (filter (comp #{:sample} :type) @events))]
+        (is (wait-for #(some (comp #{:running} :state) @events) 3000))
+        (is (= {:ok? true :name "drive" :dir (str dir)}
+               ((:start-recording! source) (str dir) {:note "test drive"})))
+        (is (= {:ok? false :error :already-recording}
+               ((:start-recording! source) (str dir) {})))
+        (is (true? (:in-progress? (recording/recording-meta dir))))
+        (let [n (sample-count)]
+          (is (wait-for #(<= (+ n 6) (sample-count)) 3000)))
+        (let [result ((:stop-recording! source))]
+          (is (= :stop (:stopped-by result)))
+          (is (pos? (get-in result [:counts :pid-samples]))))
+        (is (nil? ((:stop-recording! source))))
+        (let [n (sample-count)]
+          (is (wait-for #(< n (sample-count)) 3000)))
+        ((:stop! source))))
+    (let [meta (recording/recording-meta dir)
+          recordings (filter (comp #{:recording} :type) @events)]
+      (is (= [:recording :saved] (map :state recordings)))
+      (is (= {:name "drive" :dir (str dir) :stopped-by :stop}
+             (select-keys (second recordings) [:name :dir :stopped-by])))
+      (is (= "test drive" (:note meta)))
+      (is (= "1.17.4877" (get-in meta [:adapter :firmware])))
+      (is (= ["0C" "05"] (get-in meta [:polling :pids])))
+      (is (nil? (:in-progress? meta)))
+      (is (= #{:engine-rpm :coolant-temp} (set (map :name (recording/recording-samples dir))))))))
+
+(deftest live-source-finishes-its-recording-when-stopped
+  (let [events (atom [])
+        dir (java.io.File. (temp-dir) "drive")]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (let [source (source/start-live-source! "/dev/fake" {:emit #(swap! events conj %)
+                                                          :schedule [0x0C]
+                                                          :interval-ms 10})]
+        (is (wait-for #(some (comp #{:running} :state) @events) 3000))
+        (is (= {:ok? false :error :not-running}
+               ((:start-recording! (source/start-live-source! nil {:emit (fn [_])})) (str dir) {})))
+        (is (:ok? ((:start-recording! source) (str dir) {})))
+        ((:stop! source))))
+    (is (= :source-stopped (:stopped-by (recording/recording-meta dir))))
+    (is (= [:recording :saved :stopped]
+           (keep #(case (:type %) :recording (:state %) :status (#{:stopped} (:state %)) nil) @events)))))
+
+(deftest live-recording-starts-at-a-message-boundary
+  (let [dir (temp-dir)
+        writer (#'source/recording-writer (fn [_]))
+        decode (#'source/message-decoder (fn [_]) (:write! writer))
+        first-reply (vec (message-bytes 5 0 1000000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0]))
+        second-reply (vec (message-bytes 5 0 1001000 0x7E8 [3 0x41 0x05 0x55 0 0 0 0]))
+        chunk #(byte-array (map unchecked-byte %))]
+    ;; The recording starts while the second reply is half received.
+    (decode (chunk (concat first-reply (take 5 second-reply))))
+    ((:start! writer) (str dir) {:polling {:rx-id 0x7E8}})
+    (decode (chunk (drop 5 second-reply)))
+    ((:finish! writer) {:stopped-by :stop})
+    (is (= second-reply (vec (recording/recording-bytes dir))))
+    (is (= [:coolant-temp] (map :name (recording/recording-samples dir))))
+    (is (= 1 (:pid-samples (:counts (edn/read-string (slurp (java.io.File. dir "meta.edn")))))))))
 
 (defn- write-recording! [dir messages]
   (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))

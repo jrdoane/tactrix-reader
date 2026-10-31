@@ -2,16 +2,50 @@
 
 A recording captures raw CAN traffic from the vehicle while polling a set of
 mode 01 PIDs, so decoding can be worked on and the dashboard run without a
-vehicle. Run these commands from `lib/device`.
+vehicle. Recordings are local data, not part of the repository.
 
-## Recording
+## Where recordings live
 
-`record` sends traffic on the vehicle bus. It records until Ctrl-C, or for
-the given number of seconds:
+Recordings are saved in `~/.tactrix-reader/recordings`, one folder each.
+`$TACTRIX_READER_HOME` replaces `~/.tactrix-reader`, and `:recordings-dir` in
+`~/.tactrix-reader/config.edn` moves the recordings folder. config.edn can
+also name vehicles, keyed by VIN or calibration ID, for the dashboard's
+recordings list:
+
+```clojure
+{:vehicles {"EA1T002C" {:description "2015 Subaru Impreza, manual transmission"}}}
+```
+
+Wherever a command takes a recording, a bare name such as `my-drive` means
+that folder in the recordings directory, and anything containing `/` is a
+path.
+
+## Recording from the dashboard
+
+While the dashboard is connected live, **Record** saves what the live source
+receives as a new recording, named from the local date and time, until
+**Stop recording** (or until the source stops or switches). Polling is not
+interrupted, so the recording starts at the next received message rather
+than with the channel setup that a CLI recording has. The optional **Note**
+is saved as `:note` in `meta.edn`. With **Poll DIDs** checked, the live source
+alternates PIDs with the `scanned` DIDs, as `record-dids` does below;
+changing it reconnects.
+
+The **Recordings** list shows every recording, grouped by vehicle, and
+replays any of them.
+
+## Recording from the command line
+
+Run these commands from `lib/device`. `record` sends traffic on the vehicle
+bus. It first reads the vehicle's identity (`vehicle-info`), then records
+until Ctrl-C, or for the given number of seconds. With no name, or `-`, the
+recording is named from the date and time:
 
 ```sh
-clojure -M:run record recordings/my-drive
-clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81
+clojure -M:run record
+clojure -M:run record my-drive
+clojure -M:run record my-drive 120 /dev/cu.usbmodemTAlgJ3P81
+clojure -M:run recordings          # list them, newest first
 ```
 
 It writes `raw.bin` to disk as bytes arrive. When it stops, whether at the
@@ -32,7 +66,8 @@ barometric pressure, and fuel level. Fast PIDs are sampled about every 210 ms
 and slow ones about every 2.9 seconds.
 
 From Clojure, `record` takes `:duration-ms`, `:stop`, `:pids`,
-`:interval-ms`, `:tx-id`, `:rx-id`, and `:baud`. It records for 60 seconds by
+`:interval-ms`, `:tx-id`, `:rx-id`, `:baud`, and `:vehicle` and `:note` for
+`meta.edn`. It records for 60 seconds by
 default; `:duration-ms nil` removes the limit, and delivering the `:stop`
 promise ends the recording early. Pass `:pids []` to only listen.
 
@@ -47,8 +82,8 @@ for the 52 single-frame DIDs `uds-scan` found in `1000`-`10FF`
 (`uds/scanned-dids`):
 
 ```sh
-clojure -M:run record-dids recordings/my-drive scanned
-clojure -M:run record-dids recordings/my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81
+clojure -M:run record-dids - scanned
+clojure -M:run record-dids my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81
 ```
 
 Each DID request is the single frame `03 22 <hi> <lo> 00 00 00 00` to
@@ -73,13 +108,19 @@ shows them under "UDS data identifiers".
 
 ## Files
 
-| File | Contents | Committed |
-|---|---|---|
-| `raw.bin` | Exact bytes the adapter sent, including command replies | Yes |
-| `meta.edn` | Duration and why it stopped, firmware, bus settings, polling schedule, and counts | Yes |
-| `frames.csv` | Every CAN frame, including copies of the polling requests | No; large |
-| `pids.csv` | Decoded PID replies | Yes |
-| `dids.csv` | Single-frame service 22 replies, undecoded; only when there are any | Yes |
+| File | Contents |
+|---|---|
+| `raw.bin` | Exact bytes the adapter sent, including command replies from a CLI recording |
+| `meta.edn` | When it started, the vehicle's identity, the note, duration and why it stopped, firmware, bus settings, polling schedule, and counts |
+| `frames.csv` | Every CAN frame, including copies of the polling requests |
+| `pids.csv` | Decoded PID replies |
+| `dids.csv` | Single-frame service 22 replies, undecoded; only when there are any |
+
+`meta.edn` is written when a recording starts, with `:in-progress? true`,
+and rewritten when it stops. A recording still marked in progress was cut
+off by a crash; its `raw.bin` is intact up to that point. `:vehicle` holds
+whichever of `:vin`, `:calibration-ids`,
+`:calibration-verification-numbers`, `:ecu-name`, and `:ecu-id` were read.
 
 `raw.bin` is the source of truth. It uses the adapter's
 [received message format](openport-protocol.md#received-messages) and can be
@@ -88,7 +129,7 @@ parsed with `parse-adapter-stream`.
 Both CSVs are derived from `raw.bin`. Regenerate them with:
 
 ```sh
-clojure -M:run export-recording recordings/2026-10-24-idle
+clojure -M:run export-recording 2026-10-24-idle
 ```
 
 | CSV | Columns |
@@ -101,7 +142,13 @@ clojure -M:run export-recording recordings/2026-10-24-idle
 microsecond clock, so PID values line up with bus traffic. `id`, `status`,
 `pid`, `did`, and `data` are hex.
 
-## Committed recordings
+## Reference recordings
+
+The analysis in these docs used the recordings below. They were committed
+under `lib/device/recordings` until the move to `~/.tactrix-reader`, so they
+are in git history before that commit, and they now live in the author's
+recordings folder. All four are from the same car (calibration `EA1T002C`),
+which was added to their `meta.edn` when they moved.
 
 ### `2026-10-24-idle`
 
@@ -118,7 +165,7 @@ samples. It starts with the ignition on and the engine off, with a cold
 engine (coolant 47 °C); the engine starts at 5 s. It covers town and highway
 driving through all five gears up to 139 km/h, a full-throttle pull to
 6,400 rpm, several stops, and a warm idle in neutral at the end. It was
-stopped with Ctrl-C. The engine server replays it by default.
+stopped with Ctrl-C.
 
 It predates PIDs `45`, `49`, `4C`, and `65` in the polling schedule, so each
 fast PID was sampled about every 135 ms and each slow one every 1.35 s.

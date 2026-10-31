@@ -6,6 +6,7 @@
             [tactrix-reader.device.adapter :as adapter]
             [tactrix-reader.device.obd :as obd]
             [tactrix-reader.device.source :as source]
+            [tactrix-reader.device.uds :as uds]
             [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.main :as main]
             [tactrix-reader.engine-server.server :as server]))
@@ -17,18 +18,25 @@
   (let [body (concat [0] (u32-bytes timestamp-us) (u32-bytes id) data)]
     (concat (map int "ar5") [(count body)] body)))
 
+(defn- temp-dir []
+  (.toFile (java.nio.file.Files/createTempDirectory
+            "recordings" (make-array java.nio.file.attribute.FileAttribute 0))))
+
 (defn- recording-dir
-  "A tiny recording with one RPM and one coolant reply."
-  []
-  (let [dir (.toFile (java.nio.file.Files/createTempDirectory
-                      "recording" (make-array java.nio.file.attribute.FileAttribute 0)))]
+  "A tiny recording with one RPM and one coolant reply, in `root` (by default
+  a new temporary directory) under `name`."
+  ([]
+   (recording-dir (temp-dir) "tiny" {}))
+  ([root name meta]
+   (let [dir (java.io.File. ^java.io.File root ^String name)]
+    (.mkdirs dir)
     (java.nio.file.Files/write (.toPath (java.io.File. dir "raw.bin"))
                                (byte-array (map unchecked-byte
                                                 (concat (message-bytes 1000000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])
                                                         (message-bytes 1010000 0x7E8 [3 0x41 0x05 0x55 0 0 0 0]))))
                                (make-array java.nio.file.OpenOption 0))
-    (spit (java.io.File. dir "meta.edn") (pr-str {:polling {:rx-id 0x7E8}}))
-    (str dir)))
+    (spit (java.io.File. dir "meta.edn") (pr-str (merge {:polling {:rx-id 0x7E8}} meta)))
+    (str dir))))
 
 (defn- free-port []
   (with-open [socket (java.net.ServerSocket. 0)]
@@ -141,10 +149,28 @@
    :paths ["/dev/cu.usbmodemTAlgJ3P81"]
    :source :ioreg})
 
-(defn- fake-live-source [path {:keys [emit]}]
-  (emit {:type :status :source :live :path path :state :running :firmware "1.17.4877"})
-  {:stop! (fn []
-            (emit {:type :status :source :live :path path :state :stopped}))})
+(defn- fake-live-source
+  "Stands in for `source/start-live-source!`, recording the options it was
+  started with in `started` and keeping a pretend recording."
+  [started]
+  (fn [path {:keys [emit] :as opts}]
+    (swap! started conj (dissoc opts :emit))
+    (emit {:type :status :source :live :path path :state :running :firmware "1.17.4877"})
+    (let [recording (atom nil)
+          finish! (fn [stopped-by]
+                    (when-let [{:keys [dir]} (first (reset-vals! recording nil))]
+                      (emit {:type :recording :state :saved :dir dir :stopped-by stopped-by})
+                      {:out-dir dir :stopped-by stopped-by}))]
+      {:stop! (fn []
+                (finish! :source-stopped)
+                (emit {:type :status :source :live :path path :state :stopped}))
+       :start-recording! (fn [dir meta]
+                           (if @recording
+                             {:ok? false :error :already-recording}
+                             (do (reset! recording {:dir dir :meta meta})
+                                 (emit {:type :recording :state :recording :dir dir :meta meta})
+                                 {:ok? true :name (.getName (java.io.File. ^String dir)) :dir dir})))
+       :stop-recording! #(finish! :stop)})))
 
 (defn- event-where [events event-name pred]
   (some #(when (and (= event-name (:event %)) (pred (:data %))) (:data %)) events))
@@ -168,10 +194,12 @@
                                           :pending []
                                           :permanent nil
                                           :errors {:permanent {:error :timeout}}})
-                source/start-live-source! fake-live-source]
+                source/start-live-source! (fake-live-source (atom []))]
     (let [port (free-port)
+          root (temp-dir)
           system (main/start-system {:source {:type :replay :recording (recording-dir)}
-                                     :port port})
+                                     :port port
+                                     :config {:recordings-dir (str root) :vehicles {}}})
           client (java.net.http.HttpClient/newHttpClient)
           base (str "http://localhost:" port)
           [events close] (open-events client (str base "/stream"))]
@@ -199,7 +227,7 @@
                (post-transit client (str base "/api/source") "application/transit+json"
                              {:type :live :path "/dev/cu.usbmodemTAlgJ3P81"})))
         (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
-        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :samples [] :signals [] :dids []}} %)
+        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :recording nil :samples [] :signals [] :dids []}} %)
                                        @events)]
           (is (seq after-switch) "the switch resets the dashboard")
           (is (= {:source :live
@@ -229,3 +257,104 @@
         (finally
           (close)
           (main/stop-system system))))))
+
+(defn- get-transit [client url]
+  (let [response (get-response client url (java.net.http.HttpResponse$BodyHandlers/ofString))]
+    {:status (.statusCode response)
+     :body (read-transit (.body response))}))
+
+(deftest lists-and-replays-recordings
+  (let [root (temp-dir)
+        _ (recording-dir root "2026-10-24-idle" {:recorded-at "2026-10-24T19:30:41Z"
+                                                 :duration-ms 60000
+                                                 :stopped-by :duration
+                                                 :vehicle {:calibration-ids ["EA1T002C"]
+                                                           :state "idling"}
+                                                 :counts {:frames 2}})
+        newer (recording-dir root "2026-10-30-did-drive" {:recorded-at "2026-10-30T12:04:43Z"
+                                                          :vehicle {:vin "TESTVIN0123456789"}
+                                                          :note "highway"})
+        port (free-port)
+        system (main/start-system {:source {:type :none}
+                                   :port port
+                                   :config {:recordings-dir (str root)
+                                            :vehicles {"EA1T002C" {:description "2015 Subaru Impreza"}}}})
+        client (java.net.http.HttpClient/newHttpClient)
+        base (str "http://localhost:" port)
+        [events close] (open-events client (str base "/stream"))]
+    (try
+      (let [{:keys [status body]} (get-transit client (str base "/api/recordings"))]
+        (is (= 200 status))
+        (is (= (str root) (:dir body)))
+        (is (= ["2026-10-30-did-drive" "2026-10-24-idle"] (map :name (:recordings body))))
+        (is (= {:calibration-ids ["EA1T002C"] :state "idling" :description "2015 Subaru Impreza"}
+               (:vehicle (second (:recordings body)))))
+        (is (not (contains? (second (:recordings body)) :counts))))
+      (is (= {:status 400 :body {:error :unknown-recording}}
+             (post-transit client (str base "/api/source") "application/transit+json"
+                           {:type :replay :recording "../../etc"})))
+      (is (= {:status 202 :body {:source {:type :replay :recording newer}}}
+             (post-transit client (str base "/api/source") "application/transit+json"
+                           {:type :replay :recording "2026-10-30-did-drive"})))
+      (is (wait-for #(event-where @events "info" (comp #{:replay} :source)) 5000))
+      (is (= {:source :replay
+              :adapter {}
+              :vehicle {:vin "TESTVIN0123456789"}
+              :recording {:dir newer
+                          :name "2026-10-30-did-drive"
+                          :recorded-at "2026-10-30T12:04:43Z"
+                          :duration-ms nil
+                          :note "highway"}}
+             (event-where @events "info" (comp #{:replay} :source))))
+      (is (= {:status 409 :body {:error :not-live}}
+             (post-transit client (str base "/api/recording") "application/transit+json" {:action :start})))
+      (is (= {:status 400 :body {:error :unknown-action}}
+             (post-transit client (str base "/api/recording") "application/transit+json" {:action :delete})))
+      (finally
+        (close)
+        (main/stop-system system)))))
+
+(deftest records-the-live-source
+  (let [started (atom [])
+        root (temp-dir)]
+    (with-redefs [usb/scan-devices (fn [] [fake-adapter])
+                  adapter/read-vbat (fn [_] {:ok? true :volts 12.3 :state :present})
+                  obd/read-vehicle-info (fn [path]
+                                          {:ok? true :path path :vin "TESTVIN0123456789"
+                                           :calibration-ids ["EA1T002C"] :ecu-id nil
+                                           :errors {:ecu-id {:error :timeout}}})
+                  obd/read-trouble-codes (fn [path] {:ok? true :path path :stored []})
+                  source/start-live-source! (fake-live-source started)]
+      (let [port (free-port)
+            system (main/start-system {:source {:type :none}
+                                       :port port
+                                       :config {:recordings-dir (str root) :vehicles {}}})
+            client (java.net.http.HttpClient/newHttpClient)
+            base (str "http://localhost:" port)
+            post #(post-transit client (str base %1) "application/transit+json" %2)
+            [events close] (open-events client (str base "/stream"))]
+        (try
+          (is (= 202 (:status (post "/api/source" {:type :live :path "/dev/cu.usbmodemTAlgJ3P81" :dids? true}))))
+          (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
+          (is (= [{:dids uds/scanned-dids}] @started) "Poll DIDs adds the scanned DIDs")
+          (let [{:keys [status body]} (post "/api/recording" {:action :start :note "commute"})]
+            (is (= 202 status))
+            (is (re-matches #"\d{4}-\d{2}-\d{2}-\d{6}" (:name body)))
+            (is (= (str (java.io.File. root ^String (:name body))) (:dir body))))
+          (is (= {:status 409 :body {:error :already-recording}}
+                 (post "/api/recording" {:action :start})))
+          (is (= {:vehicle {:vin "TESTVIN0123456789" :calibration-ids ["EA1T002C"]}
+                  :note "commute"}
+                 (:meta (event-where @events "recording" (comp #{:recording} :state)))))
+          (is (= {:status 202 :body {:stopped-by :stop}}
+                 (update (post "/api/recording" {:action :stop}) :body select-keys [:stopped-by])))
+          (is (= {:status 409 :body {:error :not-recording}}
+                 (post "/api/recording" {:action :stop})))
+
+          (is (= 202 (:status (post "/api/recording" {:action :start}))))
+          (is (= 202 (:status (post "/api/source" {:type :none}))))
+          (is (wait-for #(event-where @events "recording" (comp #{:source-stopped} :stopped-by)) 5000)
+              "switching away saves the recording")
+          (finally
+            (close)
+            (main/stop-system system)))))))

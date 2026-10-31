@@ -1,6 +1,7 @@
 (ns tactrix-reader.engine-server.server
   "Pedestal routes: the dashboard page, its assets, the SSE stream, and the
-  API that lists adapters and switches the source."
+  API that lists adapters and recordings, switches the source, and starts and
+  stops recording."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -10,6 +11,8 @@
             [io.pedestal.http.jetty :as jetty]
             [io.pedestal.http.sse :as sse]
             [io.pedestal.service.resources :as resources]
+            [tactrix-reader.device.config :as config]
+            [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.hub :as hub]
             [tactrix-reader.engine-server.sources :as sources]))
@@ -34,8 +37,8 @@
 
 (defn- stream-interceptor
   "Streams Server-Sent Events: a `snapshot` event on connect, then `samples`,
-  `status`, `info`, and (after a source switch) `snapshot` events from the
-  hub. Data is Transit JSON."
+  `status`, `info`, `recording`, and (after a source switch) `snapshot`
+  events from the hub. Data is Transit JSON."
   [hub]
   {:name ::stream
    :enter (fn [context]
@@ -97,32 +100,81 @@
   (transit-response 200 {:adapters (mapv #(select-keys % [:vendor :product :serial :path :paths])
                                          (usb/scan-devices))}))
 
+(defn- recordings
+  "The recordings in the configured directory, each vehicle with its
+  description from config.edn."
+  [cfg]
+  (mapv (fn [{:keys [vehicle] :as entry}]
+          (let [description (config/vehicle-description cfg vehicle)]
+            (cond-> (dissoc entry :counts)
+              description (assoc-in [:vehicle :description] description))))
+        (recording/list-recordings (:recordings-dir cfg))))
+
+(defn- recordings-handler [cfg]
+  (fn [_request]
+    (transit-response 200 {:dir (str (:recordings-dir cfg))
+                           :recordings (recordings cfg)})))
+
 (defn- requested-source
   "Turns a request body into a source for `sources/switch!`, or an error. Only
-  paths of detected adapters are accepted, so a request cannot make the server
-  write adapter commands to any other file."
-  [{:keys [type path] :as body}]
+  paths of detected adapters and names of listed recordings are accepted, so a
+  request cannot make the server write adapter commands to any other file or
+  read any other directory."
+  [cfg {:keys [type path recording dids?] :as body}]
   (cond
     (not (map? body)) {:error :invalid-body}
-    (= :replay type) {:type :replay}
     (= :none type) {:type :none}
+
+    (= :replay type)
+    (if-let [dir (some #(when (= recording (:name %)) (:dir %))
+                       (recording/list-recordings (:recordings-dir cfg)))]
+      {:type :replay :recording dir}
+      {:error :unknown-recording})
+
     (not= :live type) {:error :unknown-source-type}
-    (some #{path} (mapcat :paths (usb/scan-devices))) {:type :live :path path}
+
+    (some #{path} (mapcat :paths (usb/scan-devices)))
+    (cond-> {:type :live :path path}
+      (true? dids?) (assoc :dids? true))
+
     :else {:error :unknown-adapter}))
 
-(defn- source-handler [manager]
+(defn- source-handler [manager cfg]
   (fn [request]
     ;; Pedestal's default body-params interceptor has parsed the Transit body.
-    (let [source (requested-source (:transit-params request))]
+    (let [source (requested-source cfg (:transit-params request))]
       (if (:error source)
         (transit-response 400 source)
         (do (sources/switch! manager source)
             (transit-response 202 {:source source}))))))
 
+(def ^:private recording-statuses
+  {:not-live 409
+   :not-running 409
+   :already-recording 409
+   :not-recording 409
+   :timeout 503})
+
+(defn- recording-handler
+  "Starts (`{:action :start :note \"...\"}`) or stops (`{:action :stop}`)
+  recording the live source."
+  [manager]
+  (fn [request]
+    (let [{:keys [action note]} (:transit-params request)
+          result (case action
+                   :start (sources/start-recording! manager {:note (when (string? note) note)})
+                   :stop (sources/stop-recording! manager)
+                   {:ok? false :error :unknown-action})]
+      (if (:ok? result)
+        (transit-response 202 (select-keys result [:name :dir :duration-ms :stopped-by]))
+        (transit-response (get recording-statuses (:error result) 400)
+                          (select-keys result [:error :message]))))))
+
 (defn create-server
   "Returns an unstarted Pedestal connector serving the dashboard for `hub`,
-  whose source the `sources` manager switches."
-  [{:keys [host port hub sources]
+  whose source the `sources` manager switches. `config` (from
+  `config/read-config`) gives the recordings directory."
+  [{:keys [host port hub sources config]
     :or {host "localhost"}}]
   (-> (connector/default-connector-map host port)
       (connector/with-default-interceptors
@@ -134,7 +186,9 @@
           ["/stream" :get (stream-interceptor hub) :route-name ::stream]
           ["/api/snapshot" :get (snapshot-handler hub) :route-name ::snapshot]
           ["/api/adapters" :get [local-api-guard adapters-handler] :route-name ::adapters]
-          ["/api/source" :post [local-api-guard (source-handler sources)] :route-name ::source]}
+          ["/api/source" :post [local-api-guard (source-handler sources config)] :route-name ::source]
+          ["/api/recordings" :get [local-api-guard (recordings-handler config)] :route-name ::recordings]
+          ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]}
         (resources/resource-routes {:resource-root "public/assets"
                                     :prefix "/assets"}))
       (jetty/create-connector {})))

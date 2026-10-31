@@ -2,6 +2,7 @@
   (:require [clojure.pprint :as pprint]
             [clojure.string :as str]
             [tactrix-reader.device.adapter :as adapter]
+            [tactrix-reader.device.config :as config]
             [tactrix-reader.device.obd :as obd]
             [tactrix-reader.device.pids :as pids]
             [tactrix-reader.device.probe :as probe]
@@ -48,12 +49,14 @@
            "clojure -M:run uds-scan 1000 10FF /dev/cu.usbmodemTAlgJ3P81"
            "clojure -M:run uds-supported"
            "clojure -M:run uds-supported 1000 /dev/cu.usbmodemTAlgJ3P81"
-           "clojure -M:run record recordings/my-drive"
-           "clojure -M:run record recordings/my-drive 120"
-           "clojure -M:run record recordings/my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
-           "clojure -M:run record-dids recordings/my-drive scanned"
-           "clojure -M:run record-dids recordings/my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81"
-           "clojure -M:run export-recording recordings/my-drive"]
+           "clojure -M:run record"
+           "clojure -M:run record my-drive"
+           "clojure -M:run record - 120"
+           "clojure -M:run record my-drive 120 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run record-dids - scanned"
+           "clojure -M:run record-dids my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81"
+           "clojure -M:run recordings"
+           "clojure -M:run export-recording my-drive"]
    :commands {:scan "List detected OpenPort/usbmodem devices."
               :open "Open and close the first detected device, or the given path."
               :status "Report host/device status and conservative vehicle status."
@@ -71,10 +74,11 @@
               :ssm-read "Read one byte at each comma-separated hex ECU address with Subaru SSM A8. Sends vehicle bus traffic."
               :uds-read "Read each comma-separated hex data identifier with UDS ReadDataByIdentifier (22), one request each. Sends vehicle bus traffic."
               :uds-scan "Read every data identifier from start to end (hex, inclusive) with UDS 22 and report those not out of range. Sends one request per DID on the vehicle bus."
-              :record "Record CAN traffic and polled PIDs to a folder, for the given seconds or until Ctrl-C. Sends vehicle bus traffic."
+              :record "Read the vehicle's identity, then record CAN traffic and polled PIDs for the given seconds or until Ctrl-C. A bare name (or `-` for one from the date and time) is saved in ~/.tactrix-reader/recordings; a name with `/` is a path. Sends vehicle bus traffic."
               :uds-supported "List the DIDs the ECU supports by following its supported-DID bitmaps from 1000, or the given hex DID. Sends one request per 32 DIDs on the vehicle bus."
               :record-dids "Record like record, alternating PID requests with UDS 22 requests for the comma-separated hex DIDs, or `scanned` for the DIDs found by uds-scan. Sends vehicle bus traffic."
-              :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin."}})
+              :recordings "List the recordings in ~/.tactrix-reader/recordings, newest first, with the vehicle each was recorded on."
+              :export-recording "Regenerate frames.csv and pids.csv from a recording's raw.bin, by name or path."}})
 
 (defn- parse-pid
   "Reads a PID argument as hex (`0C`) or a name (`engine-rpm`)."
@@ -119,11 +123,16 @@
   (some :path (usb/scan-devices)))
 
 (defn- record!
-  "Runs `recording/record` with `opts` for `seconds`, or until Ctrl-C, and
-  prints the result."
-  [out-dir seconds path opts]
+  "Reads the vehicle's identity, then runs `recording/record` with `opts` for
+  `seconds`, or until Ctrl-C, and prints the result. `name` is resolved by
+  `config/resolve-recording-dir`; nil or `-` names it from the date and time."
+  [name seconds path opts]
   (let [stop (promise)
-        done (promise)]
+        done (promise)
+        path (or path (first-detected-path))
+        out-dir (config/resolve-recording-dir (if (contains? #{nil "-"} name)
+                                                (config/new-recording-name)
+                                                name))]
     ;; Ctrl-C runs shutdown hooks; this one stops the recording and holds the
     ;; JVM open until its files are written.
     (try
@@ -132,14 +141,19 @@
                                              (deliver stop true)
                                              @done)))
       (binding [*out* *err*]
-        (println (str "Recording to " out-dir
-                      (if seconds (str " for " seconds " seconds") "")
-                      ". Press Ctrl-C to stop.")))
-      (print-edn (recording/record (or path (first-detected-path))
-                                   out-dir
-                                   (assoc opts
-                                          :duration-ms (some-> seconds Long/parseLong (* 1000))
-                                          :stop stop)))
+        (println "Reading the vehicle's identity."))
+      (let [vehicle (when path
+                      (recording/vehicle-meta (obd/read-vehicle-info path)))]
+        (binding [*out* *err*]
+          (println (str "Recording to " out-dir
+                        (if seconds (str " for " seconds " seconds") "")
+                        ". Press Ctrl-C to stop.")))
+        (print-edn (recording/record path
+                                     out-dir
+                                     (cond-> (assoc opts
+                                                    :duration-ms (some-> seconds Long/parseLong (* 1000))
+                                                    :stop stop)
+                                       (seq vehicle) (assoc :vehicle vehicle)))))
       (flush)
       (finally
         (deliver done true)))))
@@ -235,8 +249,16 @@
                                                  uds/scanned-dids
                                                  (parse-dids dids))}))
 
+        "recordings"
+        (let [cfg (config/read-config)]
+          (print-edn (mapv (fn [{:keys [vehicle] :as entry}]
+                             (cond-> (dissoc entry :counts)
+                               (config/vehicle-description cfg vehicle)
+                               (assoc-in [:vehicle :description] (config/vehicle-description cfg vehicle))))
+                           (recording/list-recordings (config/recordings-dir)))))
+
         "export-recording"
-        (print-edn (recording/export-recording arg))
+        (print-edn (recording/export-recording (config/resolve-recording-dir arg)))
 
         (print-edn (assoc (usage)
                           :error :unknown-command

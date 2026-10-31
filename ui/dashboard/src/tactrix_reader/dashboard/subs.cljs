@@ -100,3 +100,40 @@
  ::did-ranges
  (fn [db _]
    (:did-ranges db)))
+
+(rf/reg-sub
+ ::poll-dids?
+ (fn [db _]
+   (:poll-dids? db)))
+
+(rf/reg-sub
+ ::recordings
+ (fn [db _]
+   (:recordings db)))
+
+(rf/reg-sub
+ ::recordings-dir
+ (fn [db _]
+   (:recordings-dir db)))
+
+(rf/reg-sub
+ ::recording
+ (fn [db _]
+   (:recording db)))
+
+(rf/reg-sub
+ ::note
+ (fn [db _]
+   (:note db)))
+
+(rf/reg-sub
+ ::now
+ (fn [db _]
+   (:now db)))
+
+(rf/reg-sub
+ ::recordable?
+ ;; Recording saves what a running live source receives.
+ :<- [::status]
+ (fn [{:keys [source state]} _]
+   (and (= :live source) (= :running state))))

@@ -85,6 +85,7 @@
     (is (= :samples (:event (take-within subscription 1000))))
     (is (= {:status {:source :replay :state :running}
             :info nil
+            :recording nil
             :samples [(dissoc coolant :type)]
             :signals []
             :dids []}
@@ -104,12 +105,26 @@
     (emit rpm-1)
     (emit {:type :reset})
     (is (= {:event :snapshot
-            :data {:status nil :info nil :samples [] :signals [] :dids []}}
+            :data {:status nil :info nil :recording nil :samples [] :signals [] :dids []}}
            (take-within subscription 1000)))
     (is (= ::timeout (take-within subscription 200))
         "samples pending at the reset are dropped")
-    (is (= {:status nil :info nil :samples [] :signals [] :dids []}
+    (is (= {:status nil :info nil :recording nil :samples [] :signals [] :dids []}
            (hub/snapshot hub)))
+    (hub/stop-hub hub)))
+
+(deftest forwards-recording-events-until-reset
+  (let [hub (hub/start-hub {:batch-ms 50})
+        subscription (hub/subscribe hub)
+        emit (hub/emit-fn hub)
+        recording {:state :recording :name "2026-10-31-143205" :started-at "2026-10-31T21:32:05Z"}]
+    (emit (assoc recording :type :recording))
+    (is (= {:event :recording :data recording}
+           (take-within subscription 1000)))
+    (is (= recording (:recording (hub/snapshot hub))))
+    (emit {:type :reset})
+    (is (= :snapshot (:event (take-within subscription 1000))))
+    (is (nil? (:recording (hub/snapshot hub))))
     (hub/stop-hub hub)))
 
 (deftest unsubscribed-channels-are-closed

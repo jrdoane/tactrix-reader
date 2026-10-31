@@ -88,6 +88,45 @@
                     (take 2)
                     (mapcat #(let [[_ _ _ name value] (str/split % #",")] [name value])))))))))
 
+(deftest record-saves-the-vehicle-and-note
+  (let [dir (temp-dir)
+        vehicle {:vin "JF1GPAA60F8000000" :calibration-ids ["EA1T002C"]}]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
+      (recording/record "/dev/fake" (str dir) {:duration-ms 50 :pids [0x0C] :interval-ms 10
+                                               :vehicle vehicle :note "idle"}))
+    (let [meta (edn/read-string (slurp (java.io.File. dir "meta.edn")))]
+      (is (= vehicle (:vehicle meta)))
+      (is (= "idle" (:note meta)))
+      (is (= 0x7E8 (get-in meta [:polling :rx-id])))
+      (is (pos? (get-in meta [:polling :request-count]))))))
+
+(deftest list-recordings-describes-each-recording-newest-first
+  (let [root (temp-dir)
+        write! (fn [name meta]
+                 (let [dir (java.io.File. root name)]
+                   (.mkdirs dir)
+                   (spit (java.io.File. dir "raw.bin") "")
+                   (when meta
+                     (spit (java.io.File. dir "meta.edn") (pr-str meta)))))]
+    (write! "old" {:recorded-at "2026-10-24T19:30:41Z" :duration-ms 60000 :stopped-by :duration
+                   :vehicle {:description "Impreza" :state "idling"}})
+    (write! "new" {:recorded-at "2026-10-30T12:04:43Z" :in-progress? true
+                   :vehicle {:vin "JF1" :calibration-ids ["EA1T002C"]}
+                   :polling {:dids ["10A5"]} :note "drive"})
+    (write! "broken" nil)
+    (.mkdirs (java.io.File. root "empty"))
+    (let [listed (recording/list-recordings root)
+          by-name (into {} (map (juxt :name identity)) listed)]
+      (is (= #{"old" "new" "broken"} (set (keys by-name))))
+      (is (= ["new" "old"] (filter #{"new" "old"} (map :name listed))))
+      (is (= {:name "old" :dir (str (java.io.File. root "old")) :recorded-at "2026-10-24T19:30:41Z"
+              :raw-bytes 0 :dids? false :duration-ms 60000 :stopped-by :duration
+              :vehicle {:description "Impreza" :state "idling"} :note "idling"}
+             (by-name "old")))
+      (is (= {:dids? true :in-progress? true :note "drive"}
+             (select-keys (by-name "new") [:dids? :in-progress? :note])))
+      (is (true? (:incomplete? (by-name "broken")))))))
+
 (deftest record-alternates-pid-and-did-requests
   (let [dir (temp-dir)]
     (with-redefs [openport/open-session (fn [_] (fake-adapter (fake-vehicle-responder)))]
@@ -117,13 +156,15 @@
                                                                        :pids [0x0C]
                                                                        :interval-ms 10}))]
         (is (wait-for #(< 200 (.length raw-file)) 3000))
-        (is (not (.exists (java.io.File. dir "meta.edn"))))
+        (is (true? (:in-progress? (edn/read-string (slurp (java.io.File. dir "meta.edn"))))))
         (deliver stop true)
         (let [result (deref recording 3000 nil)]
           (is (true? (:ok? result)))
           (is (= :stop (:stopped-by result)))
           (is (pos? (get-in result [:counts :pid-samples])))
-          (is (= :stop (:stopped-by (edn/read-string (slurp (java.io.File. dir "meta.edn")))))))))))
+          (let [meta (edn/read-string (slurp (java.io.File. dir "meta.edn")))]
+            (is (= :stop (:stopped-by meta)))
+            (is (nil? (:in-progress? meta)))))))))
 
 (defn- failing-input
   "Wraps a fake session so reads throw, as when the adapter is unplugged,
@@ -168,3 +209,10 @@
                result))
         (is (not (.exists dir)))))))
 
+
+(deftest vehicle-meta-keeps-the-items-that-were-read
+  (is (= {:vin "JF1GPAA60F8000000" :calibration-ids ["EA1T002C"]}
+         (recording/vehicle-meta {:ok? true :path "/dev/fake" :vin "JF1GPAA60F8000000"
+                                  :calibration-ids ["EA1T002C"] :ecu-id nil
+                                  :errors {:ecu-id :timeout}})))
+  (is (nil? (recording/vehicle-meta {:ok? false :error :missing-path}))))

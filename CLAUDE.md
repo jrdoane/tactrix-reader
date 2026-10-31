@@ -23,7 +23,7 @@ clojure -M:run <command>        # CLI; run with no matching command for usage
 
 # services/engine-server
 clojure -M:test
-clojure -M:run                  # replay the committed recording on :8080 (no hardware)
+clojure -M:run                  # replay the newest recording in ~/.tactrix-reader/recordings on :8080 (no hardware)
 clojure -M:run live [path]      # poll a real vehicle
 PEDESTAL_DEV_MODE=true clojure -M:run   # needed with `shadow-cljs watch` (CSP allows hot reload)
 
@@ -69,24 +69,32 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    signals, `{:type :did :did :did-hex :data :timestamp-us}` for single-frame
    UDS service 22 replies (only recordings made with `record-dids` have them;
    `uds/did-sample` adds `:name`, `:matches`, `:value`, and `:unit` for the DIDs
-   in `uds/did-signals`), and `{:type :status :source ... :state :running|:stopped|:failed}`.
+   in `uds/did-signals`; the live source polls them with `:dids`), and
+   `{:type :status :source ... :state :running|:stopped|:failed}`. The live
+   source's `:start-recording!`/`:stop-recording!` save what it receives as a
+   recording and emit `{:type :recording :state :recording|:saved ...}`.
    Consumers must not depend on which source is running.
 2. **Source manager** (`engine_server/sources.clj`): an agent that switches
    between replay, a live adapter, and no source, one switch at a time. Each
    switch stops the old source, emits `{:type :reset}`, and emits a
    `{:type :info ...}` event (adapter, vehicle identity from
    `read-vehicle-info` and trouble codes from `read-trouble-codes`, or
-   recording metadata) before starting the new one.
+   recording metadata) before starting the new one. It also starts and stops
+   recordings of the live source, into the configured recordings directory,
+   with the identified vehicle in `meta.edn`; a switch saves any recording
+   first.
 3. **Hub** (`engine_server/hub.clj`): batches samples, signals, and DID
-   replies every 100 ms, keeping only the latest per PID, signal, and DID. It forwards status and info immediately and keeps
+   replies every 100 ms, keeping only the latest per PID, signal, and DID. It forwards status, info, and recording events immediately and keeps
    a snapshot for new connections; `:reset` clears it and sends an empty
    snapshot. Every channel uses a sliding buffer, so slow browsers drop data
    instead of back-pressuring the source.
 4. **Server** (`engine_server/server.clj`): `/stream` sends a `snapshot` SSE
-   event and then `samples`, `status`, and `info` events, with Transit JSON
-   data. `GET /api/adapters` and `POST /api/source` let the dashboard pick an
-   adapter; `local-api-guard` limits them to local, Transit requests, and only
-   paths from `scan-devices` are accepted. `main.clj` wires the hub, manager,
+   event and then `samples`, `status`, `info`, and `recording` events, with
+   Transit JSON data. `GET /api/adapters`, `GET /api/recordings`,
+   `POST /api/source`, and `POST /api/recording` let the dashboard pick an
+   adapter or recording and record; `local-api-guard` limits them to local,
+   Transit requests, and only paths from `scan-devices` and names from
+   `list-recordings` are accepted. `main.clj` wires the hub, manager,
    and server together.
 5. **Dashboard**: `stream.cljs` turns SSE events into `:stream/*` re-frame
    events and `http.cljs` calls the API. `events.cljs` stores samples keyed by
@@ -97,6 +105,10 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
 The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The
 server serves it from there.
+
+Configuration and recordings live outside the repo, in `~/.tactrix-reader`
+(see `config` below). Tests never touch it: they pass a temporary
+`:recordings-dir` or redefine `config/home-dir`.
 
 ### `lib/device/src/tactrix_reader/device/`
 
@@ -116,7 +128,8 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
   - `can/run-can-session!` keeps one raw CAN channel (5) open with a pass-all filter. It sends single-frame `02 01 <pid>` requests to `7E0` on `default-poll-schedule` and decodes `7E8` replies with `reply-sample`. `record` and the live source both use it. With `:dids` it alternates them with single-frame service 22 requests, decoded by `did-reply`; `record-dids` uses this, and `export-recording` writes the replies to `dids.csv`.
 - **Broadcast decoding (`broadcast`):** `broadcast-signals` maps CAN IDs from the car's own traffic to the mode 01 PID each signal matches, and `broadcast-samples` decodes them into PID-shaped samples with `:can-id`. The live and replay sources emit them alongside polled PIDs (`:broadcast {}` turns them off). Add a signal only once it matches a polled PID, and record it in `lib/device/docs/can-broadcast.md`.
 - **Inferred signals (`broadcast`):** `inferred-signals` holds signals identified only from how they behave (gear, steering angle, brake, wheel speeds, accelerations, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
-- **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`, and `frames.csv` is gitignored.
+- **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`. `start-recording!` writes `raw.bin` and `meta.edn` (first with `:in-progress? true`) for both `record` and the live source, and `list-recordings` describes a recordings folder.
+- **`config`:** `~/.tactrix-reader` (or `$TACTRIX_READER_HOME`) holds an optional hand-edited `config.edn` (`:recordings-dir`, `:vehicles` descriptions keyed by VIN or calibration ID) and, by default, `recordings/`. `resolve-recording-dir` treats a bare name as a folder there and anything with `/` as a path. Recordings are local data and are not committed.
 - **`source`:** the live and replay sources, built on `can` and `recording`.
 
 The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`

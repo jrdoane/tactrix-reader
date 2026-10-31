@@ -4,8 +4,8 @@
   Samples, signals, and DID replies are batched: every `batch-ms`,
   subscribers get the latest sample of each PID, the latest value of each
   inferred signal, and the latest reply for each UDS data identifier that
-  arrived since the last batch. Status and info events are forwarded
-  immediately. A `:reset` event, sent when the source changes, clears
+  arrived since the last batch. Status, info, and recording events are
+  forwarded immediately. A `:reset` event, sent when the source changes, clears
   everything kept so far and sends subscribers an empty snapshot. A subscriber
   that falls behind drops old messages instead of slowing the source."
   (:require [clojure.core.async :as async]))
@@ -16,6 +16,7 @@
 (def ^:private empty-state
   {:status nil
    :info nil
+   :recording nil
    :samples {}
    :signals {}
    :dids {}})
@@ -28,9 +29,10 @@
    :signals (sorted-samples signals)
    :dids (sorted-samples dids)})
 
-(defn- state->snapshot [{:keys [status info] :as state}]
+(defn- state->snapshot [{:keys [status info recording] :as state}]
   (merge {:status status
-          :info info}
+          :info info
+          :recording recording}
          (batch state)))
 
 (defn start-hub
@@ -84,6 +86,13 @@
                             :data info})
              (recur pending ticker))
 
+           (= :recording (:type event))
+           (let [recording (dissoc event :type)]
+             (swap! state assoc :recording recording)
+             (async/>! out {:event :recording
+                            :data recording})
+             (recur pending ticker))
+
            (= :reset (:type event))
            (do
              (reset! state empty-state)
@@ -104,13 +113,13 @@
     (async/put! (:in hub) event)))
 
 (defn snapshot
-  "The latest status and info, and the latest sample of every PID, value of
+  "The latest status, info, and recording event, and the latest sample of every PID, value of
   every signal, and reply for every DID seen since the last reset."
   [hub]
   (state->snapshot @(:state hub)))
 
 (defn subscribe
-  "Returns a channel of `{:event :samples|:status|:info|:snapshot, :data ...}`
+  "Returns a channel of `{:event :samples|:status|:info|:recording|:snapshot, :data ...}`
   messages."
   [hub]
   (let [subscription (async/chan (async/sliding-buffer 64))]

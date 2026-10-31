@@ -4,6 +4,7 @@
             [tactrix-reader.device.broadcast-test]
             [tactrix-reader.device.can-test]
             [tactrix-reader.device.codec-test]
+            [tactrix-reader.device.config-test]
             [tactrix-reader.device.obd-test]
             [tactrix-reader.device.openport-test]
             [tactrix-reader.device.pids-test]
@@ -20,6 +21,7 @@
                                              'tactrix-reader.device.broadcast-test
                                              'tactrix-reader.device.can-test
                                              'tactrix-reader.device.codec-test
+                                             'tactrix-reader.device.config-test
                                              'tactrix-reader.device.obd-test
                                              'tactrix-reader.device.openport-test
                                              'tactrix-reader.device.pids-test

@@ -46,13 +46,18 @@ path use the first detected adapter when it is left out.
 | `uds-read <dids> [path]` | Read each comma-separated hex data identifier with UDS service 22 | Yes |
 | `uds-scan <start> <end> [path]` | Read every data identifier in a hex range with UDS service 22 and report those that exist | Yes, one request per DID |
 | `uds-supported [start] [path]` | List the supported data identifiers by following the ECU's supported-DID bitmaps from `1000` | Yes, one request per 32 DIDs |
-| `record <dir> [seconds] [path]` | Record CAN traffic while polling PIDs | Yes |
-| `record-dids <dir> <dids> [seconds] [path]` | Record like `record`, also polling comma-separated hex DIDs, or `scanned` | Yes |
-| `export-recording <dir>` | Regenerate a recording's CSVs from `raw.bin` | No |
+| `record [name] [seconds] [path]` | Read the vehicle's identity, then record CAN traffic while polling PIDs; with no name or `-`, it is named from the date and time | Yes |
+| `record-dids <name> <dids> [seconds] [path]` | Record like `record`, also polling comma-separated hex DIDs, or `scanned` | Yes |
+| `recordings` | List the saved recordings, newest first | No |
+| `export-recording <name>` | Regenerate a recording's CSVs from `raw.bin` | No |
+
+A recording name such as `my-drive` is a folder in
+`~/.tactrix-reader/recordings`; a name containing `/` is a path. See
+[where recordings live](docs/recordings.md#where-recordings-live).
 
 `obd`, `pid`, `pids`, `vehicle-info`, and `trouble-codes` are covered in
 [OBD-II requests and decoded PIDs](docs/obd-pids.md); `ssm-init`,
-`ssm-read`, `uds-read`, `uds-scan`, and `uds-supported` in [Subaru SSM reads](docs/subaru-ssm.md); `record`, `record-dids`, and `export-recording` in
+`ssm-read`, `uds-read`, `uds-scan`, and `uds-supported` in [Subaru SSM reads](docs/subaru-ssm.md); `record`, `record-dids`, `recordings`, and `export-recording` in
 [Recordings](docs/recordings.md).
 
 Failures are returned as EDN with `:ok? false` and an `:error` keyword rather
@@ -169,7 +174,8 @@ The main entry points, by namespace under `tactrix-reader.device`:
 | `obd` | `read-trouble-codes`, `decode-dtc-reply` | Stored, pending, and permanent trouble codes (services 03, 07, 0A) |
 | `ssm` | `ssm-init`, `ssm-read` | [Subaru SSM](docs/subaru-ssm.md) ECU ID and memory reads over ISO15765 |
 | `uds` | `read-did`, `scan-dids`, `supported-dids` | [UDS ReadDataByIdentifier](docs/subaru-ssm.md#trying-uds-service-22) (service 22) over ISO15765 |
-| `recording` | `record`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
+| `config` | `read-config`, `recordings-dir`, `resolve-recording-dir` | Local configuration and recordings in `~/.tactrix-reader` |
+| `recording` | `record`, `start-recording!`, `list-recordings`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
 | `broadcast` | `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
 | `broadcast` | `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
 | `openport` | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
@@ -190,13 +196,16 @@ server cannot tell them apart:
 - `{:type :status :source :live|:replay :state :running|:stopped|:failed ...}`
 
 Each returns a map whose `:stop!` function stops the source and waits for it
-to finish.
+to finish. The live source's map also has `:start-recording!` and
+`:stop-recording!`, which save what it receives as a recording without
+interrupting polling, and emit `{:type :recording :state :recording|:saved ...}`.
 
 ```clojure
-(require '[tactrix-reader.device.source :as source])
+(require '[tactrix-reader.device.config :as config]
+         '[tactrix-reader.device.source :as source])
 
 (def replay
-  (source/start-replay-source! "recordings/2026-10-24-idle" {:emit prn}))
+  (source/start-replay-source! (config/resolve-recording-dir "2026-10-24-idle") {:emit prn}))
 ((:stop! replay))
 ```
 
@@ -221,7 +230,8 @@ as samples, and those in `inferred-signals` as
 `:broadcast {}` or `:signals {}` to turn either off.
 
 `record` uses the same session code and schedule. Pass `:schedule`,
-`:interval-ms`, `:tx-id`, `:rx-id`, or `:baud` to change them.
+`:interval-ms`, `:tx-id`, `:rx-id`, or `:baud` to change them, and `:dids`
+to alternate PID requests with service 22 requests for those DIDs.
 
 The replay source plays a recording's PID samples, broadcast samples, and
 inferred signals (`:broadcast` and `:signals` as for the live source), paced

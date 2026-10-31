@@ -6,7 +6,9 @@ connects to the [engine server's](../../services/engine-server/README.md)
 
 The page has:
 
-- An adapter picker with Rescan, Connect, Disconnect, and Replay recording.
+- An adapter picker with Rescan, Connect, Disconnect, and Poll DIDs, which
+  alternates PID requests with the scanned UDS DIDs.
+- Record and Stop recording, with a note, while connected live.
 - Panels for the source, the adapter (serial, device, firmware, battery
   voltage), the vehicle (VIN, calibration ID and CVN, ECU name, SSM ECU ID, or why
   each could not be read), and diagnostics from PID 01 (check-engine light,
@@ -22,6 +24,9 @@ The page has:
   readouts, is tagged inferred on its own. See
   [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
 - A table of every PID received, with where each came from.
+- The saved recordings, grouped by the vehicle each was recorded on, with a
+  Replay button for each. See
+  [recordings](../../lib/device/docs/recordings.md#recording-from-the-dashboard).
 
 ## Building
 

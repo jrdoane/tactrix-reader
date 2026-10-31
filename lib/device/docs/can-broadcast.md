@@ -5,7 +5,7 @@ receives it without sending anything, and every [recording](recordings.md)
 captures it in `raw.bin`. This page records what that traffic contains on the
 project's 2015 Impreza (manual).
 
-It comes from two recordings, each polling mode 01 PIDs alongside:
+It comes from two [reference recordings](recordings.md#reference-recordings), each polling mode 01 PIDs alongside:
 
 - **`2026-10-24-idle`:** 60 seconds of a warm engine idling in neutral, parked.
   Engine speed wanders between 633 and 662 rpm and nothing else changes.

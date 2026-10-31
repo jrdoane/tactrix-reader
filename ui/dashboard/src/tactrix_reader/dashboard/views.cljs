@@ -174,7 +174,13 @@
    :connect-failed "The adapter refused the CAN connection."
    :unknown-adapter "That adapter is no longer connected. Rescan and try again."
    :request-failed "The server did not answer."
-   :timeout "The adapter did not answer."})
+   :timeout "The adapter did not answer."
+   :not-live "Recording needs a running live connection."
+   :not-running "The adapter is not polling yet."
+   :already-recording "A recording is already running."
+   :not-recording "No recording is running."
+   :unknown-recording "That recording is no longer in the recordings folder."
+   :no-recording "There is no recording to replay."})
 
 (defn- error-message [error]
   (get error-messages error (some-> error name (str/replace "-" " "))))
@@ -259,6 +265,23 @@
       (str seconds " s")
       (str (quot seconds 60) " min " (mod seconds 60) " s"))))
 
+(defn- format-time
+  "An ISO instant in the browser's local time, such as `Oct 30, 2026, 8:04 AM`."
+  [instant]
+  (when instant
+    (.toLocaleString (js/Date. instant) js/undefined #js {:dateStyle "medium" :timeStyle "short"})))
+
+(defn- format-size [bytes]
+  (if (< bytes 1e6)
+    (str (js/Math.round (/ bytes 1e3)) " kB")
+    (str (.toFixed (/ bytes 1e6) 1) " MB")))
+
+(defn- format-clock
+  "Elapsed ms as `m:ss`."
+  [ms]
+  (let [seconds (max 0 (js/Math.floor (/ ms 1000)))]
+    (str (quot seconds 60) ":" (.padStart (str (mod seconds 60)) 2 "0"))))
+
 (defn- connection-badge []
   (let [connection @(rf/subscribe [::subs/connection])
         status @(rf/subscribe [::subs/status])]
@@ -268,12 +291,39 @@
        [:span.badge {:class (name (:state status))}
         (str (name (:source status)) " " (name (:state status)))])]))
 
+(defn- recording-controls
+  "Record and Stop, with a note saved in the recording's meta.edn."
+  []
+  (let [recording @(rf/subscribe [::subs/recording])
+        recordable? @(rf/subscribe [::subs/recordable?])
+        request @(rf/subscribe [::subs/request])
+        note @(rf/subscribe [::subs/note])
+        now @(rf/subscribe [::subs/now])
+        recording? (= :recording (:state recording))
+        pending? (= :pending (:state request))]
+    [:div.control-row
+     [:label {:for "note"} "Note"]
+     [:input#note {:type "text"
+                   :placeholder "Conditions, such as cold start then highway"
+                   :value note
+                   :disabled recording?
+                   :on-change #(rf/dispatch [::events/set-note (.. % -target -value)])}]
+     (if recording?
+       [:button.record.active {:disabled pending?
+                               :on-click #(rf/dispatch [::events/stop-recording])}
+        (str "Stop recording " (when now (format-clock (- now (js/Date.parse (:started-at recording))))))]
+       [:button.record {:disabled (or pending? (not recordable?))
+                        :title (when-not recordable? "Connect to the car to record")
+                        :on-click #(rf/dispatch [::events/start-recording])}
+        "Record"])]))
+
 (defn- source-controls []
   (let [adapters @(rf/subscribe [::subs/adapters])
         selected @(rf/subscribe [::subs/selected-path])
         status @(rf/subscribe [::subs/status])
         request @(rf/subscribe [::subs/request])
         busy? @(rf/subscribe [::subs/busy?])
+        poll-dids? @(rf/subscribe [::subs/poll-dids?])
         switch! #(rf/dispatch [::events/switch-source %])]
     [:section.controls
      [:div.control-row
@@ -288,14 +338,18 @@
            [:option {:value path} (str/join " · " (remove nil? [product serial path]))]))]
       [:button {:on-click #(rf/dispatch [::events/refresh-adapters])} "Rescan"]
       [:button.primary {:disabled (or busy? (not selected))
-                        :on-click #(switch! {:type :live :path selected})}
+                        :on-click #(switch! {:type :live :path selected :dids? poll-dids?})}
        (if (and (= :live (:source status)) (= selected (:path status))) "Reconnect" "Connect")]
       [:button {:disabled (or busy? (= :none (:source status)))
                 :on-click #(switch! {:type :none})}
        "Disconnect"]
-      [:button {:disabled busy?
-                :on-click #(switch! {:type :replay})}
-       "Replay recording"]]
+      [:label.check {:title "Alternate PID requests with the scanned UDS DIDs, which roughly halves the PID rate"}
+       [:input {:type "checkbox"
+                :checked poll-dids?
+                :disabled busy?
+                :on-change #(rf/dispatch [::events/set-poll-dids (.. % -target -checked)])}]
+       "Poll DIDs"]]
+     [recording-controls]
      (when (= :failed (:state request))
        [:p.error (error-message (:error request))])
      (when (= :failed (:state status))
@@ -326,8 +380,9 @@
     [panel "Source"
      (field "Source" (some-> (:source status) name))
      (field "State" (some-> (:state status) name))
-     (field "Recorded" (some-> (:recorded-at recording) (subs 0 16) (str/replace "T" " ") (str " UTC")))
-     (field "Conditions" (:state recording))
+     (field "Recording" (:name recording))
+     (field "Recorded" (format-time (:recorded-at recording)))
+     (field "Note" (:note recording))
      (field "Length" (some-> (:duration-ms recording) format-duration))]))
 
 (defn- adapter-panel []
@@ -522,6 +577,83 @@
                         (str "CAN " (can-id-hex can-id) ", polled")
                         "polled")]])]]]))
 
+(defn- vehicle-key [{:keys [vin calibration-ids description]}]
+  (or vin (first calibration-ids) description))
+
+(defn- vehicle-heading [{:keys [vin calibration-ids ecu-name description] :as vehicle}]
+  (let [details (remove nil? [(some->> vin (str "VIN "))
+                              (some->> (seq calibration-ids) (str/join ", ") (str "Calibration "))
+                              ecu-name])]
+    [:div.block-head
+     [:h3 (or description (if (vehicle-key vehicle) "Unnamed vehicle" "Unknown vehicle"))]
+     (when (seq details)
+       [:span.muted (str/join " · " details)])
+     (when-not (vehicle-key vehicle)
+       [:span.muted "recorded before vehicles were saved"])]))
+
+(defn- recording-state
+  "Why a recording may be unusable, or nil."
+  [{:keys [in-progress? incomplete? stopped-by error dir]} active-dir]
+  (cond
+    (and in-progress? (= dir active-dir)) "recording"
+    in-progress? "interrupted"
+    incomplete? "no meta.edn"
+    (= :error stopped-by) (str "adapter error" (some->> error (str ": ")))
+    :else nil))
+
+(defn- recordings-block
+  "Saved recordings, grouped by the vehicle each was recorded on, each with a
+  button that replays it."
+  []
+  (let [recordings @(rf/subscribe [::subs/recordings])
+        dir @(rf/subscribe [::subs/recordings-dir])
+        {:keys [source recording]} @(rf/subscribe [::subs/info])
+        active @(rf/subscribe [::subs/recording])
+        busy? @(rf/subscribe [::subs/busy?])
+        active-dir (when (= :recording (:state active)) (:dir active))
+        playing-dir (when (= :replay source) (:dir recording))
+        by-vehicle (group-by (comp vehicle-key :vehicle) recordings)
+        ;; Vehicles in the order of their newest recording.
+        vehicles (distinct (map (comp vehicle-key :vehicle) recordings))]
+    [:section.block
+     [:div.block-head
+      [:h2 "Recordings"]
+      [:button {:on-click #(rf/dispatch [::events/refresh-recordings])} "Refresh"]]
+     [:p.block-note "Saved in " [:code (or dir "~/.tactrix-reader/recordings")] "."]
+     (cond
+       (nil? recordings) [:p.muted "Loading…"]
+       (empty? recordings) [:p.muted "No recordings yet. Connect to the car and press Record."]
+       :else
+       (into [:div.recordings]
+             (for [key vehicles
+                   :let [entries (get by-vehicle key)]]
+               ^{:key (or key "unknown")}
+               [:section.vehicle-recordings
+                ;; The newest identity, with a description from any of them.
+                [vehicle-heading (cond-> (:vehicle (first entries))
+                                   (some (comp :description :vehicle) entries)
+                                   (assoc :description (some (comp :description :vehicle) entries)))]
+                [:table.samples
+                 [:thead
+                  [:tr [:th "Recorded"] [:th "Name"] [:th.value "Length"] [:th "Note"]
+                   [:th "DIDs"] [:th.value "Size"] [:th "State"] [:th]]]
+                 [:tbody
+                  (for [{:keys [name dir recorded-at duration-ms note dids? raw-bytes] :as entry} entries
+                        :let [playing? (= dir playing-dir)]]
+                    ^{:key dir}
+                    [:tr {:class (when playing? "playing")}
+                     [:td.name (format-time recorded-at)]
+                     [:td.pid name]
+                     [:td.value (some-> duration-ms format-duration)]
+                     [:td.note note]
+                     [:td.source (when dids? "yes")]
+                     [:td.value (format-size raw-bytes)]
+                     [:td.note (recording-state entry active-dir)]
+                     [:td.value
+                      [:button {:disabled (or busy? (= dir active-dir))
+                                :on-click #(rf/dispatch [::events/switch-source {:type :replay :recording name}])}
+                       (if playing? "Replaying" "Replay")]]])]]])))]))
+
 (defn app []
   [:main
    [:header
@@ -535,4 +667,5 @@
     [diagnostics-panel]]
    [readouts]
    [did-block]
-   [sample-table]])
+   [sample-table]
+   [recordings-block]])
