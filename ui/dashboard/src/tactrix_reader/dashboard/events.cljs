@@ -1,7 +1,30 @@
 (ns tactrix-reader.dashboard.events
   (:require [re-frame.core :as rf]
             [tactrix-reader.dashboard.http]
+            [tactrix-reader.dashboard.series :as series]
             [tactrix-reader.dashboard.stream]))
+
+(def ^:private initial-map
+  {;; :stream, or the name of a recording.
+   :log :stream
+   ;; Channel keys, as `series` names them.
+   :x :pid/engine-rpm
+   :y series/load-key
+   :z :pid/timing-advance
+   :timeline :pid/vehicle-speed
+   ;; :mean, :min, :max, or :count.
+   :stat :mean
+   ;; Cells with fewer rows are dimmed.
+   :min-hits 3
+   ;; Breakpoints typed for a channel, keyed by channel; others use
+   ;; `series/default-axis`.
+   :axis-text {}
+   ;; Each {:key :op :>=|:<= :value}.
+   :filters []
+   ;; [from-ms to-ms] of the log, or nil for all of it.
+   :window nil
+   ;; The selected [x-index y-index], or nil.
+   :cell nil})
 
 (def initial-db
   {:connection :connecting
@@ -37,7 +60,16 @@
    ;; The time in ms, updated every second while recording.
    :now nil
    ;; The last API request: nil, {:state :pending}, or {:state :failed :error ...}.
-   :request nil})
+   :request nil
+   ;; :dashboard or :map.
+   :view :dashboard
+   ;; Everything the stream has sent since the source last changed, as a
+   ;; `series` log.
+   :stream-log nil
+   ;; The recording open in the map: {:name :state :loading|:loaded|:failed
+   ;; :log :error}.
+   :recording-log nil
+   :map initial-map})
 
 (defn- index-by-name [samples]
   (into {} (map (juxt :name identity)) samples))
@@ -100,33 +132,43 @@
  (fn [db _]
    (assoc db :connection :disconnected)))
 
+(defn- reset-stream-map
+  "A new stream log starts at 0, so a window or cell picked on the old one no
+  longer means anything."
+  [db]
+  (cond-> db
+    (= :stream (get-in db [:map :log])) (update :map assoc :window nil :cell nil)))
+
 (rf/reg-event-fx
  :stream/snapshot
  ;; Sent on connect, and again with empty data whenever the source changes.
- (fn [{:keys [db]} [_ {:keys [status info recording samples signals dids]}]]
-   (let [dids (index-by-did dids)]
-     {:db (assoc db
-                 :status status
-                 :info info
-                 :recording recording
-                 :firmware (:firmware status)
-                 :samples (index-by-name samples)
-                 :signals (index-by-signal signals)
-                 :can-ids (can-ids samples)
-                 :dids dids
-                 :did-ranges (widen-ranges {} dids))
+ (fn [{:keys [db]} [_ {:keys [status info recording samples signals dids] :as snapshot}]]
+   (let [dids-by-did (index-by-did dids)]
+     {:db (-> db
+              (assoc :status status
+                     :info info
+                     :recording recording
+                     :firmware (:firmware status)
+                     :samples (index-by-name samples)
+                     :signals (index-by-signal signals)
+                     :can-ids (can-ids samples)
+                     :dids dids-by-did
+                     :did-ranges (widen-ranges {} dids-by-did)
+                     :stream-log (series/append-batch nil snapshot))
+              reset-stream-map)
       ::tick (recording? recording)})))
 
 (rf/reg-event-db
  :stream/samples
- (fn [db [_ {:keys [samples signals dids]}]]
-   (let [dids (index-by-did dids)]
+ (fn [db [_ {:keys [samples signals dids] :as batch}]]
+   (let [dids-by-did (index-by-did dids)]
      (-> db
          (update :samples merge (index-by-name samples))
          (update :signals merge (index-by-signal signals))
          (update :can-ids merge (can-ids samples))
-         (update :dids merge dids)
-         (update :did-ranges widen-ranges dids)))))
+         (update :dids merge dids-by-did)
+         (update :did-ranges widen-ranges dids-by-did)
+         (update :stream-log series/append-batch batch)))))
 
 (rf/reg-event-db
  :stream/status
@@ -241,3 +283,87 @@
  ::request-failed
  (fn [db [_ {:keys [error]}]]
    (assoc db :request {:state :failed :error (or error :request-failed)})))
+
+(rf/reg-event-db
+ ::show-view
+ (fn [db [_ view]]
+   (assoc db :view view)))
+
+(rf/reg-event-fx
+ ::open-map
+ ;; `log` is :stream or a recording's name, whose series is fetched unless it
+ ;; is already loaded.
+ (fn [{:keys [db]} [_ log]]
+   (let [db (-> db
+                (assoc :view :map)
+                (update :map assoc :log log :window nil :cell nil))
+         loaded? (and (= log (get-in db [:recording-log :name]))
+                      (not= :failed (get-in db [:recording-log :state])))]
+     (if (or (= :stream log) loaded?)
+       {:db db}
+       {:db (assoc db :recording-log {:name log :state :loading})
+        :http {:url (str "/api/recordings/" (js/encodeURIComponent log) "/series")
+               :on-success [::series-loaded log]
+               :on-failure [::series-failed log]}}))))
+
+(rf/reg-event-db
+ ::series-loaded
+ (fn [db [_ log data]]
+   (cond-> db
+     (= log (get-in db [:recording-log :name]))
+     (assoc :recording-log {:name log :state :loaded :log data}))))
+
+(rf/reg-event-db
+ ::series-failed
+ (fn [db [_ log {:keys [error]}]]
+   (cond-> db
+     (= log (get-in db [:recording-log :name]))
+     (assoc :recording-log {:name log :state :failed :error (or error :request-failed)}))))
+
+(rf/reg-event-db
+ ::set-map-option
+ ;; Changing an axis or the parameter clears the selected cell.
+ (fn [db [_ option value]]
+   (cond-> (assoc-in db [:map option] value)
+     (#{:x :y :z} option) (assoc-in [:map :cell] nil))))
+
+(rf/reg-event-db
+ ::set-axis-text
+ (fn [db [_ key text]]
+   (-> db
+       (assoc-in [:map :axis-text key] text)
+       (assoc-in [:map :cell] nil))))
+
+(rf/reg-event-db
+ ::reset-axis
+ (fn [db [_ key]]
+   (-> db
+       (update-in [:map :axis-text] dissoc key)
+       (assoc-in [:map :cell] nil))))
+
+(rf/reg-event-db
+ ::add-filter
+ ;; Starts with a warm engine, the usual first filter.
+ (fn [db _]
+   (update-in db [:map :filters] conj {:key :pid/coolant-temp :op :>= :value 75})))
+
+(rf/reg-event-db
+ ::set-filter
+ (fn [db [_ i option value]]
+   (assoc-in db [:map :filters i option] value)))
+
+(rf/reg-event-db
+ ::remove-filter
+ (fn [db [_ i]]
+   (update-in db [:map :filters] #(into (subvec % 0 i) (subvec % (inc i))))))
+
+(rf/reg-event-db
+ ::set-window
+ (fn [db [_ window]]
+   (assoc-in db [:map :window] window)))
+
+(rf/reg-event-db
+ ::select-cell
+ ;; Selecting the selected cell clears it.
+ (fn [db [_ cell]]
+   (update-in db [:map :cell] #(when (not= % cell) cell))))

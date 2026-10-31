@@ -1,7 +1,7 @@
 (ns tactrix-reader.engine-server.server
   "Pedestal routes: the dashboard page, its assets, the SSE stream, and the
-  API that lists adapters and recordings, switches the source, and starts and
-  stops recording."
+  API that lists adapters and recordings, gives a recording's values as time
+  series, switches the source, and starts and stops recording."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -13,6 +13,7 @@
             [io.pedestal.service.resources :as resources]
             [tactrix-reader.device.config :as config]
             [tactrix-reader.device.recording :as recording]
+            [tactrix-reader.device.series :as series]
             [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.hub :as hub]
             [tactrix-reader.engine-server.sources :as sources]))
@@ -115,6 +116,31 @@
     (transit-response 200 {:dir (str (:recordings-dir cfg))
                            :recordings (recordings cfg)})))
 
+(defn- series-handler
+  "A recording's values as time series, from `series/recording-series`, for
+  the dashboard's map. Only names `list-recordings` gives are accepted. The
+  last response is kept, since a long drive takes seconds to decode, unless
+  the recording is still being made."
+  [cfg]
+  (let [cache (atom nil)]
+    (fn [request]
+      (let [name (get-in request [:path-params :name])
+            entry (some #(when (= name (:name %)) %)
+                        (recording/list-recordings (:recordings-dir cfg)))]
+        (if-not entry
+          (transit-response 404 {:error :unknown-recording})
+          (let [raw (io/file (:dir entry) "raw.bin")
+                key [(:dir entry) (.length raw) (.lastModified raw)]]
+            (if (= key (:key @cache))
+              (:response @cache)
+              (let [result (series/recording-series (:dir entry))
+                    response (if (:ok? result)
+                               (transit-response 200 (-> result (dissoc :ok?) (assoc :name name)))
+                               (transit-response 422 (select-keys result [:error])))]
+                (when-not (:in-progress? entry)
+                  (reset! cache {:key key :response response}))
+                response))))))))
+
 (defn- requested-source
   "Turns a request body into a source for `sources/switch!`, or an error. Only
   paths of detected adapters and names of listed recordings are accepted, so a
@@ -188,6 +214,7 @@
           ["/api/adapters" :get [local-api-guard adapters-handler] :route-name ::adapters]
           ["/api/source" :post [local-api-guard (source-handler sources config)] :route-name ::source]
           ["/api/recordings" :get [local-api-guard (recordings-handler config)] :route-name ::recordings]
+          ["/api/recordings/:name/series" :get [local-api-guard (series-handler config)] :route-name ::series]
           ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]}
         (resources/resource-routes {:resource-root "public/assets"
                                     :prefix "/assets"}))

@@ -293,6 +293,17 @@
       (is (= {:status 400 :body {:error :unknown-recording}}
              (post-transit client (str base "/api/source") "application/transit+json"
                            {:type :replay :recording "../../etc"})))
+      (is (= {:status 200
+              :body {:name "2026-10-30-did-drive"
+                     :bucket-ms 100
+                     :duration-ms 10
+                     :channels {:pid/engine-rpm {:unit :rpm}
+                                :pid/coolant-temp {:unit :celsius}}
+                     :series {:pid/engine-rpm {:t [0] :v [800.0]}
+                              :pid/coolant-temp {:t [10] :v [45]}}}}
+             (get-transit client (str base "/api/recordings/2026-10-30-did-drive/series"))))
+      (is (= {:status 404 :body {:error :unknown-recording}}
+             (get-transit client (str base "/api/recordings/missing/series"))))
       (is (= {:status 202 :body {:source {:type :replay :recording newer}}}
              (post-transit client (str base "/api/source") "application/transit+json"
                            {:type :replay :recording "2026-10-30-did-drive"})))

@@ -34,6 +34,19 @@ changing it reconnects.
 The **Recordings** list shows every recording, grouped by vehicle, and
 replays any of them.
 
+## Mapping a recording
+
+**Map** beside a recording (or the Map view's log picker) opens it in the
+dashboard's map: one value binned by two others, by default timing advance by
+RPM and load in g/rev (MAF × 60 / RPM), like an ECU table. The server decodes
+`raw.bin` into time series (`series/recording-series`). Each value is held on
+a 100 ms grid for up to three times its usual gap between reads (1 to 10
+seconds), so slow PIDs and DIDs line up with fast ones. Any PID, inferred
+signal, or DID (decoded, or raw bytes as a number) can be an axis or the
+value shown, with filters such as coolant ≥ 75 °C and a window dragged on the
+timeline. The current stream, live or a replay, can be mapped the same way
+as it arrives.
+
 ## Recording from the command line
 
 Run these commands from `lib/device`. `record` sends traffic on the vehicle

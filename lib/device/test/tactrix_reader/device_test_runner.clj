@@ -11,6 +11,7 @@
             [tactrix-reader.device.probe-test]
             [tactrix-reader.device.recording-test]
             [tactrix-reader.device.serial-test]
+            [tactrix-reader.device.series-test]
             [tactrix-reader.device.source-test]
             [tactrix-reader.device.ssm-test]
             [tactrix-reader.device.uds-test]
@@ -28,6 +29,7 @@
                                              'tactrix-reader.device.probe-test
                                              'tactrix-reader.device.recording-test
                                              'tactrix-reader.device.serial-test
+                                             'tactrix-reader.device.series-test
                                              'tactrix-reader.device.source-test
                                              'tactrix-reader.device.ssm-test
                                              'tactrix-reader.device.uds-test

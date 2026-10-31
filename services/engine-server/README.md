@@ -56,6 +56,7 @@ with an `:error`.
 | `/api/snapshot` | Latest status, info, recording, samples, signals, and DIDs, as Transit JSON |
 | `GET /api/adapters` | `{:adapters [{:vendor :product :serial :path :paths}]}` from `scan-devices` |
 | `GET /api/recordings` | `{:dir "..." :recordings [...]}`: each recording's name, time, length, vehicle (with its config.edn description), note, and size, newest first |
+| `GET /api/recordings/<name>/series` | The recording's values as time series for the dashboard's map (`series/recording-series`): `{:name :bucket-ms :duration-ms :channels {key {:unit :name}} :series {key {:t [ms ...] :v [...]}}}`. 404 `:unknown-recording` for a name `/api/recordings` doesn't list. The last one is cached |
 | `POST /api/source` | Switch source. Body: `{:type :live :path "..." :dids? true}`, `{:type :replay :recording "<name>"}`, or `{:type :none}`. Replies 202 with `{:source ...}`; progress arrives on `/stream` |
 | `POST /api/recording` | `{:action :start :note "..."}` or `{:action :stop}`: record the running live source. Replies 202, or 409 with `:not-live`, `:not-running`, `:already-recording`, or `:not-recording` |
 

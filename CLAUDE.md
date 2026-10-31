@@ -30,6 +30,7 @@ PEDESTAL_DEV_MODE=true clojure -M:run   # needed with `shadow-cljs watch` (CSP a
 # ui/dashboard
 npm install
 npx shadow-cljs release app     # or `watch app`
+npm test                        # node tests of the pure namespaces (`series`)
 npm run lint                    # clj-kondo
 ```
 
@@ -92,7 +93,9 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    event and then `samples`, `status`, `info`, and `recording` events, with
    Transit JSON data. `GET /api/adapters`, `GET /api/recordings`,
    `POST /api/source`, and `POST /api/recording` let the dashboard pick an
-   adapter or recording and record; `local-api-guard` limits them to local,
+   adapter or recording and record, and `GET /api/recordings/:name/series`
+   gives a recording's values as time series for the map (the last one is
+   cached; a long drive takes seconds to decode); `local-api-guard` limits them to local,
    Transit requests, and only paths from `scan-devices` and names from
    `list-recordings` are accepted. `main.clj` wires the hub, manager,
    and server together.
@@ -101,6 +104,13 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    `:name`, not by PID number, signals keyed by `:signal`, and DID replies
    keyed by `:did`, with the range each has read. `views.cljs`
    tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
+   The map view (`map_view.cljs`) bins one value by two others, such as timing
+   by RPM and load (MAF × 60 / RPM, g/rev), for a recording's series or for
+   the stream, which `events.cljs` also appends to a log of the same shape.
+   `series.cljs` holds the pure parts (that log, holding values on a 100 ms
+   grid, axes, binning) and is the one namespace with tests; its
+   `event-points` repeats the device library's `series/event-points`, so
+   change both together.
 
 The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The
@@ -131,6 +141,7 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
 - **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`. `start-recording!` writes `raw.bin` and `meta.edn` (first with `:in-progress? true`) for both `record` and the live source, and `list-recordings` describes a recordings folder.
 - **`config`:** `~/.tactrix-reader` (or `$TACTRIX_READER_HOME`) holds an optional hand-edited `config.edn` (`:recordings-dir`, `:vehicles` descriptions keyed by VIN or calibration ID) and, by default, `recordings/`. `resolve-recording-dir` treats a bare name as a folder there and anything with `/` as a path. Recordings are local data and are not committed.
 - **`source`:** the live and replay sources, built on `can` and `recording`.
+- **`series`:** `recording-series` decodes a recording, as the replay source does, into per-channel time series for the dashboard's map: keys `:pid/<name>`, `:signal/<signal>`, and `:did/x<hex>`, map values split into `key.part` channels, booleans as 1/0, other non-numbers as nil, and at most one point per channel per 100 ms, matching the hub's batches.
 
 The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`
 map should stay in sync with the command table in `lib/device/README.md`.

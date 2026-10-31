@@ -300,3 +300,110 @@ button.record.active { color: #fff; background: var(--bad); }
 .samples tr.playing td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .samples td button { padding: 3px 10px; font-size: 13px; }
 .block-note code { font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* Dashboard and map views. */
+header .title { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.view-toggle { display: flex; }
+.view-toggle button { border-radius: 0; }
+.view-toggle button:first-child { border-radius: 8px 0 0 8px; }
+.view-toggle button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+.view-toggle button.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+.map-controls .control-label {
+  flex: 0 0 84px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.map-filters .control-label { flex: 0 0 84px; color: var(--muted); font-size: 14px; }
+.map-controls select.stat, .map-filters select.op { flex: 0 0 auto; }
+.map-filters select { flex: 0 1 320px; }
+input[type="number"] {
+  font: inherit;
+  font-size: 14px;
+  width: 90px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.axis-input { display: flex; flex: 1 1 320px; gap: 8px; min-width: 0; }
+.axis-input input { flex: 1 1 auto; font-variant-numeric: tabular-nums; }
+input.invalid { border-color: var(--bad); }
+.map-filters .muted { font-size: 13px; }
+
+.timeline {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.timeline-head, .timeline-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-head { margin-bottom: 6px; }
+.timeline-foot { margin-top: 6px; align-items: center; color: var(--muted); }
+.timeline-foot button { padding: 2px 8px; font-size: 13px; }
+.timeline-readout { color: var(--muted); }
+.timeline svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.timeline .trace { fill: none; stroke: var(--accent); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.timeline .marks { fill: none; stroke: #eb6834; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.timeline .window { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.timeline .crosshair { stroke: var(--muted); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+
+.heat-scroll { overflow-x: auto; }
+table.heat {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.heat th {
+  padding: 4px 6px;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+}
+.heat tbody th { text-align: right; position: sticky; left: 0; background: var(--bg); }
+.heat th.corner { text-align: left; font-size: 11px; }
+.heat td {
+  min-width: 54px;
+  height: 38px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  text-align: center;
+  line-height: 1.15;
+  cursor: pointer;
+}
+.heat td.empty { cursor: default; background: color-mix(in srgb, var(--border) 35%, transparent); }
+.heat td.sparse { color: var(--muted); background: var(--panel); outline: 1px dashed var(--border); outline-offset: -1px; }
+.heat td.selected { outline: 2px solid var(--text); outline-offset: 1px; box-shadow: inset 0 0 0 2px var(--panel); }
+.heat .cell-value { display: block; font-weight: 600; }
+.heat .cell-hits { display: block; font-size: 10px; opacity: 0.75; }
+.heat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.legend-bar { width: 160px; height: 10px; border-radius: 4px; }
+.cell-detail { margin-top: 16px; max-width: 520px; }
+.cell-detail h2 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--text); }
+.cell-detail p { margin-top: 10px; font-size: 13px; }
+.samples td.actions { white-space: nowrap; }
+.samples td.actions button + button { margin-left: 6px; }
