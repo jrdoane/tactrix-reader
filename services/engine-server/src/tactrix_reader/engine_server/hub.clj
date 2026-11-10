@@ -1,10 +1,13 @@
 (ns tactrix-reader.engine-server.hub
   "Collects source events and fans them out to stream subscribers.
 
-  Samples, signals, and DID replies are batched: every `batch-ms`,
-  subscribers get the latest sample of each PID, the latest value of each
-  inferred signal, and the latest reply for each UDS data identifier that
-  arrived since the last batch. Status, info, and recording events are
+  Samples, signals, DID replies, and CAN frames are batched: every
+  `batch-ms`, subscribers get the latest sample of each PID, the latest
+  value of each inferred signal, the latest reply for each UDS data
+  identifier, and the latest frame of each CAN ID that arrived since the
+  last batch. A frame comes with how many of its ID have arrived, when the
+  first did, and, in a batch, which bits changed between any two of them
+  since the last batch, so a change shorter than a batch is not lost. Status, info, and recording events are
   forwarded immediately. A `:reset` event, sent when the source changes, clears
   everything kept so far and sends subscribers an empty snapshot. A subscriber
   that falls behind drops old messages instead of slowing the source."
@@ -19,15 +22,38 @@
    :recording nil
    :samples {}
    :signals {}
-   :dids {}})
+   :dids {}
+   :frames {}})
 
 (def ^:private no-pending
-  {:samples {} :signals {} :dids {}})
+  {:samples {} :signals {} :dids {} :frames {}})
 
-(defn- batch [{:keys [samples signals dids]}]
+(defn- batch [{:keys [samples signals dids frames]}]
   {:samples (sorted-samples samples)
    :signals (sorted-samples signals)
-   :dids (sorted-samples dids)})
+   :dids (sorted-samples dids)
+   :frames (sorted-samples frames)})
+
+(defn- changed-bits
+  "For each byte of `data`, the bits that differ from `previous`, as a mask,
+  ORed with `earlier`, the changes already seen. A frame with no previous
+  one, or of another length, counts as unchanged."
+  [earlier previous data]
+  (let [changes (if (= (count previous) (count data))
+                  (mapv bit-xor previous data)
+                  (vec (repeat (count data) 0)))]
+    (if (= (count earlier) (count changes))
+      (mapv bit-or earlier changes)
+      changes)))
+
+(defn- next-frame
+  "The frame kept for a CAN ID once `event` arrives after `previous`."
+  [previous {:keys [id data timestamp-us]}]
+  {:id id
+   :data data
+   :timestamp-us timestamp-us
+   :first-us (:first-us previous timestamp-us)
+   :count (inc (:count previous 0))})
 
 (defn- state->snapshot [{:keys [status info recording] :as state}]
   (merge {:status status
@@ -72,6 +98,16 @@
              (swap! state assoc-in [:dids (:did reply)] reply)
              (recur (assoc-in pending [:dids (:did reply)] reply) ticker))
 
+           (= :frame (:type event))
+           (let [id (:id event)
+                 previous (get-in @state [:frames id])
+                 frame (next-frame previous event)]
+             (swap! state assoc-in [:frames id] frame)
+             (recur (update-in pending [:frames id]
+                               (fn [waiting]
+                                 (assoc frame :changed (changed-bits (:changed waiting) (:data previous) (:data frame)))))
+                    ticker))
+
            (= :status (:type event))
            (let [status (dissoc event :type)]
              (swap! state assoc :status status)
@@ -114,7 +150,8 @@
 
 (defn snapshot
   "The latest status, info, and recording event, and the latest sample of every PID, value of
-  every signal, and reply for every DID seen since the last reset."
+  every signal, reply for every DID, and frame of every CAN ID seen since the
+  last reset."
   [hub]
   (state->snapshot @(:state hub)))
 

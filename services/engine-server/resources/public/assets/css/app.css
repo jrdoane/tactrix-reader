@@ -470,3 +470,51 @@ table.heat {
 .cell-detail p { margin-top: 10px; font-size: 13px; }
 .samples td.actions { white-space: nowrap; }
 .samples td.actions button + button { margin-left: 6px; }
+
+/* The bus view. */
+.bus-controls { margin-bottom: 12px; }
+.bus-controls .muted { font-size: 13px; }
+.bus-controls button { padding: 4px 10px; }
+.new-bits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 13px; }
+button.chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border-color: #eb6834;
+  color: #eb6834;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.bus-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; }
+table.bus tbody tr { cursor: pointer; }
+.bus .bytes { font-family: ui-monospace, monospace; font-size: 13px; white-space: nowrap; }
+.byte {
+  display: inline-block;
+  padding: 1px 3px;
+  margin-right: 3px;
+  border-radius: 4px;
+  animation: byte-changed 1.2s ease-out;
+}
+.byte.quiet { color: var(--muted); animation: none; }
+.byte.new { color: #fff; background: #eb6834; animation: none; }
+@keyframes byte-changed {
+  from { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+  to { background: transparent; }
+}
+.bit-detail { flex: 0 1 380px; position: sticky; top: 16px; }
+.bit-detail p { margin-top: 10px; font-size: 13px; }
+table.bits { border-collapse: separate; border-spacing: 3px; font-family: ui-monospace, monospace; font-size: 13px; }
+.bits th { color: var(--muted); font-weight: 500; font-size: 12px; text-align: center; }
+.bits tbody th { text-align: right; padding-right: 4px; }
+.bits td.pid { padding-right: 8px; color: var(--muted); }
+.bits td.bit {
+  width: 26px;
+  height: 26px;
+  text-align: center;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+.bits td.bit.on { color: var(--text); font-weight: 600; }
+.bits td.bit.active { border-color: var(--accent); }
+.bits td.bit.new { color: #fff; background: #eb6834; border-color: #eb6834; }

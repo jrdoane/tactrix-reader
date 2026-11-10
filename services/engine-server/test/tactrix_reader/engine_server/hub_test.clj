@@ -21,7 +21,7 @@
     (is (= {:event :samples
             :data {:samples [(dissoc coolant :type) (dissoc rpm-2 :type)]
                    :signals []
-                   :dids []}}
+                   :dids [] :frames []}}
            (take-within subscription 1000)))
     (hub/stop-hub hub)))
 
@@ -40,7 +40,7 @@
     (is (= {:event :samples
             :data {:samples [(dissoc coolant :type)]
                    :signals [(dissoc brake :type) (dissoc gear-2 :type)]
-                   :dids []}}
+                   :dids [] :frames []}}
            (take-within subscription 1000)))
     (is (= [(dissoc brake :type) (dissoc gear-2 :type)]
            (:signals (hub/snapshot hub))))
@@ -65,12 +65,35 @@
     (is (= {:event :samples
             :data {:samples []
                    :signals []
-                   :dids [(dissoc lambda-did :type) (dissoc throttle-did-2 :type)]}}
+                   :dids [(dissoc lambda-did :type) (dissoc throttle-did-2 :type)]
+                   :frames []}}
            (take-within subscription 1000)))
     (is (= [(dissoc lambda-did :type) (dissoc throttle-did-2 :type)]
            (:dids (hub/snapshot hub))))
     (emit {:type :reset})
     (is (= [] (:dids (:data (take-within subscription 1000)))))
+    (hub/stop-hub hub)))
+
+(deftest batches-the-latest-frame-of-each-can-id-with-the-bits-that-changed
+  (let [hub (hub/start-hub {:batch-ms 50})
+        subscription (hub/subscribe hub)
+        emit (hub/emit-fn hub)
+        frame (fn [id t data] {:type :frame :id id :timestamp-us t :data data})]
+    (emit (frame 0x374 10 [0x00 0x80]))
+    ;; A bit that sets and clears again within the batch still counts.
+    (emit (frame 0x374 20 [0x01 0x80]))
+    (emit (frame 0x374 30 [0x00 0x80]))
+    (emit (frame 0x140 15 [0x12]))
+    (is (= [{:id 0x140 :data [0x12] :timestamp-us 15 :first-us 15 :count 1 :changed [0x00]}
+            {:id 0x374 :data [0x00 0x80] :timestamp-us 30 :first-us 10 :count 3 :changed [0x01 0x00]}]
+           (:frames (:data (take-within subscription 1000)))))
+    (emit (frame 0x374 40 [0x00 0x00]))
+    (is (= [{:id 0x374 :data [0x00 0x00] :timestamp-us 40 :first-us 10 :count 4 :changed [0x00 0x80]}]
+           (:frames (:data (take-within subscription 1000)))))
+    ;; The snapshot has the latest frames, without changes.
+    (is (= [{:id 0x140 :data [0x12] :timestamp-us 15 :first-us 15 :count 1}
+            {:id 0x374 :data [0x00 0x00] :timestamp-us 40 :first-us 10 :count 4}]
+           (:frames (hub/snapshot hub))))
     (hub/stop-hub hub)))
 
 (deftest forwards-status-and-keeps-a-snapshot
@@ -88,7 +111,7 @@
             :recording nil
             :samples [(dissoc coolant :type)]
             :signals []
-            :dids []}
+            :dids [] :frames []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 
@@ -105,11 +128,11 @@
     (emit rpm-1)
     (emit {:type :reset})
     (is (= {:event :snapshot
-            :data {:status nil :info nil :recording nil :samples [] :signals [] :dids []}}
+            :data {:status nil :info nil :recording nil :samples [] :signals [] :dids [] :frames []}}
            (take-within subscription 1000)))
     (is (= ::timeout (take-within subscription 200))
         "samples pending at the reset are dropped")
-    (is (= {:status nil :info nil :recording nil :samples [] :signals [] :dids []}
+    (is (= {:status nil :info nil :recording nil :samples [] :signals [] :dids [] :frames []}
            (hub/snapshot hub)))
     (hub/stop-hub hub)))
 

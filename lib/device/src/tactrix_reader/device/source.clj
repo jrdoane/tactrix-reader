@@ -2,8 +2,10 @@
   "Live and replay data sources. Both run on a background thread and call
   `:emit` with the same events, so consumers cannot tell them apart:
   `{:type :sample ...}`, `{:type :signal ...}`, `{:type :did ...}`, and
-  `{:type :status ...}`. The live source can also save what it receives as a
-  recording, and reports that with `{:type :recording ...}`."
+  `{:type :status ...}`, and with `:frames? true` a `{:type :frame :id :data
+  :timestamp-us}` for every CAN frame received, before the events decoded
+  from it. The live source can also save what it receives as a recording,
+  and reports that with `{:type :recording ...}`."
   (:require [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.codec :as codec]
@@ -26,6 +28,13 @@
          (doseq [event (:events parsed)
                  :when (= :message (:type event))]
            (on-message event)))))))
+
+(defn- message-events
+  "The source events for one received message: with `frames?`, the frame
+  itself, then what `can/message-events` decodes from it."
+  [rx-id broadcast signals frames? {:keys [id data timestamp-us] :as message}]
+  (cond->> (can/message-events rx-id broadcast signals message)
+    (and frames? id) (cons {:type :frame :id id :data data :timestamp-us timestamp-us})))
 
 (defn- status-emitter [emit base]
   (fn [state & {:as details}]
@@ -71,7 +80,8 @@
   for each single-frame service 22 reply (to the DIDs in `:dids`, which it
   alternates with PID requests), and `{:type :status ...}` when the source
   is running, stopped, or failed. `{}` turns either kind of broadcast
-  decoding off.
+  decoding off. `:frames? true` also emits a `{:type :frame ...}` for every
+  CAN frame received.
 
   Returns a map of functions:
 
@@ -88,7 +98,7 @@
 
   Sends read-only mode 01 and service 22 requests on the vehicle bus."
   [device-or-path {:keys [emit schedule dids interval-ms reply-timeout-ms tx-id rx-id baud
-                          broadcast signals]
+                          broadcast signals frames?]
                    :or {schedule can/default-poll-schedule
                         dids []
                         interval-ms can/default-poll-interval-ms
@@ -121,7 +131,7 @@
                                       :continue? #(deref running?)
                                       :on-bytes (message-decoder
                                                  (fn [message]
-                                                   (run! emit (can/message-events rx-id broadcast signals message)))
+                                                   (run! emit (message-events rx-id broadcast signals frames? message)))
                                                  (:write! writer))
                                       :on-connected (fn [version]
                                                       (reset! firmware version)
@@ -168,10 +178,11 @@
   "Replays a recording on a background thread, paced by its timestamps,
   calling `emit` with the same events as `start-live-source!`, including
   broadcast signals in `:broadcast`, inferred signals in `:signals`, and the
-  DID replies of a recording made with `:dids`. Loops
+  DID replies of a recording made with `:dids`, and with `:frames? true`
+  every CAN frame. Loops
   by default, shifting timestamps so they keep increasing. `:speed` scales
   playback. Returns a map whose :stop! function stops playback."
-  [dir {:keys [emit loop? speed broadcast signals]
+  [dir {:keys [emit loop? speed broadcast signals frames?]
         :or {loop? true
              speed 1.0
              broadcast broadcast/broadcast-signals
@@ -200,7 +211,7 @@
                                  started (System/nanoTime)]
                              (doseq [message messages
                                      :while @running?
-                                     :let [events (can/message-events rx-id broadcast signals message)]
+                                     :let [events (message-events rx-id broadcast signals frames? message)]
                                      :when (seq events)]
                                (let [due-ms (/ (- (:timestamp-us message) t0) 1000.0 speed)
                                      wait-ms (- due-ms (/ (- (System/nanoTime) started) 1e6))]

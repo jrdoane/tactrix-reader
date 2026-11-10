@@ -1,5 +1,6 @@
 (ns tactrix-reader.dashboard.events
   (:require [re-frame.core :as rf]
+            [tactrix-reader.dashboard.bus :as bus]
             [tactrix-reader.dashboard.http]
             [tactrix-reader.dashboard.series :as series]
             [tactrix-reader.dashboard.stream]))
@@ -28,7 +29,7 @@
 
 (def views
   "The tabs, in order."
-  [:dashboard :signals :map :recordings])
+  [:dashboard :signals :bus :map :recordings])
 
 (def initial-db
   {:connection :connecting
@@ -49,6 +50,10 @@
    ;; The [lowest highest] :number of each DID since the page connected or
    ;; the source changed, keyed by DID.
    :did-ranges {}
+   ;; The bus view: the latest frame of each CAN ID, by ID, as `bus` keeps
+   ;; them; whether a baseline is marked; whether to list only IDs with new
+   ;; bits; and the selected ID.
+   :bus {:frames {} :baseline? false :new-only? false :selected nil}
    ;; Adapters the server detected, and the one chosen to connect to.
    :adapters nil
    :selected-path nil
@@ -213,7 +218,7 @@
 (rf/reg-event-fx
  :stream/snapshot
  ;; Sent on connect, and again with empty data whenever the source changes.
- (fn [{:keys [db]} [_ {:keys [status info recording samples signals dids] :as snapshot}]]
+ (fn [{:keys [db]} [_ {:keys [status info recording samples signals dids frames] :as snapshot}]]
    (let [dids-by-did (index-by-did dids)]
      {:db (-> db
               (assoc :status status
@@ -226,12 +231,14 @@
                      :dids dids-by-did
                      :did-ranges (widen-ranges {} dids-by-did)
                      :stream-log (series/append-batch nil snapshot))
+              ;; A new source's frames have no baseline.
+              (update :bus assoc :frames (bus/merge-frames {} frames) :baseline? false)
               reset-stream-map)
       ::tick (recording? recording)})))
 
 (rf/reg-event-db
  :stream/samples
- (fn [db [_ {:keys [samples signals dids] :as batch}]]
+ (fn [db [_ {:keys [samples signals dids frames] :as batch}]]
    (let [dids-by-did (index-by-did dids)]
      (-> db
          (update :samples merge (index-by-name samples))
@@ -239,7 +246,34 @@
          (update :can-ids merge (can-ids samples))
          (update :dids merge dids-by-did)
          (update :did-ranges widen-ranges dids-by-did)
+         (update-in [:bus :frames] bus/merge-frames frames)
          (update :stream-log series/append-batch batch)))))
+
+(rf/reg-event-db
+ ::mark-baseline
+ ;; From now on, only bits that had not changed before count as new.
+ (fn [db _]
+   (-> db
+       (update-in [:bus :frames] bus/mark-baseline)
+       (assoc-in [:bus :baseline?] true))))
+
+(rf/reg-event-db
+ ::clear-baseline
+ (fn [db _]
+   (-> db
+       (update-in [:bus :frames] bus/clear-baseline)
+       (assoc-in [:bus :baseline?] false))))
+
+(rf/reg-event-db
+ ::set-bus-option
+ (fn [db [_ option value]]
+   (assoc-in db [:bus option] value)))
+
+(rf/reg-event-db
+ ::select-frame
+ ;; Selecting the selected ID clears it.
+ (fn [db [_ id]]
+   (update-in db [:bus :selected] #(when (not= % id) id))))
 
 (rf/reg-event-db
  :stream/status

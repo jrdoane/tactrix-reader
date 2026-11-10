@@ -207,6 +207,23 @@
             {:type :did :did 0x10A5 :did-hex "10A5" :data [0x80] :timestamp-us 1015000}]
            (remove (comp #{:status} :type) @events)))))
 
+(deftest replay-source-emits-every-frame-when-asked
+  (let [dir (temp-dir)
+        events (atom [])]
+    (write-recording! dir [(message-bytes 5 0 1000000 0x372 [0 0 0 0 0 0 0 0])
+                           (message-bytes 5 0 1001000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])])
+    (let [source (source/start-replay-source! (str dir) {:emit #(swap! events conj %)
+                                                         :loop? false
+                                                         :frames? true})]
+      (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
+      ((:stop! source)))
+    ;; A frame nothing is decoded from is still emitted, and each frame comes
+    ;; before the events decoded from it.
+    (is (= [{:type :frame :id 0x372 :data [0 0 0 0 0 0 0 0] :timestamp-us 1000000}
+            {:type :frame :id 0x7E8 :data [4 0x41 0x0C 0x0C 0x80 0 0 0] :timestamp-us 1001000}
+            {:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 1001000}]
+           (remove (comp #{:status} :type) @events)))))
+
 (deftest replay-source-loops-with-increasing-timestamps
   (let [dir (temp-dir)
         events (atom [])]

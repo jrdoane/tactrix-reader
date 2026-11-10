@@ -223,7 +223,7 @@
                (post-transit client (str base "/api/source") "application/transit+json"
                              {:type :live :path "/dev/cu.usbmodemTAlgJ3P81"})))
         (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
-        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :recording nil :samples [] :signals [] :dids []}} %)
+        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :recording nil :samples [] :signals [] :dids [] :frames []}} %)
                                        @events)]
           (is (seq after-switch) "the switch resets the dashboard")
           (is (= {:source :live
@@ -348,7 +348,7 @@
         (try
           (is (= 202 (:status (post "/api/source" {:type :live :path "/dev/cu.usbmodemTAlgJ3P81" :dids? true}))))
           (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
-          (is (= [{:dids uds/scanned-dids}] @started) "Poll DIDs adds the scanned DIDs")
+          (is (= [{:dids uds/scanned-dids :frames? true}] @started) "Poll DIDs adds the scanned DIDs")
           (let [{:keys [status body]} (post "/api/recording" {:action :start :note "commute"})]
             (is (= 202 status))
             (is (re-matches #"\d{4}-\d{2}-\d{2}-\d{6}" (:name body)))

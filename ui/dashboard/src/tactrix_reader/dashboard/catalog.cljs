@@ -14,6 +14,15 @@
   [{:keys [signals dids]}]
   (into {} (map (juxt :name :label)) (concat dids signals)))
 
+(defn can-labels
+  "The labels of the PIDs and signals decoded from each CAN ID, by ID."
+  [{:keys [signals]}]
+  (reduce (fn [by-id {:keys [can-id label]}]
+            (cond-> by-id
+              can-id (update can-id (fnil conj []) label)))
+          {}
+          signals))
+
 (defn entries
   "The catalog's `:signals` plus an entry in `:other` for each name in
   `seen`, `{:pid #{names} :signal #{names}}`, that the catalog does not

@@ -64,7 +64,7 @@
             (emit (assoc info
                          :vehicle (dissoc vehicle-info :ok? :error :path)
                          :trouble-codes (dissoc trouble-codes :ok? :error :path)))
-            (some-> (source/start-live-source! path (cond-> {:emit emit}
+            (some-> (source/start-live-source! path (cond-> {:emit emit :frames? true}
                                                       dids? (assoc :dids uds/scanned-dids)))
                     (assoc :vehicle (recording/vehicle-meta vehicle-info)))))))))
 
@@ -81,7 +81,7 @@
                        :recorded-at recorded-at
                        :duration-ms duration-ms
                        :note (or note (:state vehicle))}})
-    (source/start-replay-source! recording {:emit emit})))
+    (source/start-replay-source! recording {:emit emit :frames? true})))
 
 (defn- stop-current [{:keys [handle] :as state}]
   (when handle

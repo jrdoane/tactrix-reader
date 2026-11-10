@@ -1,6 +1,7 @@
 (ns tactrix-reader.dashboard.views
   (:require [clojure.string :as str]
             [re-frame.core :as rf]
+            [tactrix-reader.dashboard.bus-view :as bus-view]
             [tactrix-reader.dashboard.catalog :as catalog]
             [tactrix-reader.dashboard.events :as events]
             [tactrix-reader.dashboard.format :refer [did-hex format-value label unit-labels]]
@@ -668,6 +669,7 @@
        :map [map-view/map-view]
        :recordings [recordings-block]
        :signals [signals-view]
+       :bus [bus-view/bus-view]
        (if catalog
          [:<>
           [readouts]

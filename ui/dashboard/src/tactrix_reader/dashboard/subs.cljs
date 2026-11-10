@@ -135,6 +135,18 @@
      (and sample part) (update :value get part))))
 
 (rf/reg-sub
+ ::bus
+ (fn [db _]
+   (:bus db)))
+
+(rf/reg-sub
+ ::can-labels
+ ;; The labels of what is decoded from each CAN ID, by ID.
+ :<- [::catalog]
+ (fn [catalog _]
+   (catalog/can-labels catalog)))
+
+(rf/reg-sub
  ::collapsed
  (fn [db _]
    (:collapsed db)))
