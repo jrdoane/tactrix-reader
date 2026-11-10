@@ -12,7 +12,7 @@
             {:id :other :section :can :title "Other signals"}]
    :primary [:engine-rpm :gear]
    :signals [{:kind :pid :name :engine-rpm :pid 0x0C :label "RPM" :group :air :unit :rpm
-              :polled? true :can-id 0x140}
+              :polled? true :can-id 0x140 :bits [0 0 0xFF 0x3F]}
              {:kind :pid :name :engine-load :pid 0x04 :label "Engine load" :group :air :unit :percent
               :polled? true}
              {:kind :pid :name :wideband :pid 0x34 :label "Measured λ" :group :fuel :polled? true
@@ -21,10 +21,11 @@
               :polled? true :tile? false}
              {:kind :pid :name :absolute-load :pid 0x43 :label "Absolute load" :group :other :unit :percent}
              {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear
-              :override {:signal :reverse :text "R"}}
+              :bits [0 0 0 0 0 0 0x07] :override {:signal :reverse :text "R"}}
              {:kind :signal :name :wheel-speeds :can-id 0x0D4 :label "Wheel speeds" :group :wheels
-              :unit :km-per-hour
-              :parts [{:part :front-left :label "Front left"} {:part :front-right :label "Front right"}]}]
+              :unit :km-per-hour :bits [0xFF 0xFF 0xFF 0xFF]
+              :parts [{:part :front-left :label "Front left" :bits [0xFF 0xFF]}
+                      {:part :front-right :label "Front right" :bits [0 0 0xFF 0xFF]}]}]
    :dids [{:did 0x10BE :name :lambda :label "Measured λ"}]})
 
 (defn- group-names [sections]
@@ -75,6 +76,29 @@
     (is (nil? (catalog/override-text gear {:gear {:value 1} :reverse {:value false}})))
     (is (nil? (catalog/override-text gear {:gear {:value 1}})))
     (is (nil? (catalog/override-text {:name :brake} {:reverse {:value true}})))))
+
+(deftest can-fields-are-in-frame-order-with-a-slot-each
+  (let [catalog (update server-catalog :signals into
+                        ;; Listed after RPM, but earlier in the frame.
+                        [{:kind :signal :name :clutch :can-id 0x140 :label "Clutch"
+                          :format :pressed-released :bits [0 0x80]}
+                         {:kind :signal :name :pedal-travel :can-id 0x140 :label "Pedal travel"
+                          :unit :percent :bits [0xFF]}
+                         ;; Decoded, but from no known bits.
+                         {:kind :signal :name :mystery :can-id 0x140 :label "Mystery"}])
+        fields (catalog/can-fields catalog)]
+    (is (= #{0x0D4 0x140 0x141} (set (keys fields))))
+    (is (= [[0 :signal/pedal-travel "Pedal travel" [0xFF]]
+            [1 :signal/clutch "Clutch" [0 0x80]]
+            [2 :pid/engine-rpm "RPM" [0 0 0xFF 0x3F]]]
+           (map (juxt :slot :id :label :bits) (get fields 0x140))))
+    ;; A field is a tile, so its value is found and shown as a tile's is.
+    (is (= {:kind :signal :name :clutch :format :pressed-released :of "Clutch"}
+           (select-keys (second (get fields 0x140)) [:kind :name :format :of :part])))
+    ;; Each part is a field, named with the value it is part of.
+    (is (= [[0 "Wheel speeds, front left" "Wheel speeds" :front-left [0xFF 0xFF]]
+            [1 "Wheel speeds, front right" "Wheel speeds" :front-right [0 0 0xFF 0xFF]]]
+           (map (juxt :slot :label :of :part :bits) (get fields 0x0D4))))))
 
 (deftest labels-cover-signals-and-dids
   (is (= {:engine-rpm "RPM" :lambda "Measured λ"}

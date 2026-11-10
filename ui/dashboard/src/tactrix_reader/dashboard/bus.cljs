@@ -8,7 +8,8 @@
   marked, `:baseline`, the data then, and `:noise`, a mask per byte of the
   bits that had already changed before it. A bit that changes after the
   baseline and is not noise is new: it is what moved when a control was
-  operated.")
+  operated."
+  (:require [clojure.string :as str]))
 
 (defn- zeros [n]
   (vec (repeat n 0)))
@@ -102,6 +103,56 @@
      :bit bit
      :value (if (bit-test (nth data byte-index) bit) 1 0)
      :flips (nth flips (+ (* 8 byte-index) bit))}))
+
+(defn field-at
+  "The field a bit is decoded into, or nil. `fields` each have `:bits`, a
+  mask per byte, as `catalog/can-fields` gives them."
+  [fields byte-index bit]
+  (some #(when (bit-test (nth (:bits %) byte-index 0) bit) %) fields))
+
+(defn byte-fields
+  "The fields of a byte's bits, most significant first, as runs of `[field
+  bit-count]`, with nil for bits decoded into nothing. Nil when the whole
+  byte is."
+  [fields byte-index]
+  (let [runs (->> (range 7 -1 -1)
+                  (map #(field-at fields byte-index %))
+                  (partition-by identity)
+                  (mapv (juxt first count)))]
+    (when (some first runs)
+      runs)))
+
+(defn- bit-runs
+  "The runs of set bits in a mask, highest first, as `[high low]`."
+  [mask]
+  (->> (range 7 -1 -1)
+       (partition-by #(bit-test mask %))
+       (filter #(bit-test mask (first %)))
+       (map (juxt first last))))
+
+(defn bits-text
+  "Which bits a mask per byte covers, as the docs write them: `b2, b3.5–0`
+  for byte 2 and the low six bits of byte 3, with whole bytes that follow
+  each other joined, as in `b0–b1`."
+  [bits]
+  (let [whole? #(= 0xFF (nth bits % 0))
+        parts (for [byte-index (range (count bits))
+                    :let [mask (nth bits byte-index)]
+                    :when (pos? mask)]
+                (cond
+                  ;; A whole byte after another is covered by the first's range.
+                  (and (whole? byte-index) (pos? byte-index) (whole? (dec byte-index))) nil
+                  (whole? byte-index)
+                  (let [end (last (take-while whole? (iterate inc byte-index)))]
+                    (if (= end byte-index)
+                      (str "b" byte-index)
+                      (str "b" byte-index "–b" end)))
+                  :else
+                  (str/join ", " (for [[high low] (bit-runs mask)]
+                                   (if (= high low)
+                                     (bit-name byte-index high)
+                                     (str (bit-name byte-index high) "–" low))))))]
+    (str/join ", " (remove nil? parts))))
 
 (defn period-ms
   "The mean time between a CAN ID's frames, or nil with fewer than two."

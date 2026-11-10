@@ -171,6 +171,36 @@
            :decode (fn [[low high]]
                      (round-to 1 (- (/ (- (+ low (* 256 (bit-and high 0x7F))) 3600) 9.0) 40)))}]})
 
+(def ^:private probe-frames
+  "The frames `decode-bits` flips the bits of."
+  [(vec (repeat 8 0x00)) (vec (repeat 8 0xFF))])
+
+(defn decode-bits
+  "The bits of a frame that `decode` reads, as a mask per byte with the
+  trailing zero bytes dropped: `[0 0 0xFF 0x3F]` is byte 2 and the low six
+  bits of byte 3. They are found by flipping each bit of an all-zero and an
+  all-one eight-byte frame and seeing whether the value changes, so they
+  cannot disagree with the decoding. `part` picks one key of a value that is
+  a map."
+  ([decode]
+   (decode-bits decode nil))
+  ([decode part]
+   (let [value (if part #(get (decode %) part) decode)
+         reads? (fn [byte-index bit]
+                  (some #(not= (value %) (value (update % byte-index bit-flip bit)))
+                        probe-frames))
+         mask (fn [byte-index]
+                (reduce (fn [mask bit]
+                          (cond-> mask
+                            (reads? byte-index bit) (bit-or (bit-shift-left 1 bit))))
+                        0
+                        (range 8)))]
+     (->> (map mask (range 8))
+          reverse
+          (drop-while zero?)
+          reverse
+          vec))))
+
 (defn signal-samples
   "Decodes a received message carrying signals in `signals` (by default
   `inferred-signals`) into `{:signal :value :unit :can-id :timestamp-us}`

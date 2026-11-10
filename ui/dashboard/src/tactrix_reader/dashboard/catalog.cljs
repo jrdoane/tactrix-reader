@@ -14,15 +14,6 @@
   [{:keys [signals dids]}]
   (into {} (map (juxt :name :label)) (concat dids signals)))
 
-(defn can-labels
-  "The labels of the PIDs and signals decoded from each CAN ID, by ID."
-  [{:keys [signals]}]
-  (reduce (fn [by-id {:keys [can-id label]}]
-            (cond-> by-id
-              can-id (update can-id (fnil conj []) label)))
-          {}
-          signals))
-
 (defn entries
   "The catalog's `:signals` plus an entry in `:other` for each name in
   `seen`, `{:pid #{names} :signal #{names}}`, that the catalog does not
@@ -60,9 +51,35 @@
               :label (or (:label part-entry) label)
               :unit (or (:unit part-entry) unit)
               :part part}
-             (select-keys part-entry [:decimals])))
-    [(merge (select-keys entry [:kind :name :format :raw? :can-id :pid :override])
+             (select-keys part-entry [:decimals :bits])))
+    [(merge (select-keys entry [:kind :name :format :raw? :can-id :pid :override :bits])
             {:id (series-key kind name nil) :label label :unit unit})]))
+
+(defn- first-bit
+  "Where a field starts, to order fields by: its first byte, then that
+  byte's highest bit, counted from the top."
+  [bits]
+  (first (for [[byte-index mask] (map-indexed vector bits)
+               :when (pos? mask)]
+           [byte-index (some #(when (bit-test mask (- 7 %)) %) (range 8))])))
+
+(defn can-fields
+  "What is decoded from each CAN ID's frames, by ID: the tiles of the PIDs
+  and signals that have `:bits`, a mask per byte of the bits each is decoded
+  from, in frame order. A field also has `:slot`, its place in that order,
+  which a display colours it by, and `:of`, the label of the value it is a
+  part of; its `:label` is then the two together."
+  [{:keys [signals]}]
+  (->> (for [{:keys [label] :as entry} signals
+             {:keys [part bits] :as tile} (tiles entry)
+             :when (some pos? bits)]
+         (cond-> (assoc tile :of label)
+           (and part (not= label (:label tile)))
+           (assoc :label (str label ", " (str/lower-case (:label tile))))))
+       (group-by :can-id)
+       (into {} (map (fn [[can-id fields]]
+                       [can-id (vec (map-indexed #(assoc %2 :slot %1)
+                                                 (sort-by (comp first-bit :bits) fields)))])))))
 
 (defn primary-tiles
   "Tiles for the catalog's `:primary` names."

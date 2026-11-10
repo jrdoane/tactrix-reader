@@ -17,7 +17,7 @@
             :let [pid-name (:name (get pids/mode-01-pids pid))]]
       (is (:polled? (get entries pid-name)) (str pid-name)))
     (is (= {:kind :pid :name :engine-rpm :pid 0x0C :label "RPM" :group :air :unit :rpm
-            :polled? true :can-id 0x140}
+            :polled? true :can-id 0x140 :bits [0 0 0xFF 0x3F]}
            (:engine-rpm entries)))
     (is (= [{:part :lambda :unit :lambda}] (:parts (:wideband-oxygen-sensor-1-current entries))))
     (is (false? (:tile? (:monitor-status entries))))
@@ -30,15 +30,32 @@
   (let [entries (by-name :signal)]
     (is (= (set (for [[_ signals] broadcast/inferred-signals, {:keys [signal]} signals] signal))
            (set (keys entries))))
-    (is (= {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear
+    (is (= {:kind :signal :name :gear :can-id 0x141 :bits [0 0 0 0 0 0 0x07]
+            :label "Gear" :group :driver :format :gear
             :override {:signal :reverse :text "R"}}
            (:gear entries)))
     ;; An override names a signal that exists.
     (is (every? entries (keep (comp :signal :override) (vals entries))))
-    (is (= {:kind :signal :name :fuel-gauge :can-id 0x156 :label "Fuel gauge" :group :counters :raw? true}
+    (is (= {:kind :signal :name :fuel-gauge :can-id 0x156 :bits [0 0 0 0 0 0 0 0xFF]
+            :label "Fuel gauge" :group :counters :raw? true}
            (:fuel-gauge entries)))
-    (is (= [:front-left :front-right :rear-left :rear-right]
-           (map :part (:parts (:wheel-speeds entries)))))))
+    ;; Each part of a value that is a map has its own bits.
+    (is (= [{:part :front-left :label "Front left" :bits [0xFF 0xFF]}
+            {:part :front-right :label "Front right" :bits [0 0 0xFF 0xFF]}
+            {:part :rear-left :label "Rear left" :bits [0 0 0 0 0xFF 0xFF]}
+            {:part :rear-right :label "Rear right" :bits [0 0 0 0 0 0 0xFF 0xFF]}]
+           (:parts (:wheel-speeds entries))))))
+
+(deftest values-decoded-from-one-id-read-different-bits
+  ;; A display colours each bit of a frame by the value it belongs to.
+  (doseq [[can-id entries] (group-by :can-id (filter :can-id (:signals (catalog/catalog))))
+          :let [masks (map :bits entries)]]
+    (is (every? seq masks) (format "%03X" can-id))
+    (is (every? zero? (for [[a & others] (take-while seq (iterate rest masks))
+                            b others
+                            overlap (map bit-and a b)]
+                        overlap))
+        (format "%03X" can-id))))
 
 (deftest every-group-and-primary-name-exists
   (let [{:keys [sections groups primary signals]} (catalog/catalog)

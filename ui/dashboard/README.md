@@ -52,7 +52,11 @@ it names is true: the gear shows R while reverse is on.
 legend.
 
 **Bus** shows the latest frame of every CAN ID, with how often it comes and
-what is decoded from it. A byte is highlighted as it changes. To find what a
+what is decoded from it. Each decoded value has a colour: a bar under the
+frame's bytes marks the bits it is decoded from, and the bit grid of the ID
+you click fills those bits and lists each value with its bits (`b2,
+b3.5–0`) and what it reads now. The bits come from the catalog's `:bits`.
+A byte is highlighted as it changes. To find what a
 control does: let the bus run for a few seconds, press Mark baseline, and
 operate the control. Bits that had not changed before the baseline are
 listed by name (`374 b3.0`, as in the docs) and filled in the bit grid of
@@ -110,9 +114,9 @@ Namespaces are under `tactrix-reader.dashboard`:
 | `views` | The source bar, the Dashboard, Signals, and Recordings tabs |
 | `bus-view` | The Bus tab |
 | `map-view` | The Map tab: controls, filters, timeline, heat table, and cell details |
-| `format` | Units and number formats, and labels from the catalog |
-| `catalog` | Pure: turns the server's catalog into sections, groups, and tiles |
-| `bus` | Pure: the latest frame per CAN ID, which bits have changed, and the baseline |
+| `format` | Units, number formats, a tile's value as text, and labels from the catalog |
+| `catalog` | Pure: turns the server's catalog into sections, groups, and tiles, and into the fields of each CAN ID |
+| `bus` | Pure: the latest frame per CAN ID, which bits have changed, the baseline, and which field a bit belongs to |
 | `series` | Pure: time-series logs from recordings or the stream, holding values on a grid, axes, binning, and sparklines |
 
 `catalog`, `bus`, and `series` are tested by `npm test`.

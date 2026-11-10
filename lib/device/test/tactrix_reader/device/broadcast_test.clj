@@ -106,3 +106,25 @@
                                             :data [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00]})))
   (is (empty? (broadcast/signal-samples {:type :line :text "aro"}))))
 
+(deftest decode-bits-finds-the-bits-a-decoding-reads
+  (let [bits (fn [signals id key value]
+               (broadcast/decode-bits (:decode (first (filter #(= value (key %)) (get signals id))))))]
+    ;; RPM is byte 2 and the low six bits of byte 3.
+    (is (= [0 0 0xFF 0x3F] (bits broadcast/broadcast-signals 0x140 :pid 0x0C)))
+    ;; The throttle's rounding does not hide a bit.
+    (is (= [0 0 0 0 0 0 0xFF] (bits broadcast/broadcast-signals 0x140 :pid 0x11)))
+    (is (= [0 0 0 0 0xFF] (bits broadcast/broadcast-signals 0x360 :pid 0x0B)))
+    (is (= [0 0x80] (bits broadcast/inferred-signals 0x140 :signal :clutch)))
+    (is (= [0 0 0 0 0 0 0x07] (bits broadcast/inferred-signals 0x141 :signal :gear)))
+    (is (= [0xFF 0x7F] (bits broadcast/inferred-signals 0x141 :signal :requested-torque)))
+    (is (= [0 0 0 0 0 0 0 0x08] (bits broadcast/inferred-signals 0x141 :signal :fuel-cut)))
+    (is (= [0 0 0xFF 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :yaw-rate)))
+    (is (= [0 0 0 0 0 0 0 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :longitudinal-acceleration)))
+    (is (= [0xFF 0x0F] (bits broadcast/inferred-signals 0x282 :signal :fuel-sender)))
+    (is (= [0 0 0 0 0 0x01] (bits broadcast/inferred-signals 0x282 :signal :driver-seatbelt))))
+  ;; One part of a value that is a map.
+  (let [wheel-speeds (:decode (first (get broadcast/inferred-signals 0x0D4)))]
+    (is (= [0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF 0xFF] (broadcast/decode-bits wheel-speeds)))
+    (is (= [0 0 0 0 0xFF 0xFF] (broadcast/decode-bits wheel-speeds :rear-left))))
+  ;; A decoding that reads nothing has no bits.
+  (is (= [] (broadcast/decode-bits (constantly 1)))))

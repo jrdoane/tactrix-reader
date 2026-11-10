@@ -84,17 +84,18 @@
 (defn- name-label [value-name]
   (str/capitalize (str/replace (name value-name) "-" " ")))
 
-(defn- broadcast-ids
-  "The CAN ID each PID is also decoded from, by PID."
+(defn- broadcast-sources
+  "Where each PID is also decoded from, by PID: the CAN ID and the bits of
+  its frames."
   []
   (into {}
         (for [[can-id signals] broadcast/broadcast-signals
-              {:keys [pid]} signals]
-          [pid can-id])))
+              {:keys [pid decode]} signals]
+          [pid {:can-id can-id :bits (broadcast/decode-bits decode)}])))
 
 (defn- pid-entries []
   (let [polled (set can/default-poll-schedule)
-        can-ids (broadcast-ids)]
+        sources (broadcast-sources)]
     (for [[pid {:keys [name unit pid-list?]}] (sort-by key pids/mode-01-pids)
           :when (not pid-list?)
           :let [display (get pid-display name)]]
@@ -106,18 +107,22 @@
                      display)
         unit (assoc :unit unit)
         (polled pid) (assoc :polled? true)
-        (can-ids pid) (assoc :can-id (can-ids pid))))))
+        (sources pid) (merge (sources pid))))))
 
 (defn- signal-entries []
   (for [[can-id signals] (sort-by key broadcast/inferred-signals)
-        {:keys [signal unit] :as entry} signals]
+        {:keys [signal unit decode parts] :as entry} signals]
     (cond-> (merge {:kind :signal
                     :name signal
                     :can-id can-id
+                    :bits (broadcast/decode-bits decode)
                     :label (name-label signal)
                     :group :other}
-                   (select-keys entry [:label :group :format :raw? :parts :override]))
-      unit (assoc :unit unit))))
+                   (select-keys entry [:label :group :format :raw? :override]))
+      unit (assoc :unit unit)
+      ;; Each part of a value that is a map has its own bits.
+      parts (assoc :parts (mapv #(assoc % :bits (broadcast/decode-bits decode (:part %)))
+                                parts)))))
 
 (defn- did-entries []
   (for [[did {:keys [name] :as entry}] (sort-by key uds/did-signals)]
@@ -133,8 +138,10 @@
   - `:signals`, one entry per PID and inferred signal: `{:kind :pid|:signal
     :name :label :group}` with `:unit`, `:format`, `:parts`, `:raw?`, and
     `:override` where they apply, `:pid` and `:polled?` (in the default poll
-    schedule) for a PID, and `:can-id` for a signal or a PID also decoded
-    from the bus.
+    schedule) for a PID, and, for a signal or a PID also decoded from the
+    bus, `:can-id` and `:bits`, the bits of that ID's frames it is decoded
+    from, as `broadcast/decode-bits` gives them. Each of a signal's `:parts`
+    has its own `:bits`.
   - `:dids`, one entry per DID in `uds/did-signals`, and `:did-notes`, what
     is known about the others."
   []

@@ -122,7 +122,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    name the catalog lacks goes in an Other group. `views.cljs`
    tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
    The Bus tab (`bus_view.cljs`, `bus.cljs`) shows each CAN ID's latest frame
-   and which bits are new since a marked baseline.
+   and which bits are new since a marked baseline, and colours the bits each
+   value is decoded from, which the catalog gives as `:bits`.
    The map view (`map_view.cljs`) bins one value by two others, such as timing
    by RPM and load (MAF × 60 / RPM, g/rev), for a recording's series or for
    the stream, which `events.cljs` also appends to a log of the same shape.
@@ -168,7 +169,10 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
   `:format`, `:raw?`, `:parts`, `:override`, `:compare`) in `broadcast/inferred-signals`
   and `uds/did-signals`, and `uds/did-notes` holds what is known about the
   other DIDs. Give a new signal a `:label` and `:group` there; without them
-  it is labelled from its name and shown under Other.
+  it is labelled from its name and shown under Other. An entry decoded from
+  the bus also has `:bits`, a mask per byte of the frame bits it reads.
+  `broadcast/decode-bits` works them out from the `:decode` fn by flipping
+  each bit, so they are not written down anywhere.
 - **`series`:** `recording-series` decodes a recording, as the replay source does, into per-channel time series for the dashboard's map: keys `:pid/<name>`, `:signal/<signal>`, and `:did/x<hex>`, map values split into `key.part` channels, booleans as 1/0, other non-numbers as nil, and at most one point per channel per 100 ms, matching the hub's batches.
 
 The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`

@@ -5,7 +5,8 @@
             [tactrix-reader.dashboard.bus-view :as bus-view]
             [tactrix-reader.dashboard.catalog :as catalog]
             [tactrix-reader.dashboard.events :as events]
-            [tactrix-reader.dashboard.format :refer [did-hex format-value label unit-labels]]
+            [tactrix-reader.dashboard.format :refer [did-hex format-value label tile-text tile-unit
+                                                     unit-labels]]
             [tactrix-reader.dashboard.map-view :as map-view]
             [tactrix-reader.dashboard.subs :as subs]))
 
@@ -32,61 +33,6 @@
 
 (defn- can-id-hex [n]
   (.padStart (.toUpperCase (.toString n 16)) 3 "0"))
-
-(defn- on-off [value]
-  (if value "on" "off"))
-
-(defn- open-closed [value]
-  (if value "open" "closed"))
-
-(def ^:private formatters
-  "Display for values that read better as words than as numbers, by the
-  catalog's `:format`."
-  {:gear #(if (= :neutral %) "N" (str %))
-   ;; Positive is a left turn.
-   :steering #(cond
-                (pos? %) (str (.toFixed % 1) "° L")
-                (neg? %) (str (.toFixed (- %) 1) "° R")
-                :else "0.0°")
-   :on-off on-off
-   :open-closed open-closed
-   :pressed-released #(if % "pressed" "released")
-   :keyword name
-   :monitor-status (fn [{:keys [mil-on? dtc-count monitors]}]
-                     (str "check engine " (if mil-on? "on" "off")
-                          ", " dtc-count " stored codes, "
-                          (count (filter #{:complete} (vals monitors))) " of "
-                          (count monitors) " monitors complete"))
-   :in-gear #(case (:manual-transmission-in-gear? %)
-               true "in gear"
-               false "neutral"
-               nil "—")
-   :fuel-system #(let [state (:system-1 %)]
-                   (if (keyword? state)
-                     (str/replace (name state) "-" " ")
-                     (str state)))})
-
-(def ^:private formats-with-unit
-  "Formats that already show the unit."
-  #{:steering})
-
-(defn- tile-text
-  "A tile's value as text."
-  [{:keys [format unit decimals]} value sample-unit]
-  (cond
-    (nil? value) "—"
-    format ((get formatters format str) value)
-    (and decimals (number? value)) (.toFixed value decimals)
-    :else (format-value value (or unit sample-unit))))
-
-(defn- tile-unit
-  "A tile's unit label: its unit's, or `raw` for a count with no known
-  scale."
-  [{:keys [format unit raw?]} sample-unit]
-  (cond
-    (contains? formats-with-unit format) ""
-    raw? "raw"
-    :else (get unit-labels (or unit sample-unit) "")))
 
 (defn- format-duration [ms]
   (let [seconds (js/Math.round (/ ms 1000))]

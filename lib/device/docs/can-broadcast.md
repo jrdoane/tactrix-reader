@@ -200,6 +200,12 @@ shows them tagged inferred. Each entry also carries how to show it (`:label`,
 `catalog/catalog` passes to the dashboard, so a signal added here appears
 there with no other change.
 
+The catalog also gives the bits of the frame each signal here and in
+`broadcast-signals` is decoded from, as `:bits`, a mask per byte: `[0 0 0xFF
+0x3F]` for RPM. `decode-bits` finds them by flipping each bit of a frame
+and seeing whether the decoded value changes, so they follow the decoding.
+The dashboard's Bus tab colours those bits.
+
 | Signal | Encoding | Value |
 |---|---|---|
 | `:steering-angle` | `002` bytes 0-1, big-endian, signed, 0.1° per bit | Degrees, positive for a left turn |

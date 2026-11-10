@@ -59,3 +59,34 @@
   (is (= 150 (bus/frames-per-second {1 {:first-us 0 :timestamp-us 1000000 :count 101}
                                     2 {:first-us 0 :timestamp-us 1000000 :count 51}
                                     3 {:first-us 5 :timestamp-us 5 :count 1}}))))
+
+(deftest finds-the-field-each-bit-is-decoded-into
+  (let [pedal {:id :pedal :bits [0xFF]}
+        clutch {:id :clutch :bits [0x00 0x80]}
+        rpm {:id :rpm :bits [0x00 0x00 0xFF 0x3F]}
+        fields [pedal clutch rpm]]
+    (is (= pedal (bus/field-at fields 0 3)))
+    (is (= clutch (bus/field-at fields 1 7)))
+    (is (nil? (bus/field-at fields 1 6)))
+    (is (= rpm (bus/field-at fields 3 5)))
+    (is (nil? (bus/field-at fields 3 6)))
+    ;; A byte the masks do not reach.
+    (is (nil? (bus/field-at fields 7 0)))
+    ;; Runs of a byte's bits, most significant first.
+    (is (= [[pedal 8]] (bus/byte-fields fields 0)))
+    (is (= [[clutch 1] [nil 7]] (bus/byte-fields fields 1)))
+    (is (= [[nil 2] [rpm 6]] (bus/byte-fields fields 3)))
+    (is (nil? (bus/byte-fields fields 4)))
+    (is (nil? (bus/byte-fields nil 0)))))
+
+(deftest writes-which-bits-a-mask-covers
+  (is (= "b0" (bus/bits-text [0xFF])))
+  (is (= "b0–b1" (bus/bits-text [0xFF 0xFF])))
+  (is (= "b2, b3.5–0" (bus/bits-text [0x00 0x00 0xFF 0x3F])))
+  (is (= "b0, b1.6–0" (bus/bits-text [0xFF 0x7F])))
+  (is (= "b1.7" (bus/bits-text [0x00 0x80])))
+  (is (= "b6.2–0" (bus/bits-text [0 0 0 0 0 0 0x07])))
+  (is (= "b0–b2, b4" (bus/bits-text [0xFF 0xFF 0xFF 0x00 0xFF])))
+  (is (= "b0.7–6, b0.1" (bus/bits-text [0xC2])))
+  (is (= "" (bus/bits-text []))))
+

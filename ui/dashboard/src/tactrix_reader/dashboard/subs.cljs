@@ -167,11 +167,11 @@
    (:bus db)))
 
 (rf/reg-sub
- ::can-labels
- ;; The labels of what is decoded from each CAN ID, by ID.
+ ::can-fields
+ ;; What is decoded from each CAN ID and from which bits, by ID.
  :<- [::catalog]
  (fn [catalog _]
-   (catalog/can-labels catalog)))
+   (catalog/can-fields catalog)))
 
 (rf/reg-sub
  ::collapsed
