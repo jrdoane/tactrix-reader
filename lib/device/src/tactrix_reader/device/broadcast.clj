@@ -52,8 +52,10 @@
 (def inferred-signals
   "Signals the project's 2015 Impreza broadcasts that were identified from how
   they behave, in the 2026-10-28-drive recording and, for the doors,
-  2026-11-09-194644, but match no mode 01 PID, by CAN ID. Scales marked approximate come from fits against quantities derived
-  from other signals; see docs/can-broadcast.md. Unlike `broadcast-signals`,
+  2026-11-09-194644, but match no mode 01 PID, by CAN ID. The counters and
+  the fuel gauge were identified by comparing all seven reference
+  recordings. Scales marked approximate come from fits against quantities
+  derived from other signals; see docs/can-broadcast.md. Unlike `broadcast-signals`,
   these are not confirmed."
   {0x002 [{:signal :steering-angle :unit :degrees :byte-count 2
            ;; Positive is a left turn, assuming opendbc's wheel order in 0D4.
@@ -76,7 +78,14 @@
            :decode #(let [gear (bit-and (nth % 6) 0x07)]
                       (cond (<= 1 gear 5) gear
                             (= 7 gear) :neutral))}]
+   ;; Counts that carry over between drives: byte 3 steps when the engine
+   ;; starts, and byte 4 once coolant reaches 71 C after a cold start.
+   0x144 [{:signal :engine-starts :byte-count 4 :decode #(nth % 3)}
+          {:signal :warm-up-cycles :byte-count 5 :decode #(nth % 4)}]
    0x152 [{:signal :parking-brake :byte-count 7 :decode #(bit-test (nth % 6) 3)}]
+   ;; A raw count that follows fuel level (PID 2F), at about 2.4% of the tank
+   ;; per count: 35 at 97% and 15 at 51%.
+   0x156 [{:signal :fuel-gauge :byte-count 8 :decode #(nth % 7)}]
    0x282 [{:signal :outside-temp :unit :celsius :byte-count 5
            ;; Byte 4 is degrees Fahrenheit plus 40.
            :decode #(round-to 1 (/ (* 5 (- (nth % 4) 72)) 9.0))}

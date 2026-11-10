@@ -11,7 +11,7 @@
   matched to no PID, so not confirmed. See lib/device/docs/can-broadcast.md."
   #{:gear :steering-angle :brake :brake-pressure :parking-brake :driver-seatbelt
     :wheel-speeds :longitudinal-acceleration :lateral-acceleration :yaw-rate
-    :fuel-flow :outside-temp
+    :fuel-flow :outside-temp :fuel-gauge :engine-starts :warm-up-cycles
     :door-front-left :door-front-right :door-rear-left :door-rear-right})
 
 (def ^:private wheel-tiles
@@ -44,7 +44,8 @@
    ["Wheel speeds" [:wheel-front-left :wheel-front-right
                     :wheel-rear-left :wheel-rear-right]]
    ["Doors" [:door-front-left :door-front-right :door-rear-left :door-rear-right]]
-   ["Engine and outside" [:fuel-flow :outside-temp]]])
+   ["Engine and outside" [:fuel-flow :outside-temp]]
+   ["Fuel gauge and counters" [:fuel-gauge :engine-starts :warm-up-cycles]]])
 
 (defn- paired-notes
   "Notes for DIDs that move together, each naming the other in its pair."

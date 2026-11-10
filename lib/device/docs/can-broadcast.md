@@ -181,7 +181,10 @@ shows them tagged inferred.
 | `:brake` | `0D3` b2.5 | Boolean |
 | `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
 | `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7 |
+| `:engine-starts` | `144` byte 3 | Raw count, 0-255; see [Counters and fuel level](#counters-and-fuel-level) |
+| `:warm-up-cycles` | `144` byte 4 | Raw count, 0-255 |
 | `:parking-brake` | `152` b6.3 | Boolean |
+| `:fuel-gauge` | `156` byte 7 | Raw count, about 2.4% of the tank each: 35 at 97% and 15 at 51% |
 | `:outside-temp` | `282` byte 4 minus 40, as °F | °C |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` byte 1, about 0.185 g/s per bit | Grams per second |
@@ -437,12 +440,18 @@ except fuel level.
   move in the three drives that began warm (84-98 °C) or in the cold idle,
   which only reached 55 °C. OBD-II counts a warm-up cycle when coolant rises
   by at least 22 °C and reaches 70 °C.
-- **`156` byte 7 follows fuel level,** at about 2.3% of the tank per count.
+- **`156` byte 7 follows fuel level,** at about 2.4% of the tank per count
+  (PID `2F` = 2.37 × count + 15.3 over all 1,168 replies, r = 0.987). The
+  line doesn't pass through zero, so it is decoded as the raw count, not as
+  a percentage.
   It falls as PID `2F` does, and rose with it between `2026-10-24-idle` and
   `2026-10-28-drive` (70% to 97%, so the tank was filled). PID `2F` wanders by a few
   percent as the fuel moves, and `2026-10-29-did-drive` sits about 5% above
   the line. Both drops within a recording came 475 s in, which looks like
   coincidence.
+
+`inferred-signals` decodes the three as `:engine-starts`, `:warm-up-cycles`,
+and `:fuel-gauge`, each as its raw byte.
 
 ### Lighting bits in `152` byte 7
 

@@ -84,6 +84,9 @@
    :yaw-rate "Yaw rate"
    :fuel-flow "Fuel flow"
    :outside-temp "Outside"
+   :fuel-gauge "Fuel gauge"
+   :engine-starts "Engine starts"
+   :warm-up-cycles "Warm-up cycles"
    ;; UDS data identifiers.
    :accelerator-pedal "Accelerator pedal"
    :wideband-current "Wideband current"
