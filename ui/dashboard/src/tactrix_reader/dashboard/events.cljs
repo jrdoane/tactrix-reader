@@ -26,6 +26,10 @@
    ;; The selected [x-index y-index], or nil.
    :cell nil})
 
+(def views
+  "The tabs, in order."
+  [:dashboard :signals :map :recordings])
+
 (def initial-db
   {:connection :connecting
    :status nil
@@ -61,8 +65,14 @@
    :now nil
    ;; The last API request: nil, {:state :pending}, or {:state :failed :error ...}.
    :request nil
-   ;; :dashboard or :map.
+   ;; How to show each PID, signal, and DID, from /api/catalog.
+   :catalog nil
+   ;; One of `views`.
    :view :dashboard
+   ;; Whether the source bar shows the adapter, vehicle, and diagnostics.
+   :details? false
+   ;; The ids of the dashboard sections that are folded away.
+   :collapsed #{}
    ;; Everything the stream has sent since the source last changed, as a
    ;; `series` log.
    :stream-log nil
@@ -114,13 +124,74 @@
 (defn- recording? [recording]
   (= :recording (:state recording)))
 
+(def ^:private collapsed-storage-key "tactrix-reader.collapsed")
+
+(defn- stored-collapsed
+  "The folded sections saved in this browser, or none when storage is
+  unavailable or holds something else."
+  []
+  (try
+    (into #{} (map keyword) (js->clj (js/JSON.parse (or (js/localStorage.getItem collapsed-storage-key) "[]"))))
+    (catch :default _ #{})))
+
+(rf/reg-fx
+ ::store-collapsed
+ (fn [collapsed]
+   (try
+     (js/localStorage.setItem collapsed-storage-key (js/JSON.stringify (clj->js (map name collapsed))))
+     (catch :default _ nil))))
+
+(defn- hash-view
+  "The view the page's URL names, as in `#map`, or the dashboard."
+  []
+  (or (some #{(keyword (subs (.. js/window -location -hash) 1))} views)
+      :dashboard))
+
+(rf/reg-fx
+ ::set-hash
+ (fn [view]
+   (let [hash (if (= :dashboard view) "" (str "#" (name view)))]
+     (when (not= hash (.. js/window -location -hash))
+       (js/history.replaceState nil "" (str (.. js/window -location -pathname) hash))))))
+
 (rf/reg-event-fx
  ::initialize
  (fn [_ _]
-   {:db initial-db
+   {:db (assoc initial-db :view (hash-view) :collapsed (stored-collapsed))
     :stream/connect "/stream"
-    :fx [[:dispatch [::refresh-adapters]]
+    :fx [[:dispatch [::load-catalog]]
+         [:dispatch [::refresh-adapters]]
          [:dispatch [::refresh-recordings]]]}))
+
+(rf/reg-event-fx
+ ::load-catalog
+ (fn [_ _]
+   {:http {:url "/api/catalog"
+           :on-success [::catalog-loaded]
+           :on-failure [::request-failed]}}))
+
+(rf/reg-event-db
+ ::catalog-loaded
+ (fn [db [_ catalog]]
+   (assoc db :catalog catalog)))
+
+(rf/reg-event-fx
+ ::hash-changed
+ ;; The back button, or a typed `#map`.
+ (fn [{:keys [db]} _]
+   {:db (assoc db :view (hash-view))}))
+
+(rf/reg-event-fx
+ ::toggle-collapsed
+ (fn [{:keys [db]} [_ id]]
+   (let [collapsed ((if (contains? (:collapsed db) id) disj conj) (:collapsed db) id)]
+     {:db (assoc db :collapsed collapsed)
+      ::store-collapsed collapsed})))
+
+(rf/reg-event-db
+ ::toggle-details
+ (fn [db _]
+   (update db :details? not)))
 
 (rf/reg-event-db
  :stream/connected
@@ -284,10 +355,11 @@
  (fn [db [_ {:keys [error]}]]
    (assoc db :request {:state :failed :error (or error :request-failed)})))
 
-(rf/reg-event-db
+(rf/reg-event-fx
  ::show-view
- (fn [db [_ view]]
-   (assoc db :view view)))
+ (fn [{:keys [db]} [_ view]]
+   {:db (assoc db :view view)
+    ::set-hash view}))
 
 (rf/reg-event-fx
  ::open-map
@@ -297,14 +369,16 @@
    (let [db (-> db
                 (assoc :view :map)
                 (update :map assoc :log log :window nil :cell nil))
+         open {::set-hash :map}
          loaded? (and (= log (get-in db [:recording-log :name]))
                       (not= :failed (get-in db [:recording-log :state])))]
      (if (or (= :stream log) loaded?)
-       {:db db}
-       {:db (assoc db :recording-log {:name log :state :loading})
+       (assoc open :db db)
+       (assoc open
+        :db (assoc db :recording-log {:name log :state :loading})
         :http {:url (str "/api/recordings/" (js/encodeURIComponent log) "/series")
                :on-success [::series-loaded log]
-               :on-failure [::series-failed log]}}))))
+               :on-failure [::series-failed log]})))))
 
 (rf/reg-event-db
  ::series-loaded

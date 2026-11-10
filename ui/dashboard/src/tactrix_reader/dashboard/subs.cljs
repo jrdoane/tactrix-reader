@@ -1,5 +1,6 @@
 (ns tactrix-reader.dashboard.subs
   (:require [re-frame.core :as rf]
+            [tactrix-reader.dashboard.catalog :as catalog]
             [tactrix-reader.dashboard.series :as series]))
 
 (rf/reg-sub
@@ -74,6 +75,74 @@
  :<- [::signals]
  (fn [signals [_ signal-name]]
    (get signals signal-name)))
+
+(rf/reg-sub
+ ::catalog
+ ;; How to show each PID, signal, and DID, from /api/catalog, or nil until
+ ;; it has loaded.
+ (fn [db _]
+   (:catalog db)))
+
+(rf/reg-sub
+ :catalog/labels
+ ;; Labels by name, for `format/label`.
+ :<- [::catalog]
+ (fn [catalog _]
+   (catalog/labels catalog)))
+
+(rf/reg-sub
+ ::seen-names
+ ;; The names of the PIDs and signals that have arrived. Its value changes
+ ;; only when a new name does, so what is built from it is not rebuilt for
+ ;; every batch.
+ :<- [::samples]
+ :<- [::signals]
+ (fn [[samples signals] _]
+   {:pid (set (keys samples)) :signal (set (keys signals))}))
+
+(rf/reg-sub
+ ::entries
+ ;; The catalog's entries plus one for each arrived name it does not have.
+ :<- [::catalog]
+ :<- [::seen-names]
+ (fn [[catalog seen] _]
+   (catalog/entries catalog seen)))
+
+(rf/reg-sub
+ ::primary-tiles
+ :<- [::catalog]
+ :<- [::entries]
+ (fn [[catalog entries] _]
+   (catalog/primary-tiles catalog entries)))
+
+(rf/reg-sub
+ ::sections
+ ;; The dashboard's sections, each with its groups of tiles.
+ :<- [::catalog]
+ :<- [::entries]
+ :<- [::seen-names]
+ (fn [[catalog entries seen] _]
+   (catalog/sections catalog entries seen)))
+
+(rf/reg-sub
+ ::tile-value
+ ;; The latest {:value :unit} for a tile, with `:value` the tile's part of a
+ ;; value that is a map.
+ (fn [[_ {:keys [kind name]}]]
+   (rf/subscribe [(if (= :signal kind) ::signal ::sample) name]))
+ (fn [sample [_ {:keys [part]}]]
+   (cond-> sample
+     (and sample part) (update :value get part))))
+
+(rf/reg-sub
+ ::collapsed
+ (fn [db _]
+   (:collapsed db)))
+
+(rf/reg-sub
+ ::details?
+ (fn [db _]
+   (:details? db)))
 
 (rf/reg-sub
  ::can-ids

@@ -43,8 +43,9 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 h1 { margin: 0; font-size: 22px; }
@@ -74,11 +75,21 @@ h2 {
 }
 
 .muted { color: var(--muted); }
+.warn { color: var(--warn); }
+
+h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .error { margin: 8px 0 0; color: var(--bad); }
 
 .controls {
   margin-bottom: 20px;
-  padding: 12px 16px;
+  padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -107,6 +118,19 @@ select { flex: 1 1 260px; min-width: 0; }
 input[type="text"] { flex: 1 1 260px; min-width: 0; }
 
 .controls .control-row + .control-row { margin-top: 8px; }
+
+/* The source bar: what is playing, the adapter, and recording, in one row
+   that wraps. */
+.source-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.bar-group.grow { flex: 1 1 320px; }
+.bar-group.summary { gap: 4px 12px; font-size: 14px; margin-right: auto; }
+.bar-group select { flex: 0 1 auto; width: 220px; }
+.bar-group:not(.grow):not(.summary) { flex-wrap: nowrap; }
+.bar-group label.check { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.source-bar button, .source-bar select, .source-bar input[type="text"] { padding: 4px 10px; }
+.controls .panels { margin: 12px 0 4px; }
+.controls .panel { background: var(--bg); }
 .control-row label.check { display: flex; align-items: center; gap: 6px; color: var(--text); }
 
 button { cursor: pointer; }
@@ -181,22 +205,46 @@ button.record.active { color: #fff; background: var(--bad); }
   color: var(--text);
 }
 
+.block-head .muted { font-size: 13px; }
+
+/* A section heading that folds its section away. */
+button.fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.chevron { width: 14px; color: var(--muted); font-size: 14px; }
+
 .block-note {
   margin: -6px 0 14px;
   font-size: 13px;
   color: var(--muted);
 }
 
+/* Groups flow across the page and wrap. Each is as wide as its tiles need
+   (--columns, at most five), so a small group takes little room and a new
+   one fits wherever there is space. */
 .groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 18px 28px;
 }
+
+.group { min-width: 0; }
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(var(--columns, 4), 148px);
   gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .group { flex: 1 1 100%; }
+  .tiles, .did-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .tile {
@@ -272,7 +320,19 @@ button.record.active { color: #fff; background: var(--bad); }
   color: var(--muted);
 }
 
-.tag.inferred { color: var(--warn); border-color: var(--warn); }
+.tag.inferred, .tag.fitted { color: var(--warn); border-color: var(--warn); }
+.tag.can { color: var(--accent); border-color: var(--accent); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 20px; font-size: 13px; color: var(--muted); }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+
+/* A table that is only as wide as its columns need. */
+.samples.compact { width: auto; min-width: min(100%, 560px); }
+.samples.compact th, .samples.compact td { padding: 6px 14px; }
+.samples .source { display: flex; align-items: center; gap: 6px; }
+.samples td.source { display: table-cell; }
+.samples td.source .tag { margin-right: 6px; }
+.source-id { font-family: ui-monospace, monospace; font-size: 12px; }
 
 .samples .name, .samples .unit, .samples .source { white-space: nowrap; }
 .samples .source { color: var(--muted); font-size: 13px; }
@@ -285,8 +345,7 @@ button.record.active { color: #fff; background: var(--bad); }
 }
 
 .did-tiles {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 200px));
 }
 .samples .data { font-family: ui-monospace, monospace; font-size: 13px; white-space: nowrap; }
 .samples .varies { color: var(--accent); }
@@ -295,7 +354,7 @@ button.record.active { color: #fff; background: var(--bad); }
 .all-samples + .block { margin-top: 28px; }
 .recordings { display: grid; gap: 20px; }
 .vehicle-recordings .block-head { flex-wrap: wrap; margin-bottom: 8px; }
-.vehicle-recordings h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.vehicle-recordings h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
 .vehicle-recordings .block-head .muted { font-size: 13px; }
 .samples tr.playing td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .samples td button { padding: 3px 10px; font-size: 13px; }
@@ -306,7 +365,8 @@ header .title { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; 
 .view-toggle { display: flex; }
 .view-toggle button { border-radius: 0; }
 .view-toggle button:first-child { border-radius: 8px 0 0 8px; }
-.view-toggle button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+.view-toggle button + button { border-left: none; }
+.view-toggle button:last-child { border-radius: 0 8px 8px 0; }
 .view-toggle button.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 .map-controls .control-label {
@@ -402,7 +462,10 @@ table.heat {
   font-variant-numeric: tabular-nums;
 }
 .legend-bar { width: 160px; height: 10px; border-radius: 4px; }
-.cell-detail { margin-top: 16px; max-width: 520px; }
+/* The cell's details sit beside the table, or under it when there is no room. */
+.map-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; }
+.map-grid { min-width: 0; max-width: 100%; }
+.cell-detail { flex: 0 1 360px; }
 .cell-detail h2 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--text); }
 .cell-detail p { margin-top: 10px; font-size: 13px; }
 .samples td.actions { white-space: nowrap; }

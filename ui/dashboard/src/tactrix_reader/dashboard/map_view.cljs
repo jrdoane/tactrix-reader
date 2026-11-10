@@ -427,6 +427,6 @@
              [:p.muted "Type breakpoints for both axes."]
 
              :else
-             [:<>
-              [heat-table settings channels x-axis y-axis cells]
+             [:div.map-body
+              [:div.map-grid [heat-table settings channels x-axis y-axis cells]]
               [cell-detail settings channels x-axis y-axis cells]])]])]))

@@ -13,4 +13,5 @@
 
 (defn init []
   (rf/dispatch-sync [::events/initialize])
+  (.addEventListener js/window "hashchange" #(rf/dispatch [::events/hash-changed]))
   (mount))

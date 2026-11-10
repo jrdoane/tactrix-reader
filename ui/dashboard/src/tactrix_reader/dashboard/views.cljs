@@ -1,88 +1,11 @@
 (ns tactrix-reader.dashboard.views
   (:require [clojure.string :as str]
             [re-frame.core :as rf]
+            [tactrix-reader.dashboard.catalog :as catalog]
             [tactrix-reader.dashboard.events :as events]
             [tactrix-reader.dashboard.format :refer [did-hex format-value label unit-labels]]
             [tactrix-reader.dashboard.map-view :as map-view]
             [tactrix-reader.dashboard.subs :as subs]))
-
-(def ^:private inferred-signals
-  "Signals identified from the car's own CAN traffic by how they behave, but
-  matched to no PID, so not confirmed. See lib/device/docs/can-broadcast.md."
-  #{:gear :steering-angle :brake :brake-pressure :parking-brake :driver-seatbelt
-    :wheel-speeds :longitudinal-acceleration :lateral-acceleration :yaw-rate
-    :fuel-flow :outside-temp :fuel-gauge :engine-starts :warm-up-cycles
-    :door-front-left :door-front-right :door-rear-left :door-rear-right})
-
-(def ^:private wheel-tiles
-  "Tiles for each wheel in the :wheel-speeds signal."
-  {:wheel-front-left :front-left
-   :wheel-front-right :front-right
-   :wheel-rear-left :rear-left
-   :wheel-rear-right :rear-right})
-
-(def ^:private primary-readouts
-  [:engine-rpm :vehicle-speed :gear :coolant-temp :throttle-position])
-
-(def ^:private readout-groups
-  [["Throttle and pedal" [:relative-throttle-position :commanded-throttle-actuator
-                          :relative-accelerator-pedal-position
-                          :accelerator-pedal-position-d]]
-   ["Air and load" [:engine-load :maf-air-flow :intake-manifold-pressure
-                    :barometric-pressure :timing-advance]]
-   ["Temperatures" [:oil-temp :intake-air-temp :ambient-air-temp
-                    :catalyst-temp-bank-1-sensor-1]]
-   ["Fuel" [:fuel-system-status :commanded-lambda :wideband-oxygen-sensor-1-current
-            :short-term-fuel-trim-bank-1 :long-term-fuel-trim-bank-1
-            :oxygen-sensor-bank-1-sensor-2 :fuel-level]]
-   ["Electrical and gearbox" [:control-module-voltage :auxiliary-io-status]]])
-
-(def ^:private can-groups
-  [["Driver" [:steering-angle :brake :brake-pressure :parking-brake
-              :driver-seatbelt]]
-   ["Motion" [:longitudinal-acceleration :lateral-acceleration :yaw-rate]]
-   ["Wheel speeds" [:wheel-front-left :wheel-front-right
-                    :wheel-rear-left :wheel-rear-right]]
-   ["Doors" [:door-front-left :door-front-right :door-rear-left :door-rear-right]]
-   ["Engine and outside" [:fuel-flow :outside-temp]]
-   ["Fuel gauge and counters" [:fuel-gauge :engine-starts :warm-up-cycles]]])
-
-(defn- paired-notes
-  "Notes for DIDs that move together, each naming the other in its pair."
-  [note & pairs]
-  (into {} (for [[a b] pairs
-                 [did other] [[a b] [b a]]]
-             [did (str note "; pairs with " (did-hex other))])))
-
-(def ^:private did-notes
-  "What the 2026-10-29-did-drive recording showed about DIDs that match no
-  PID. These are inferences; see lib/device/docs/subaru-ssm.md."
-  (merge
-   (zipmap (range 0x1000 0x1100 0x20) (repeat "Supported-DID bitmap"))
-   (zipmap [0x101D 0x1022 0x10E3] (repeat "Held at 00; knock correction is not ruled out"))
-   (zipmap [0x10AE 0x10B1 0x10B4 0x10B5] (repeat "Varies under load"))
-   (paired-notes "Possibly cam timing" [0x10EC 0x10ED])
-   (paired-notes "Loosely follows load and timing" [0x10EE 0x10EF] [0x10F0 0x10F1])
-   (paired-notes "Drops at once in fuel cut" [0x10B6 0x10B7] [0x10B8 0x10B9])
-   (paired-notes "Opposite flags that swap at the first full throttle" [0x1088 0x1089])
-   {0x103D "Changes between drives only: 2A, 2D, 2F"
-    0x10A5 "Rises above about 50% load"
-    0x10DE "Follows load and timing advance"}))
-
-(def ^:private did-comparisons
-  "For each DID in `uds/did-signals`, by name, the polled value it was
-  matched against, from the PID samples by name, and that value's unit."
-  {:throttle-position [#(get-in % [:throttle-position :value]) :percent]
-   :accelerator-pedal [#(get-in % [:relative-accelerator-pedal-position :value]) :percent]
-   :wideband-current [#(get-in % [:wideband-oxygen-sensor-1-current :value :milliamps]) :milliamps]
-   :lambda [#(get-in % [:wideband-oxygen-sensor-1-current :value :lambda]) :lambda]
-   :air-per-revolution [#(let [maf (get-in % [:maf-air-flow :value])
-                               rpm (get-in % [:engine-rpm :value])]
-                           (when (and maf (pos? rpm))
-                             (/ maf (/ rpm 60))))
-                        :grams-per-revolution]
-   :mass-air-flow [#(get-in % [:maf-air-flow :value]) :grams-per-second]
-   :charging-voltage-target [#(get-in % [:control-module-voltage :value]) :volts]})
 
 (def ^:private error-messages
   {:missing-path "No adapter was found."
@@ -114,52 +37,53 @@
 (defn- open-closed [value]
   (if value "open" "closed"))
 
-(def ^:private value-formats
-  "Display for values that read better as words than as numbers."
+(def ^:private formatters
+  "Display for values that read better as words than as numbers, by the
+  catalog's `:format`."
   {:gear #(if (= :neutral %) "N" (str %))
    ;; Positive is a left turn.
-   :steering-angle #(cond
-                      (pos? %) (str (.toFixed % 1) "° L")
-                      (neg? %) (str (.toFixed (- %) 1) "° R")
-                      :else "0.0°")
-   :brake on-off
-   :parking-brake on-off
-   :driver-seatbelt name
-   :door-front-left open-closed
-   :door-front-right open-closed
-   :door-rear-left open-closed
-   :door-rear-right open-closed
+   :steering #(cond
+                (pos? %) (str (.toFixed % 1) "° L")
+                (neg? %) (str (.toFixed (- %) 1) "° R")
+                :else "0.0°")
+   :on-off on-off
+   :open-closed open-closed
+   :keyword name
    :monitor-status (fn [{:keys [mil-on? dtc-count monitors]}]
                      (str "check engine " (if mil-on? "on" "off")
                           ", " dtc-count " stored codes, "
                           (count (filter #{:complete} (vals monitors))) " of "
                           (count monitors) " monitors complete"))
-   :auxiliary-io-status #(case (:manual-transmission-in-gear? %)
-                           true "in gear"
-                           false "neutral"
-                           nil "—")
-   :wideband-oxygen-sensor-1-current #(some-> (:lambda %) (.toFixed 3))
-   ;; The Impreza has one fuel system.
-   :fuel-system-status #(let [state (:system-1 %)]
-                          (if (keyword? state)
-                            (str/replace (name state) "-" " ")
-                            (str state)))
-   :oxygen-sensor-bank-1-sensor-2 #(some-> (:volts %) (.toFixed 3))})
+   :in-gear #(case (:manual-transmission-in-gear? %)
+               true "in gear"
+               false "neutral"
+               nil "—")
+   :fuel-system #(let [state (:system-1 %)]
+                   (if (keyword? state)
+                     (str/replace (name state) "-" " ")
+                     (str state)))})
 
 (def ^:private formats-with-unit
-  "Names whose `value-formats` entry already shows the unit."
-  #{:steering-angle})
+  "Formats that already show the unit."
+  #{:steering})
 
-(def ^:private display-units
-  "Units for values whose PID gives none because it decodes to a map, for
-  the part `value-formats` shows."
-  {:wideband-oxygen-sensor-1-current :lambda
-   :oxygen-sensor-bank-1-sensor-2 :volts})
+(defn- tile-text
+  "A tile's value as text."
+  [{:keys [format unit decimals]} value sample-unit]
+  (cond
+    (nil? value) "—"
+    format ((get formatters format str) value)
+    (and decimals (number? value)) (.toFixed value decimals)
+    :else (format-value value (or unit sample-unit))))
 
-(defn- display-value [value-name value unit]
-  (if-let [format-named (get value-formats value-name)]
-    (format-named value)
-    (format-value value unit)))
+(defn- tile-unit
+  "A tile's unit label: its unit's, or `raw` for a count with no known
+  scale."
+  [{:keys [format unit raw?]} sample-unit]
+  (cond
+    (contains? formats-with-unit format) ""
+    raw? "raw"
+    :else (get unit-labels (or unit sample-unit) "")))
 
 (defn- format-duration [ms]
   (let [seconds (js/Math.round (/ ms 1000))]
@@ -194,7 +118,8 @@
         (str (name (:source status)) " " (name (:state status)))])]))
 
 (defn- recording-controls
-  "Record and Stop, with a note saved in the recording's meta.edn."
+  "Record and Stop, with a note saved in the recording's meta.edn. Shown only
+  while a live source can be recorded."
   []
   (let [recording @(rf/subscribe [::subs/recording])
         recordable? @(rf/subscribe [::subs/recordable?])
@@ -203,59 +128,103 @@
         now @(rf/subscribe [::subs/now])
         recording? (= :recording (:state recording))
         pending? (= :pending (:state request))]
-    [:div.control-row
-     [:label {:for "note"} "Note"]
-     [:input#note {:type "text"
-                   :placeholder "Conditions, such as cold start then highway"
-                   :value note
-                   :disabled recording?
-                   :on-change #(rf/dispatch [::events/set-note (.. % -target -value)])}]
-     (if recording?
-       [:button.record.active {:disabled pending?
-                               :on-click #(rf/dispatch [::events/stop-recording])}
-        (str "Stop recording " (when now (format-clock (- now (js/Date.parse (:started-at recording))))))]
-       [:button.record {:disabled (or pending? (not recordable?))
-                        :title (when-not recordable? "Connect to the car to record")
-                        :on-click #(rf/dispatch [::events/start-recording])}
-        "Record"])]))
+    (when (or recordable? recording?)
+      [:div.bar-group.grow
+       [:input#note {:type "text"
+                     :aria-label "Note for the recording"
+                     :placeholder "Note, such as cold start then highway"
+                     :value note
+                     :disabled recording?
+                     :on-change #(rf/dispatch [::events/set-note (.. % -target -value)])}]
+       (if recording?
+         [:button.record.active {:disabled pending?
+                                 :on-click #(rf/dispatch [::events/stop-recording])}
+          (str "Stop recording " (when now (format-clock (- now (js/Date.parse (:started-at recording))))))]
+         [:button.record {:disabled pending?
+                          :on-click #(rf/dispatch [::events/start-recording])}
+          "Record"])])))
 
-(defn- source-controls []
+(defn- adapter-controls []
   (let [adapters @(rf/subscribe [::subs/adapters])
         selected @(rf/subscribe [::subs/selected-path])
         status @(rf/subscribe [::subs/status])
-        request @(rf/subscribe [::subs/request])
         busy? @(rf/subscribe [::subs/busy?])
         poll-dids? @(rf/subscribe [::subs/poll-dids?])
         switch! #(rf/dispatch [::events/switch-source %])]
+    [:div.bar-group
+     [:select#adapter {:value (or selected "")
+                       :aria-label "Adapter"
+                       :disabled (empty? adapters)
+                       :on-change #(rf/dispatch [::events/select-adapter (.. % -target -value)])}
+      (if (empty? adapters)
+        [:option {:value ""} (if (nil? adapters) "Scanning…" "No adapters found")]
+        (for [{:keys [path product serial]} adapters]
+          ^{:key path}
+          [:option {:value path} (str/join " · " (remove nil? [product serial path]))]))]
+     [:button {:on-click #(rf/dispatch [::events/refresh-adapters])} "Rescan"]
+     (when (seq adapters)
+       [:<>
+        [:button.primary {:disabled (or busy? (not selected))
+                          :on-click #(switch! {:type :live :path selected :dids? poll-dids?})}
+         (if (and (= :live (:source status)) (= selected (:path status))) "Reconnect" "Connect")]
+        [:label.check {:title "Alternate PID requests with the scanned UDS DIDs, which roughly halves the PID rate"}
+         [:input {:type "checkbox"
+                  :checked poll-dids?
+                  :disabled busy?
+                  :on-change #(rf/dispatch [::events/set-poll-dids (.. % -target -checked)])}]
+         "Poll DIDs"]])
+     (when (#{:live :replay} (:source status))
+       [:button {:disabled busy?
+                 :title "Stop the source"
+                 :on-click #(switch! {:type :none})}
+        (if (= :live (:source status)) "Disconnect" "Stop")])]))
+
+(defn- source-summary
+  "What is playing, on which car, and whether it has trouble codes, in a
+  line."
+  []
+  (let [status @(rf/subscribe [::subs/status])
+        {:keys [recording vehicle adapter]} @(rf/subscribe [::subs/info])
+        {:keys [mil-on? dtc-count]} (:value @(rf/subscribe [::subs/sample :monitor-status]))]
+    [:div.bar-group.summary
+     [:strong (case (:source status)
+                :replay (str "Replay · " (or (:name recording) "recording"))
+                :live (str "Live · " (or (:product adapter) (:path status) "adapter"))
+                "No source")]
+     (when-let [car (or (:description vehicle) (:vin vehicle) (first (:calibration-ids vehicle)))]
+       [:span.muted car])
+     (when (some? mil-on?)
+       [:span {:class (if (or mil-on? (pos? dtc-count)) "warn" "muted")}
+        (str "check engine " (if mil-on? "on" "off") " · "
+             dtc-count (if (= 1 dtc-count) " code" " codes"))])]))
+
+(declare source-panel adapter-panel vehicle-panel diagnostics-panel)
+
+(defn- source-bar
+  "One bar for the source on every tab: what is playing, the adapter, and
+  recording, with the adapter, vehicle, and diagnostics a click away."
+  []
+  (let [status @(rf/subscribe [::subs/status])
+        request @(rf/subscribe [::subs/request])
+        details? @(rf/subscribe [::subs/details?])]
     [:section.controls
-     [:div.control-row
-      [:label {:for "adapter"} "Adapter"]
-      [:select#adapter {:value (or selected "")
-                        :disabled (empty? adapters)
-                        :on-change #(rf/dispatch [::events/select-adapter (.. % -target -value)])}
-       (if (empty? adapters)
-         [:option {:value ""} (if (nil? adapters) "Scanning…" "No adapters found")]
-         (for [{:keys [path product serial]} adapters]
-           ^{:key path}
-           [:option {:value path} (str/join " · " (remove nil? [product serial path]))]))]
-      [:button {:on-click #(rf/dispatch [::events/refresh-adapters])} "Rescan"]
-      [:button.primary {:disabled (or busy? (not selected))
-                        :on-click #(switch! {:type :live :path selected :dids? poll-dids?})}
-       (if (and (= :live (:source status)) (= selected (:path status))) "Reconnect" "Connect")]
-      [:button {:disabled (or busy? (= :none (:source status)))
-                :on-click #(switch! {:type :none})}
-       "Disconnect"]
-      [:label.check {:title "Alternate PID requests with the scanned UDS DIDs, which roughly halves the PID rate"}
-       [:input {:type "checkbox"
-                :checked poll-dids?
-                :disabled busy?
-                :on-change #(rf/dispatch [::events/set-poll-dids (.. % -target -checked)])}]
-       "Poll DIDs"]]
-     [recording-controls]
+     [:div.source-bar
+      [source-summary]
+      [:button.details-toggle {:aria-expanded details?
+                               :on-click #(rf/dispatch [::events/toggle-details])}
+       (if details? "Hide details" "Details")]
+      [adapter-controls]
+      [recording-controls]]
      (when (= :failed (:state request))
        [:p.error (error-message (:error request))])
      (when (= :failed (:state status))
-       [:p.error (error-message (:error status))])]))
+       [:p.error (error-message (:error status))])
+     (when details?
+       [:div.panels
+        [source-panel]
+        [adapter-panel]
+        [vehicle-panel]
+        [diagnostics-panel]])]))
 
 (defn- field
   "One row of a panel. `value` is shown when present, else `missing`."
@@ -271,7 +240,7 @@
 
 (defn- panel [title & fields]
   [:section.panel
-   [:h2 title]
+   [:h3 title]
    (if (some some? fields)
      (into [:dl] fields)
      [:p.muted "Nothing yet."])])
@@ -342,68 +311,102 @@
      (field "Incomplete" (when (seq incomplete)
                            (str/replace (str/join ", " incomplete) "-" " ")))]))
 
-(def ^:private inferred-tag
-  [:span.tag.inferred {:title "Identified from CAN traffic, not confirmed against a PID"}
-   "inferred"])
+(def ^:private provenance
+  "How a value is known, as [text explanation]. The same badges are used on
+  tiles, in tables, and in the legend."
+  {:polled ["polled" "Read by polling an OBD-II mode 01 PID"]
+   :can ["CAN" "Decoded from the car's own CAN traffic and confirmed against the polled PID"]
+   :inferred ["inferred" "Identified from CAN traffic by how it behaves, not confirmed against a PID"]
+   :fitted ["fitted" "A UDS data identifier with a scale fitted from drives, not documented"]})
+
+(defn- badge
+  "A provenance badge, with `detail` (such as a CAN ID) added to its
+  explanation."
+  ([kind]
+   (badge kind nil))
+  ([kind detail]
+   (let [[text title] (get provenance kind)]
+     [:span.tag {:class (name kind)
+                 :title (cond-> title detail (str " (" detail ")"))}
+      text])))
+
+(defn- provenance-legend []
+  (into [:p.legend]
+        (for [kind [:polled :can :inferred :fitted]]
+          ^{:key kind}
+          [:span.legend-item [badge kind] (second (get provenance kind))])))
+
+(defn- tile-badge
+  "The badge for a tile: inferred for a CAN signal, CAN for a PID that has
+  also been decoded from the bus. Polled alone is the default and gets none."
+  [{:keys [kind name]}]
+  (if (= :signal kind)
+    [badge :inferred]
+    (when-let [can-id @(rf/subscribe [::subs/can-id name])]
+      [badge :can (str "CAN ID " (can-id-hex can-id))])))
 
 (defn- readout
-  "A PID sample or, for names in `inferred-signals` and `wheel-tiles`, an
-  inferred CAN signal. With `tags?`, inferred signals are tagged inferred and
-  PIDs also decoded from the CAN bus are tagged CAN."
-  [class value-name tags?]
-  (let [wheel (get wheel-tiles value-name)
-        inferred? (or (some? wheel) (contains? inferred-signals value-name))
-        sample @(rf/subscribe [(if inferred? ::subs/signal ::subs/sample)
-                               (if wheel :wheel-speeds value-name)])
-        {:keys [value unit]} (if wheel (update sample :value get wheel) sample)
-        can-id @(rf/subscribe [::subs/can-id value-name])]
+  "One value: a `catalog/tiles` tile with its latest value."
+  [class tile badges?]
+  (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])]
     [:div {:class class}
      [:div.readout-label
-      [:span (label value-name)]
-      (when tags?
-        (cond
-          inferred? inferred-tag
-          can-id [:span.tag {:title (str "Also decoded from CAN ID " (can-id-hex can-id))}
-                  "CAN"]))]
+      [:span (:label tile)]
+      (when badges? [tile-badge tile])]
      [:div.readout-value
-      (if (some? value) (display-value value-name value unit) "—")
-      (when-not (contains? formats-with-unit value-name)
-        [:span.readout-unit (get unit-labels (or unit (get display-units value-name)) "")])]]))
+      (tile-text tile value unit)
+      [:span.readout-unit (tile-unit tile unit)]]]))
 
-(defn- groups [titled-names tags?]
-  (into [:div.groups]
-        (for [[title value-names] titled-names]
-          ^{:key title}
-          [:section.group
-           [:h2 title]
-           (into [:div.tiles]
-                 (map (fn [value-name] ^{:key value-name} [readout "tile" value-name tags?]))
-                 value-names)])))
+(defn- group-columns
+  "A group is as wide as its tiles need, up to five across."
+  [tiles]
+  {:style {"--columns" (min 5 (count tiles))}})
+
+(defn- section-block
+  "A section of the dashboard that folds away: a heading that toggles it,
+  then its groups, each a grid of tiles, flowing across the page."
+  [{:keys [id title note groups] section-provenance :provenance}]
+  (let [collapsed? (contains? @(rf/subscribe [::subs/collapsed]) id)]
+    [:section.block
+     [:div.block-head
+      [:button.fold {:aria-expanded (not collapsed?)
+                     :on-click #(rf/dispatch [::events/toggle-collapsed id])}
+       [:span.chevron (if collapsed? "▸" "▾")]
+       [:h2 title]]
+      (when section-provenance [badge section-provenance])
+      [:span.muted (str (reduce + (map (comp count :tiles) groups)) " values")]]
+     (when-not collapsed?
+       [:<>
+        (when note [:p.block-note note])
+        (into [:div.groups]
+              (for [{:keys [title tiles] group-id :id} groups]
+                ^{:key group-id}
+                [:section.group
+                 [:h3 title]
+                 (into [:div.tiles (group-columns tiles)]
+                       (map (fn [tile]
+                              ^{:key (:id tile)}
+                              ;; A section that is all one provenance says so once.
+                              [readout "tile" tile (not section-provenance)]))
+                       tiles)]))])]))
 
 (defn- readouts []
-  [:<>
-   (into [:section.readouts]
-         (map (fn [value-name] ^{:key value-name} [readout "readout" value-name true]))
-         primary-readouts)
-   [:section.block
-    [:div.block-head
-     [:h2 "OBD-II PIDs"]]
-    [groups readout-groups true]]
-   [:section.block
-    [:div.block-head
-     [:h2 "From the CAN bus"]
-     inferred-tag]
-    [:p.block-note
-     "Identified from the car's own traffic by how they behave, but matched "
-     "to no PID, so scales and directions are not confirmed."]
-    [groups can-groups false]]])
+  (let [primary @(rf/subscribe [::subs/primary-tiles])
+        sections @(rf/subscribe [::subs/sections])]
+    [:<>
+     (into [:section.readouts]
+           (map (fn [tile] ^{:key (:id tile)} [readout "readout" tile true]))
+           primary)
+     (for [section sections
+           :when (seq (:groups section))]
+       ^{:key (:id section)}
+       [section-block section])]))
 
 (defn- did-tile
   "A DID matched to a PID: its fitted value, or its raw number when it has no
   scale, over the polled value it was matched against."
-  [{:keys [did name value unit number matches]} samples]
-  (let [[polled polled-unit] (get did-comparisons name)
-        polled-value (when polled (polled samples))]
+  [{:keys [did name value unit number matches]} compare samples]
+  (let [polled-value (catalog/compare-value compare samples)]
     [:div.tile
      [:div.readout-label
       [:span (label name)]
@@ -414,73 +417,150 @@
      [:div.readout-compare
       (str (if matches (str "PID " (hex-byte matches)) "MAF ÷ rpm") ": "
            (if (some? polled-value)
-             (str (format-value polled-value polled-unit) " " (get unit-labels polled-unit ""))
+             (str (format-value polled-value unit) " " (get unit-labels unit ""))
              "—"))]]))
 
-(defn- did-table [dids]
-  (let [ranges @(rf/subscribe [::subs/did-ranges])]
-    [:details.all-samples
-     [:summary (str "All DIDs (" (count dids) ")")]
-     [:table.samples
-      [:thead
-       [:tr [:th "DID"] [:th "Data"] [:th.value "Value"] [:th.value "Range seen"] [:th "What it is"]]]
-      [:tbody
-       (for [{:keys [did name data number]} dids
-             :let [[low high] (get ranges did)]]
-         ^{:key did}
-         [:tr
-          [:td.pid (did-hex did)]
-          [:td.data (str/join " " (map hex-byte data))]
-          [:td.value number]
-          [:td.value {:class (when (not= low high) "varies")}
-           (if (= low high) (str low) (str low "–" high))]
-          [:td.note (if name
-                      (str (label name) ", fitted")
-                      (get did-notes did ""))]])]]]))
-
 (defn- did-block
-  "UDS data identifiers, which only recordings made with record-dids have."
+  "The DIDs matched to a PID, which only recordings made with record-dids
+  and a live source polling DIDs have."
   []
   (let [dids @(rf/subscribe [::subs/did-list])
-        samples @(rf/subscribe [::subs/samples])]
-    (when (seq dids)
+        samples @(rf/subscribe [::subs/samples])
+        {catalog-dids :dids} @(rf/subscribe [::subs/catalog])
+        compare-by-did (into {} (map (juxt :did :compare)) catalog-dids)
+        collapsed? (contains? @(rf/subscribe [::subs/collapsed]) :dids)
+        matched (filter :name dids)]
+    (when (seq matched)
       [:section.block
        [:div.block-head
-        [:h2 "UDS data identifiers"]
-        [:span.tag.inferred {:title "Scales fitted from one drive, not documented"} "fitted"]]
-       [:p.block-note
-        "Read with service 22 alongside the PIDs. Each tile is a DID matched to a "
-        "PID, with a scale fitted from one drive, over the polled value it was "
-        "matched against. What the others hold is unknown; ranges count from when "
-        "the source started or the page connected."]
-       (into [:div.tiles.did-tiles]
-             (comp (filter :name)
-                   (map (fn [reply] ^{:key (:did reply)} [did-tile reply samples])))
-             dids)
-       [did-table dids]])))
+        [:button.fold {:aria-expanded (not collapsed?)
+                       :on-click #(rf/dispatch [::events/toggle-collapsed :dids])}
+         [:span.chevron (if collapsed? "▸" "▾")]
+         [:h2 "UDS data identifiers"]]
+        [badge :fitted]
+        [:span.muted (str (count matched) " values")]]
+       (when-not collapsed?
+         [:<>
+          [:p.block-note
+           "Read with service 22 alongside the PIDs. Each tile is a DID matched to a "
+           "PID, with a scale fitted from drives, over the polled value it was "
+           "matched against. Every DID is listed under Signals."]
+          (into [:div.tiles.did-tiles]
+                (map (fn [reply]
+                       ^{:key (:did reply)}
+                       [did-tile reply (get compare-by-did (:did reply)) samples]))
+                matched)])])))
 
-(defn- sample-table []
+(defn- entry-text
+  "A whole entry's value as text for a table: its format's, each of its
+  parts', or the plain value."
+  [{:keys [format parts] :as entry} value unit]
+  (cond
+    (nil? value) "—"
+    format (tile-text entry value unit)
+    (seq parts) (str/join ", " (for [{:keys [part] part-label :label :as part-entry} parts]
+                                 (str (when part-label (str part-label " "))
+                                      (tile-text (merge (select-keys entry [:unit]) part-entry)
+                                                 (get value part) unit))))
+    :else (tile-text entry value unit)))
+
+(defn- entry-unit [{:keys [parts] :as entry} unit]
+  (tile-unit (cond-> entry
+               (= 1 (count parts)) (merge (first parts)))
+             unit))
+
+(defn- pid-table
+  "Every PID that has arrived."
+  []
   (let [samples @(rf/subscribe [::subs/sample-list])
-        can-ids @(rf/subscribe [::subs/can-ids])]
-    [:details.all-samples {:open true}
-     [:summary (str "All PIDs (" (count samples) ")")]
-     [:table.samples
+        can-ids @(rf/subscribe [::subs/can-ids])
+        by-name (into {} (map (juxt (juxt :kind :name) identity)) @(rf/subscribe [::subs/entries]))]
+    [:section.block
+     [:div.block-head
+      [:h2 "OBD-II PIDs"]
+      [:span.muted (str (count samples) " arrived")]]
+     [:table.samples.compact
       [:thead
        [:tr [:th "PID"] [:th "Name"] [:th.value "Value"] [:th "Unit"] [:th "Source"]]]
       [:tbody
-       (for [{:keys [pid name value unit]} samples]
+       (for [{:keys [pid name value unit]} samples
+             :let [entry (get by-name [:pid name] {:label (catalog/name-label name)})
+                   can-id (get can-ids name)]]
          ^{:key pid}
          [:tr
           [:td.pid (hex-byte pid)]
-          [:td.name (label name)]
-          [:td.value (display-value name value unit)]
-          [:td.unit (get unit-labels (or unit (get display-units name)) "")]
-          [:td.source (if-let [can-id (get can-ids name)]
-                        (str "CAN " (can-id-hex can-id) ", polled")
-                        "polled")]])]]]))
+          [:td.name (:label entry)]
+          [:td.value (entry-text entry value unit)]
+          [:td.unit (entry-unit entry unit)]
+          [:td.source
+           [badge :polled]
+           (when can-id [badge :can (str "CAN ID " (can-id-hex can-id))])
+           (when can-id [:span.source-id (can-id-hex can-id)])]])]]]))
 
-(defn- vehicle-key [{:keys [vin calibration-ids description]}]
-  (or vin (first calibration-ids) description))
+(defn- signal-table
+  "Every inferred CAN signal the catalog has or that has arrived."
+  []
+  (let [signals @(rf/subscribe [::subs/signals])
+        entries (filter (comp #{:signal} :kind) @(rf/subscribe [::subs/entries]))]
+    [:section.block
+     [:div.block-head
+      [:h2 "CAN signals"]
+      [:span.muted (str (count entries) " decoded")]]
+     [:table.samples.compact
+      [:thead
+       [:tr [:th "CAN ID"] [:th "Name"] [:th.value "Value"] [:th "Unit"] [:th "Source"]]]
+      [:tbody
+       (for [{:keys [name can-id] :as entry} (sort-by (juxt :can-id :label) entries)
+             :let [{:keys [value unit]} (get signals name)]]
+         ^{:key name}
+         [:tr
+          [:td.pid (some-> (or can-id (:can-id (get signals name))) can-id-hex)]
+          [:td.name (:label entry)]
+          [:td.value (entry-text entry value unit)]
+          [:td.unit (entry-unit entry unit)]
+          [:td.source [badge :inferred]]])]]]))
+
+(defn- did-table
+  "Every DID that has arrived, with what is known about it."
+  []
+  (let [dids @(rf/subscribe [::subs/did-list])
+        ranges @(rf/subscribe [::subs/did-ranges])
+        {:keys [did-notes]} @(rf/subscribe [::subs/catalog])]
+    [:section.block
+     [:div.block-head
+      [:h2 "UDS data identifiers"]
+      [:span.muted (if (seq dids)
+                     (str (count dids) " arrived; ranges count from when the source started or the page connected")
+                     "none in this source; replay a recording made with DIDs, or connect with Poll DIDs")]]
+     (when (seq dids)
+       [:table.samples.compact
+        [:thead
+         [:tr [:th "DID"] [:th "Data"] [:th.value "Value"] [:th.value "Range seen"] [:th "What it is"] [:th "Source"]]]
+        [:tbody
+         (for [{:keys [did name data number]} dids
+               :let [[low high] (get ranges did)]]
+           ^{:key did}
+           [:tr
+            [:td.pid (did-hex did)]
+            [:td.data (str/join " " (map hex-byte data))]
+            [:td.value number]
+            [:td.value {:class (when (not= low high) "varies")}
+             (if (= low high) (str low) (str low "–" high))]
+            [:td.note (if name (label name) (get did-notes did ""))]
+            [:td.source (when name [badge :fitted])]])]])]))
+
+(defn- signals-view []
+  [:<>
+   [provenance-legend]
+   [pid-table]
+   [signal-table]
+   [did-table]])
+
+(defn- vehicle-key
+  "What groups a vehicle's recordings. The calibration ID comes first:
+  recordings made before the VIN was saved have only that."
+  [{:keys [vin calibration-ids description]}]
+  (or (first calibration-ids) vin description))
 
 (defn- vehicle-heading [{:keys [vin calibration-ids ecu-name description] :as vehicle}]
   (let [details (remove nil? [(some->> vin (str "VIN "))
@@ -531,10 +611,9 @@
                    :let [entries (get by-vehicle key)]]
                ^{:key (or key "unknown")}
                [:section.vehicle-recordings
-                ;; The newest identity, with a description from any of them.
-                [vehicle-heading (cond-> (:vehicle (first entries))
-                                   (some (comp :description :vehicle) entries)
-                                   (assoc :description (some (comp :description :vehicle) entries)))]
+                ;; The newest identity, filled in from any of the others.
+                [vehicle-heading (reduce (fn [vehicle other] (merge other vehicle))
+                                         (map :vehicle entries))]
                 [:table.samples
                  [:thead
                   [:tr [:th "Recorded"] [:th "Name"] [:th.value "Length"] [:th "Note"]
@@ -559,33 +638,38 @@
                                 :on-click #(rf/dispatch [::events/switch-source {:type :replay :recording name}])}
                        (if playing? "Replaying" "Replay")]]])]]])))]))
 
+(def ^:private view-names
+  {:dashboard "Dashboard"
+   :signals "Signals"
+   :bus "Bus"
+   :map "Map"
+   :recordings "Recordings"})
+
 (defn- view-toggle [view]
   [:nav.view-toggle
-   (for [[key text] [[:dashboard "Dashboard"] [:map "Map"]]]
+   (for [key events/views]
      ^{:key key}
      [:button {:class (when (= key view) "active")
                :aria-pressed (= key view)
                :on-click #(rf/dispatch [::events/show-view key])}
-      text])])
+      (get view-names key)])])
 
 (defn app []
-  (let [view @(rf/subscribe [::subs/view])]
+  (let [view @(rf/subscribe [::subs/view])
+        catalog @(rf/subscribe [::subs/catalog])]
     [:main
      [:header
       [:div.title
        [:h1 "Engine"]
        [view-toggle view]]
       [connection-badge]]
-     (if (= :map view)
-       [map-view/map-view]
-       [:<>
-        [source-controls]
-        [:section.panels
-         [source-panel]
-         [adapter-panel]
-         [vehicle-panel]
-         [diagnostics-panel]]
-        [readouts]
-        [did-block]
-        [sample-table]
-        [recordings-block]])]))
+     [source-bar]
+     (case view
+       :map [map-view/map-view]
+       :recordings [recordings-block]
+       :signals [signals-view]
+       (if catalog
+         [:<>
+          [readouts]
+          [did-block]]
+         [:p.muted "Loading…"]))]))
