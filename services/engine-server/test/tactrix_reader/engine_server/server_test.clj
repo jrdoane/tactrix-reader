@@ -38,10 +38,6 @@
     (spit (java.io.File. dir "meta.edn") (pr-str (merge {:polling {:rx-id 0x7E8}} meta)))
     (str dir))))
 
-(defn- free-port []
-  (with-open [socket (java.net.ServerSocket. 0)]
-    (.getLocalPort socket)))
-
 (defn- read-transit [s]
   (transit/read (transit/reader (java.io.ByteArrayInputStream. (.getBytes ^String s "UTF-8")) :json)))
 
@@ -111,9 +107,9 @@
     (first (line-seq (io/reader (.getInputStream socket))))))
 
 (deftest streams-replayed-samples-over-sse
-  (let [port (free-port)
-        system (main/start-system {:source {:type :replay :recording (recording-dir)}
-                                   :port port})
+  (let [system (main/start-system {:source {:type :replay :recording (recording-dir)}
+                                   :port 0})
+        port (:port system)
         client (java.net.http.HttpClient/newHttpClient)
         base (str "http://localhost:" port)]
     (try
@@ -195,11 +191,11 @@
                                           :permanent nil
                                           :errors {:permanent {:error :timeout}}})
                 source/start-live-source! (fake-live-source (atom []))]
-    (let [port (free-port)
-          root (temp-dir)
+    (let [root (temp-dir)
           system (main/start-system {:source {:type :replay :recording (recording-dir)}
-                                     :port port
+                                     :port 0
                                      :config {:recordings-dir (str root) :vehicles {}}})
+          port (:port system)
           client (java.net.http.HttpClient/newHttpClient)
           base (str "http://localhost:" port)
           [events close] (open-events client (str base "/stream"))]
@@ -274,11 +270,11 @@
         newer (recording-dir root "2026-10-30-did-drive" {:recorded-at "2026-10-30T12:04:43Z"
                                                           :vehicle {:vin "TESTVIN0123456789"}
                                                           :note "highway"})
-        port (free-port)
         system (main/start-system {:source {:type :none}
-                                   :port port
+                                   :port 0
                                    :config {:recordings-dir (str root)
                                             :vehicles {"EA1T002C" {:description "2015 Subaru Impreza"}}}})
+        port (:port system)
         client (java.net.http.HttpClient/newHttpClient)
         base (str "http://localhost:" port)
         [events close] (open-events client (str base "/stream"))]
@@ -336,10 +332,10 @@
                                            :errors {:ecu-id {:error :timeout}}})
                   obd/read-trouble-codes (fn [path] {:ok? true :path path :stored []})
                   source/start-live-source! (fake-live-source started)]
-      (let [port (free-port)
-            system (main/start-system {:source {:type :none}
-                                       :port port
+      (let [system (main/start-system {:source {:type :none}
+                                       :port 0
                                        :config {:recordings-dir (str root) :vehicles {}}})
+            port (:port system)
             client (java.net.http.HttpClient/newHttpClient)
             base (str "http://localhost:" port)
             post #(post-transit client (str base %1) "application/transit+json" %2)

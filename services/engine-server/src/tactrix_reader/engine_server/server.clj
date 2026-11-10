@@ -199,9 +199,11 @@
 (defn create-server
   "Returns an unstarted Pedestal connector serving the dashboard for `hub`,
   whose source the `sources` manager switches. `config` (from
-  `config/read-config`) gives the recordings directory."
-  [{:keys [host port hub sources config]
-    :or {host "localhost"}}]
+  `config/read-config`) gives the recordings directory. `configurator`, if
+  given, is called with the Jetty server before it starts and returns it."
+  [{:keys [host port hub sources config configurator]
+    :or {host "localhost"
+         configurator identity}}]
   (-> (connector/default-connector-map host port)
       (connector/with-default-interceptors
         :secure-headers {:content-security-policy-settings (if dev-mode?
@@ -218,4 +220,4 @@
           ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]}
         (resources/resource-routes {:resource-root "public/assets"
                                     :prefix "/assets"}))
-      (jetty/create-connector {})))
+      (jetty/create-connector {:container-options {:configurator configurator}})))

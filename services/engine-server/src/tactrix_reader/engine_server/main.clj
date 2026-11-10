@@ -6,14 +6,16 @@
             [tactrix-reader.device.usb :as usb]
             [tactrix-reader.engine-server.hub :as hub]
             [tactrix-reader.engine-server.server :as server]
-            [tactrix-reader.engine-server.sources :as sources]))
+            [tactrix-reader.engine-server.sources :as sources])
+  (:import (org.eclipse.jetty.server Server ServerConnector)))
 
 (defn start-system
   "Starts the hub, the source manager, and the HTTP server. `source` is the
   first source: `{:type :replay :recording dir}`, `{:type :live :path
   device-path}`, or `{:type :none}`. `config` defaults to
   `config/read-config`; its `:recordings-dir` is where the dashboard lists
-  recordings and saves new ones."
+  recordings and saves new ones. `port` 0 picks a free port; the port the
+  server listens on is in the result's `:port`."
   [{:keys [source port host] :as opts}]
   (let [cfg (or (:config opts) (config/read-config))
         hub (hub/start-hub)
@@ -21,11 +23,14 @@
                                         :recording (:recording source)
                                         :config cfg
                                         :source source})
+        jetty (promise)
         server (connector/start! (server/create-server {:host host :port port :hub hub
-                                                        :sources manager :config cfg}))]
+                                                        :sources manager :config cfg
+                                                        :configurator #(doto % (->> (deliver jetty)))}))]
     {:hub hub
      :sources manager
-     :server server}))
+     :server server
+     :port (.getLocalPort ^ServerConnector (first (.getConnectors ^Server @jetty)))}))
 
 (defn stop-system [{:keys [hub sources server]}]
   (connector/stop! server)
@@ -53,6 +58,6 @@
         port (parse-long (or (System/getenv "PORT") "8080"))
         system (start-system {:source source :port port})]
     (.addShutdownHook (Runtime/getRuntime) (Thread. #(stop-system system)))
-    (println (str "Engine dashboard on http://localhost:" port " (" (name (:type source))
+    (println (str "Engine dashboard on http://localhost:" (:port system) " (" (name (:type source))
                   (some->> (:recording source) (str " ")) ")"))
     @(promise)))
