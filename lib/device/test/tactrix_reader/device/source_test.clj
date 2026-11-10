@@ -237,6 +237,43 @@
       (is (apply < timestamps))
       (is (= [1000000 1010000 1035000 1045000] (take 4 timestamps))))))
 
+(deftest replay-source-pauses-seeks-and-reports-its-position
+  (let [dir (temp-dir)
+        events (atom [])
+        rpm (fn [t value] (message-bytes 5 0 t 0x7E8 [4 0x41 0x0C (quot (* 4 value) 256) (mod (* 4 value) 256) 0 0 0]))]
+    ;; Two seconds: a reply every 100 ms, 1000 rpm rising by 100.
+    (write-recording! dir (for [i (range 21)] (rpm (+ 1000000 (* i 100000)) (+ 1000 (* i 100)))))
+    (let [source (source/start-replay-source! (str dir) {:emit #(swap! events conj %)
+                                                         :loop? false
+                                                         :position-ms 50})
+          control! (:control! source)
+          samples #(filter (comp #{:sample} :type) @events)
+          positions #(filter (comp #{:position} :type) @events)]
+      (is (wait-for #(seq (samples)) 2000))
+      (is (= {:ok? true} (control! {:action :pause})))
+      (is (wait-for #(:paused? (last (positions))) 2000))
+      (let [paused-at (count (samples))]
+        (Thread/sleep 250)
+        (is (= paused-at (count (samples))) "nothing is emitted while paused")
+        ;; Seeking works while paused, and is clamped to the recording.
+        (is (= {:ok? true} (control! {:action :seek :position-ms 1500})))
+        (is (wait-for #(= 1500 (:position-ms (last (positions)))) 2000))
+        (is (= {:type :position :position-ms 1500 :duration-ms 2000 :paused? true :speed 1.0}
+               (last (positions))))
+        (is (= paused-at (count (samples))))
+        (is (= {:ok? true} (control! {:action :speed :speed 4})))
+        (is (= {:ok? true} (control! {:action :resume})))
+        (is (wait-for #(some (comp #{:stopped} :state) @events) 3000))
+        ;; Playback went on from 1.5 s, at 2500 rpm, and timestamps kept
+        ;; increasing across the seek.
+        (is (= [2500.0 2600.0 2700.0 2800.0 2900.0 3000.0] (map :value (drop paused-at (samples)))))
+        (is (apply < (map :timestamp-us (samples))))
+        (is (= 4.0 (:speed (last (positions))))))
+      (is (= {:ok? false :error :invalid-command} (control! {:action :speed :speed 0})))
+      (is (= {:ok? false :error :invalid-command} (control! {:action :seek})))
+      (is (= {:ok? false :error :invalid-command} (control! {:action :rewind})))
+      ((:stop! source)))))
+
 (deftest replay-source-reports-an-empty-recording
   (let [dir (temp-dir)
         events (atom [])]

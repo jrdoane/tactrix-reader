@@ -68,6 +68,10 @@
                                                       dids? (assoc :dids uds/scanned-dids)))
                     (assoc :vehicle (recording/vehicle-meta vehicle-info)))))))))
 
+(def ^:private position-ms
+  "How often a replay reports where it is."
+  250)
+
 (defn- start-replay! [emit cfg recording]
   (let [{:keys [recorded-at duration-ms vehicle adapter note]} (recording/recording-meta recording)
         description (config/vehicle-description cfg vehicle)]
@@ -81,7 +85,7 @@
                        :recorded-at recorded-at
                        :duration-ms duration-ms
                        :note (or note (:state vehicle))}})
-    (source/start-replay-source! recording {:emit emit :frames? true})))
+    (source/start-replay-source! recording {:emit emit :frames? true :position-ms position-ms})))
 
 (defn- stop-current [{:keys [handle] :as state}]
   (when handle
@@ -156,6 +160,17 @@
                 (if-let [result (some-> (:stop-recording! handle) (apply []))]
                   (assoc result :ok? true)
                   {:ok? false :error :not-recording}))))
+
+(defn control-replay!
+  "Pauses, resumes, seeks, or changes the speed of the replay, with a command
+  for the replay source's `:control!`. Returns `{:ok? true}`, or `{:ok? false
+  :error :not-replaying|:invalid-command}`."
+  [manager command]
+  (on-manager manager
+              (fn [{:keys [handle source]}]
+                (if-let [control! (when (= :replay (:type source)) (:control! handle))]
+                  (control! command)
+                  {:ok? false :error :not-replaying}))))
 
 (defn start-manager
   "Starts a manager that emits events with `emit` and switches to `source`.

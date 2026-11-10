@@ -223,7 +223,7 @@
                (post-transit client (str base "/api/source") "application/transit+json"
                              {:type :live :path "/dev/cu.usbmodemTAlgJ3P81"})))
         (is (wait-for #(event-where @events "status" (comp #{:running} :state)) 5000))
-        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :recording nil :samples [] :signals [] :dids [] :frames []}} %)
+        (let [after-switch (drop-while #(not= {:event "snapshot" :data {:status nil :info nil :recording nil :position nil :samples [] :signals [] :dids [] :frames []}} %)
                                        @events)]
           (is (seq after-switch) "the switch resets the dashboard")
           (is (= {:source :live
@@ -305,10 +305,23 @@
              (get-transit client (str base "/api/recordings/2026-10-30-did-drive/series"))))
       (is (= {:status 404 :body {:error :unknown-recording}}
              (get-transit client (str base "/api/recordings/missing/series"))))
+      (is (= {:status 409 :body {:error :not-replaying}}
+             (post-transit client (str base "/api/replay") "application/transit+json" {:action :pause})))
       (is (= {:status 202 :body {:source {:type :replay :recording newer}}}
              (post-transit client (str base "/api/source") "application/transit+json"
                            {:type :replay :recording "2026-10-30-did-drive"})))
       (is (wait-for #(event-where @events "info" (comp #{:replay} :source)) 5000))
+      ;; The replay reports where it is, and can be paused.
+      (is (wait-for #(event-where @events "position" some?) 5000))
+      (is (= {:status 202 :body {}}
+             (post-transit client (str base "/api/replay") "application/transit+json" {:action :pause})))
+      (is (wait-for #(event-where @events "position" :paused?) 5000))
+      (is (= {:duration-ms 10 :paused? true :speed 1.0}
+             (dissoc (event-where @events "position" :paused?) :position-ms)))
+      (is (= {:status 400 :body {:error :invalid-command}}
+             (post-transit client (str base "/api/replay") "application/transit+json" {:action :seek})))
+      (is (= {:status 400 :body {:error :invalid-command}}
+             (post-transit client (str base "/api/replay") "application/transit+json" [:pause])))
       (is (= {:source :replay
               :adapter {}
               :vehicle {:vin "TESTVIN0123456789"}

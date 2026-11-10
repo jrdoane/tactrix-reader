@@ -7,8 +7,8 @@
   identifier, and the latest frame of each CAN ID that arrived since the
   last batch. A frame comes with how many of its ID have arrived, when the
   first did, and, in a batch, which bits changed between any two of them
-  since the last batch, so a change shorter than a batch is not lost. Status, info, and recording events are
-  forwarded immediately. A `:reset` event, sent when the source changes, clears
+  since the last batch, so a change shorter than a batch is not lost. Status, info, recording, and replay
+  position events are forwarded immediately. A `:reset` event, sent when the source changes, clears
   everything kept so far and sends subscribers an empty snapshot. A subscriber
   that falls behind drops old messages instead of slowing the source."
   (:require [clojure.core.async :as async]))
@@ -20,6 +20,7 @@
   {:status nil
    :info nil
    :recording nil
+   :position nil
    :samples {}
    :signals {}
    :dids {}
@@ -55,10 +56,11 @@
    :first-us (:first-us previous timestamp-us)
    :count (inc (:count previous 0))})
 
-(defn- state->snapshot [{:keys [status info recording] :as state}]
+(defn- state->snapshot [{:keys [status info recording position] :as state}]
   (merge {:status status
           :info info
-          :recording recording}
+          :recording recording
+          :position position}
          (batch state)))
 
 (defn start-hub
@@ -129,6 +131,13 @@
                             :data recording})
              (recur pending ticker))
 
+           (= :position (:type event))
+           (let [position (dissoc event :type)]
+             (swap! state assoc :position position)
+             (async/>! out {:event :position
+                            :data position})
+             (recur pending ticker))
+
            (= :reset (:type event))
            (do
              (reset! state empty-state)
@@ -156,7 +165,7 @@
   (state->snapshot @(:state hub)))
 
 (defn subscribe
-  "Returns a channel of `{:event :samples|:status|:info|:recording|:snapshot, :data ...}`
+  "Returns a channel of `{:event :samples|:status|:info|:recording|:position|:snapshot, :data ...}`
   messages."
   [hub]
   (let [subscription (async/chan (async/sliding-buffer 64))]

@@ -1,7 +1,8 @@
 (ns tactrix-reader.engine-server.server
   "Pedestal routes: the dashboard page, its assets, the SSE stream, and the
   API that describes the values to show, lists adapters and recordings, gives
-  a recording's values as time series, switches the source, and starts and stops recording."
+  a recording's values as time series, switches the source, starts and stops
+  recording, and pauses and seeks a replay."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -39,7 +40,7 @@
 
 (defn- stream-interceptor
   "Streams Server-Sent Events: a `snapshot` event on connect, then `samples`,
-  `status`, `info`, `recording`, and (after a source switch) `snapshot`
+  `status`, `info`, `recording`, `position`, and (after a source switch) `snapshot`
   events from the hub. Data is Transit JSON."
   [hub]
   {:name ::stream
@@ -202,6 +203,23 @@
         (transit-response (get recording-statuses (:error result) 400)
                           (select-keys result [:error :message]))))))
 
+(defn- replay-handler
+  "Controls the replay: `{:action :pause}`, `{:action :resume}`, `{:action
+  :seek :position-ms n}`, or `{:action :speed :speed x}`."
+  [manager]
+  (fn [request]
+    (let [command (:transit-params request)
+          result (if (map? command)
+                   (sources/control-replay! manager (select-keys command [:action :position-ms :speed]))
+                   {:ok? false :error :invalid-command})]
+      (if (:ok? result)
+        (transit-response 202 {})
+        (transit-response (case (:error result)
+                            :not-replaying 409
+                            :timeout 503
+                            400)
+                          (select-keys result [:error]))))))
+
 (defn create-server
   "Returns an unstarted Pedestal connector serving the dashboard for `hub`,
   whose source the `sources` manager switches. `config` (from
@@ -224,7 +242,8 @@
           ["/api/source" :post [local-api-guard (source-handler sources config)] :route-name ::source]
           ["/api/recordings" :get [local-api-guard (recordings-handler config)] :route-name ::recordings]
           ["/api/recordings/:name/series" :get [local-api-guard (series-handler config)] :route-name ::series]
-          ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]}
+          ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]
+          ["/api/replay" :post [local-api-guard (replay-handler sources)] :route-name ::replay]}
         (resources/resource-routes {:resource-root "public/assets"
                                     :prefix "/assets"}))
       (jetty/create-connector {:container-options {:configurator configurator}})))

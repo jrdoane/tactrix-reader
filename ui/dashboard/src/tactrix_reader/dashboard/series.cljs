@@ -306,6 +306,38 @@
     :count hits
     (get cell stat)))
 
+(defn sparkline
+  "The last `window-ms` of channel `key` as an SVG path in a box `width` by
+  `height`, or nil with fewer than two numbers. The box spans the window, so
+  a value that has only just arrived starts partway across, and the value is
+  held between points, as on the dashboard. A channel that has not moved is
+  a line across the middle."
+  [{:keys [duration-ms] :as log} key window-ms width height]
+  (let [{:keys [t v]} (get-in log [:series key])
+        from (- (or duration-ms 0) window-ms)
+        start (loop [i (count t)]
+                (if (and (pos? i) (>= (nth t (dec i)) from))
+                  (recur (dec i))
+                  i))
+        points (filterv #(some? (second %)) (map vector (subvec (or t []) start) (subvec (or v []) start)))]
+    (when (>= (count points) 2)
+      (let [values (map second points)
+            low (apply min values)
+            high (apply max values)
+            x #(.toFixed (* width (/ (- % from) window-ms)) 1)
+            y #(.toFixed (if (= low high)
+                           (/ height 2)
+                           ;; A pixel of room above and below.
+                           (- (dec height) (* (- height 2) (/ (- % low) (- high low)))))
+                         1)]
+        (str/join " "
+                  (cons (str "M" (x (ffirst points)) " " (y (second (first points))))
+                        (mapcat (fn [[_ before] [at value]]
+                                  (cond-> [(str "H" (x at))]
+                                    (not= before value) (conj (str "V" (y value)))))
+                                points
+                                (rest points))))))))
+
 (defn envelope
   "The lowest and highest value in each of `width` slices of `values`, as
   `[low high]` or nil for a slice with none, for drawing a long column."

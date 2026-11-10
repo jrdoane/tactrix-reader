@@ -1,6 +1,7 @@
 (ns tactrix-reader.dashboard.views
   (:require [clojure.string :as str]
             [re-frame.core :as rf]
+            [reagent.core :as r]
             [tactrix-reader.dashboard.bus-view :as bus-view]
             [tactrix-reader.dashboard.catalog :as catalog]
             [tactrix-reader.dashboard.events :as events]
@@ -199,6 +200,45 @@
         (str "check engine " (if mil-on? "on" "off") " · "
              dtc-count (if (= 1 dtc-count) " code" " codes"))])]))
 
+(def ^:private replay-speeds [0.5 1 2 4 8])
+
+(defn- transport
+  "Where the replay is, with pause, a slider to seek, and the speed. While
+  the slider is dragged it shows where it is dragged to, and seeks when it
+  is let go."
+  []
+  (let [scrub (r/atom nil)]
+    (fn []
+      (let [{:keys [position-ms duration-ms paused? speed]} @(rf/subscribe [::subs/position])
+            control! #(rf/dispatch [::events/control-replay %])
+            commit! #(when-let [to @scrub]
+                       (control! {:action :seek :position-ms to})
+                       (reset! scrub nil))]
+        (when duration-ms
+          [:div.transport
+           [:button {:aria-label (if paused? "Play" "Pause")
+                     :title (if paused? "Play" "Pause")
+                     :on-click #(control! {:action (if paused? :resume :pause)})}
+            (if paused? "▶" "❚❚")]
+           [:span.clock (format-clock (or @scrub position-ms))]
+           [:input {:type "range"
+                    :aria-label "Position in the recording"
+                    :min 0
+                    :max duration-ms
+                    :step 100
+                    :value (or @scrub position-ms)
+                    :on-change #(reset! scrub (js/Number (.. % -target -value)))
+                    :on-pointer-up commit!
+                    :on-key-up commit!
+                    :on-blur commit!}]
+           [:span.clock (format-clock duration-ms)]
+           [:select {:aria-label "Replay speed"
+                     :value (str speed)
+                     :on-change #(control! {:action :speed :speed (js/Number (.. % -target -value))})}
+            (for [option (distinct (sort (conj replay-speeds speed)))]
+              ^{:key option}
+              [:option {:value (str option)} (str option "×")])]])))))
+
 (declare source-panel adapter-panel vehicle-panel diagnostics-panel)
 
 (defn- source-bar
@@ -211,6 +251,8 @@
     [:section.controls
      [:div.source-bar
       [source-summary]
+      (when (= :replay (:source status))
+        [transport])
       [:button.details-toggle {:aria-expanded details?
                                :on-click #(rf/dispatch [::events/toggle-details])}
        (if details? "Hide details" "Details")]
@@ -346,17 +388,27 @@
     (when-let [can-id @(rf/subscribe [::subs/can-id name])]
       [badge :can (str "CAN ID " (can-id-hex can-id))])))
 
+(defn- sparkline
+  "The last minute of a channel, drawn small. It keeps its room when there
+  is nothing to draw, so tiles do not change height."
+  [key]
+  (let [path @(rf/subscribe [::subs/sparkline key])]
+    [:svg.spark {:viewBox "0 0 100 24" :preserveAspectRatio "none" :aria-hidden true}
+     (when path [:path {:d path}])]))
+
 (defn- readout
-  "One value: a `catalog/tiles` tile with its latest value."
+  "One value: a `catalog/tiles` tile with its latest value and its last
+  minute."
   [class tile badges?]
   (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])]
-    [:div {:class class}
+    [:div {:class class :title "The line is the last minute"}
      [:div.readout-label
       [:span (:label tile)]
       (when badges? [tile-badge tile])]
      [:div.readout-value
       (tile-text tile value unit)
-      [:span.readout-unit (tile-unit tile unit)]]]))
+      [:span.readout-unit (tile-unit tile unit)]]
+     [sparkline (:id tile)]]))
 
 (defn- group-columns
   "A group is as wide as its tiles need, up to five across."
@@ -419,7 +471,8 @@
       (str (if matches (str "PID " (hex-byte matches)) "MAF ÷ rpm") ": "
            (if (some? polled-value)
              (str (format-value polled-value unit) " " (get unit-labels unit ""))
-             "—"))]]))
+             "—"))]
+     [sparkline (keyword "did" (str "x" (did-hex did)))]]))
 
 (defn- did-block
   "The DIDs matched to a PID, which only recordings made with record-dids

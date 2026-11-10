@@ -104,3 +104,20 @@
 
 (deftest envelope-gives-the-range-in-each-slice
   (is (= [[1 2] nil [5 9]] (series/envelope [1 2 nil nil 9 5] 3))))
+
+(deftest sparkline-draws-the-last-window-held-between-points
+  (let [log {:duration-ms 60000
+             :series {:pid/engine-rpm {:t [0 30000 45000 60000] :v [900 1000 2000 1000]}
+                      :signal/brake {:t [10000 50000] :v [0 0]}
+                      :signal/gear {:t [10000 50000] :v [nil nil]}
+                      :pid/coolant-temp {:t [59000] :v [90]}}}]
+    ;; The window is the last 30 s, 100 wide: 30 s is at 0, 45 s at 50. The
+    ;; value holds until the next point, then steps. 1000 is the bottom.
+    (is (= "M0.0 23.0 H50.0 V1.0 H100.0 V23.0"
+           (series/sparkline log :pid/engine-rpm 30000 100 24)))
+    ;; A value that has not moved is a line across the middle.
+    (is (= "M16.7 12.0 H83.3" (series/sparkline log :signal/brake 60000 100 24)))
+    (is (nil? (series/sparkline log :signal/gear 60000 100 24)) "no numbers")
+    (is (nil? (series/sparkline log :pid/coolant-temp 60000 100 24)) "one point")
+    (is (nil? (series/sparkline log :pid/missing 60000 100 24)))
+    (is (nil? (series/sparkline nil :pid/engine-rpm 60000 100 24)))))

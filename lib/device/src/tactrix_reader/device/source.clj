@@ -174,22 +174,68 @@
      :stop-recording! (fn []
                         ((:finish! writer) {:stopped-by :stop}))}))
 
+(def ^:private replay-tick-ms
+  "The longest the replay sleeps before looking at its controls again."
+  20)
+
+(defn- first-index-at
+  "The index of the first of `messages` at or after `target-us`, or their
+  count when there is none."
+  [messages target-us]
+  (loop [low 0
+         high (count messages)]
+    (if (< low high)
+      (let [middle (quot (+ low high) 2)]
+        (if (< (:timestamp-us (nth messages middle)) target-us)
+          (recur (inc middle) high)
+          (recur low middle)))
+      low)))
+
+(defn- replay-command
+  "Applies a control command to the replay's controls, or returns nil for one
+  that is not valid. `duration-ms` is the recording's length."
+  [controls duration-ms {:keys [action position-ms speed]}]
+  (case action
+    :pause (assoc controls :paused? true)
+    :resume (assoc controls :paused? false)
+    :seek (when (number? position-ms)
+            (assoc controls :seek-ms (-> position-ms (max 0) (min duration-ms))))
+    :speed (when (and (number? speed) (<= 0.1 speed 16))
+             (assoc controls :speed (double speed)))
+    nil))
+
 (defn start-replay-source!
   "Replays a recording on a background thread, paced by its timestamps,
   calling `emit` with the same events as `start-live-source!`, including
   broadcast signals in `:broadcast`, inferred signals in `:signals`, and the
   DID replies of a recording made with `:dids`, and with `:frames? true`
-  every CAN frame. Loops
-  by default, shifting timestamps so they keep increasing. `:speed` scales
-  playback. Returns a map whose :stop! function stops playback."
-  [dir {:keys [emit loop? speed broadcast signals frames?]
+  every CAN frame. Loops by default. `:speed` scales playback.
+
+  Emitted timestamps always increase: each pass, and each seek, shifts them
+  to follow the last one emitted, so a consumer sees one continuous stream.
+
+  With `:position-ms`, it also emits `{:type :position :position-ms
+  :duration-ms :paused? :speed}` that often, and whenever a control changes
+  it, giving where in the recording playback is.
+
+  Returns a map of functions:
+
+  - `:stop!` stops playback.
+  - `:control!` takes `{:action :pause}`, `{:action :resume}`, `{:action
+    :seek :position-ms n}`, or `{:action :speed :speed x}` (0.1 to 16) and
+    returns `{:ok? true}`, or `{:ok? false :error :invalid-command}`. A seek
+    is clamped to the recording, and works while paused."
+  [dir {:keys [emit loop? speed broadcast signals frames? position-ms]
         :or {loop? true
              speed 1.0
              broadcast broadcast/broadcast-signals
              signals broadcast/inferred-signals}}]
   (let [running? (atom true)
+        controls (atom {:paused? false :speed (double speed) :seek-ms nil})
+        duration (atom 0)
         status (status-emitter emit {:source :replay :recording (str dir)})
         gap-us 25000
+        now-ms #(/ (System/nanoTime) 1e6)
         worker (future
                  (try
                    (let [rx-id (recording/recording-rx-id dir)
@@ -203,30 +249,101 @@
                                                  messages)]
                      (if (zero? sample-count)
                        (status :failed :error :no-samples)
-                       (let [t0 (:timestamp-us (first messages))
-                             span-us (- (:timestamp-us (peek messages)) t0)]
+                       (let [total (count messages)
+                             t0 (:timestamp-us (first messages))
+                             stamp #(:timestamp-us (nth messages %))
+                             ;; A message's time in the recording, in ms.
+                             at-ms #(/ (- (stamp %) t0) 1000.0)
+                             duration-ms (at-ms (dec total))
+                             report! (fn [i]
+                                       (when position-ms
+                                         (let [{:keys [paused? speed]} @controls]
+                                           (emit {:type :position
+                                                  :position-ms (long (at-ms (min i (dec total))))
+                                                  :duration-ms (long duration-ms)
+                                                  :paused? paused?
+                                                  :speed speed}))))]
+                         (reset! duration duration-ms)
                          (status :running :sample-count sample-count)
-                         (loop [pass 0]
-                           (let [offset (* pass (+ span-us gap-us))
-                                 started (System/nanoTime)]
-                             (doseq [message messages
-                                     :while @running?
-                                     :let [events (message-events rx-id broadcast signals frames? message)]
-                                     :when (seq events)]
-                               (let [due-ms (/ (- (:timestamp-us message) t0) 1000.0 speed)
-                                     wait-ms (- due-ms (/ (- (System/nanoTime) started) 1e6))]
-                                 (when (pos? wait-ms)
-                                   (Thread/sleep (long wait-ms)))
-                                 (doseq [event events]
-                                   (emit (update event :timestamp-us + offset)))))
-                             (if (and loop? @running?)
+                         ;; `i` is the next message. Playback is anchored:
+                         ;; the message at `anchor-ms` in the recording was
+                         ;; due at `anchor-wall` on the clock, at `speed`.
+                         ;; `offset` is added to emitted timestamps, and
+                         ;; `last` is the last message emitted.
+                         (loop [i 0
+                                anchor-wall (now-ms)
+                                anchor-ms 0.0
+                                speed (:speed @controls)
+                                offset 0
+                                last nil
+                                reported (- (now-ms) (or position-ms 0))
+                                was-paused? false]
+                           (let [{:keys [paused? seek-ms] wanted-speed :speed} @controls
+                                 reported (if (and position-ms (>= (- (now-ms) reported) position-ms))
+                                            (do (report! i) (now-ms))
+                                            reported)
+                                 ;; Timestamps continue from the last one
+                                 ;; emitted when playback jumps to `to`.
+                                 jump (fn [to]
+                                        (if last
+                                          (+ offset (- (stamp last) (stamp to)) gap-us)
+                                          offset))]
+                             (cond
+                               (not @running?)
+                               (status :stopped)
+
+                               seek-ms
+                               (let [to (min (dec total) (first-index-at messages (+ t0 (* 1000 seek-ms))))]
+                                 (swap! controls assoc :seek-ms nil)
+                                 (report! to)
+                                 (recur to (now-ms) (at-ms to) speed (jump to) last (now-ms) was-paused?))
+
+                               paused?
                                (do
-                                 (Thread/sleep (long (/ gap-us 1000.0 speed)))
-                                 (recur (inc pass)))
-                               (status :stopped)))))))
+                                 (when-not was-paused? (report! i))
+                                 (Thread/sleep (long replay-tick-ms))
+                                 (recur i anchor-wall anchor-ms speed offset last reported true))
+
+                               ;; Resuming, or a new speed, starts timing
+                               ;; again from the next message.
+                               (or was-paused? (not= speed wanted-speed))
+                               (do
+                                 (report! i)
+                                 (recur i (now-ms) (at-ms (min i (dec total))) wanted-speed offset last (now-ms) false))
+
+                               (>= i total)
+                               (if loop?
+                                 (do
+                                   (Thread/sleep (long (/ gap-us 1000.0 speed)))
+                                   (recur 0 (now-ms) 0.0 speed (jump 0) last reported false))
+                                 (status :stopped))
+
+                               :else
+                               (let [wait-ms (- (+ anchor-wall (/ (- (at-ms i) anchor-ms) speed)) (now-ms))]
+                                 (if (> wait-ms replay-tick-ms)
+                                   (do
+                                     (Thread/sleep (long replay-tick-ms))
+                                     (recur i anchor-wall anchor-ms speed offset last reported false))
+                                   (let [message (nth messages i)]
+                                     (when (pos? wait-ms)
+                                       (Thread/sleep (long wait-ms)))
+                                     (doseq [event (message-events rx-id broadcast signals frames? message)]
+                                       (emit (update event :timestamp-us + offset)))
+                                     (recur (inc i) anchor-wall anchor-ms speed offset i reported false))))))))))
                    (catch Throwable e
                      (status :failed :error :replay-failed :message (.getMessage e)))))]
     {:stop! (fn []
               (reset! running? false)
               @worker
-              nil)}))
+              nil)
+     :control! (fn [command]
+                 (if-let [changed (replay-command @controls @duration command)]
+                   (do
+                     ;; Only the keys the command set, so a seek the worker
+                     ;; has just cleared is not put back.
+                     (swap! controls merge (select-keys changed (case (:action command)
+                                                                  (:pause :resume) [:paused?]
+                                                                  :seek [:seek-ms]
+                                                                  :speed [:speed])))
+                     {:ok? true})
+                   {:ok? false :error :invalid-command}))}))

@@ -135,6 +135,25 @@
      (and sample part) (update :value get part))))
 
 (rf/reg-sub
+ ::position
+ ;; Where a replay is, or nil.
+ (fn [db _]
+   (:position db)))
+
+(rf/reg-sub
+ ::spark-log
+ (fn [db _]
+   (:spark-log db)))
+
+(rf/reg-sub
+ ::sparkline
+ ;; The last minute of a channel as an SVG path, redrawn once a second.
+ :<- [::spark-log]
+ (fn [log [_ key]]
+   (when log
+     (series/sparkline log key 60000 100 24))))
+
+(rf/reg-sub
  ::bus
  (fn [db _]
    (:bus db)))

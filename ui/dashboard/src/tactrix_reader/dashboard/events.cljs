@@ -62,6 +62,8 @@
    ;; Saved recordings from /api/recordings, newest first, and their folder.
    :recordings nil
    :recordings-dir nil
+   ;; Where a replay is: {:position-ms :duration-ms :paused? :speed}, or nil.
+   :position nil
    ;; The last recording event: {:state :recording|:saved ...}, or nil.
    :recording nil
    ;; The note typed for the next recording.
@@ -81,6 +83,9 @@
    ;; Everything the stream has sent since the source last changed, as a
    ;; `series` log.
    :stream-log nil
+   ;; The stream log as it was at the last second, which the sparklines are
+   ;; drawn from, so they are redrawn once a second and not for every batch.
+   :spark-log nil
    ;; The recording open in the map: {:name :state :loading|:loaded|:failed
    ;; :log :error}.
    :recording-log nil
@@ -164,9 +169,24 @@
  (fn [_ _]
    {:db (assoc initial-db :view (hash-view) :collapsed (stored-collapsed))
     :stream/connect "/stream"
+    ::refresh-sparklines-every 1000
     :fx [[:dispatch [::load-catalog]]
          [:dispatch [::refresh-adapters]]
          [:dispatch [::refresh-recordings]]]}))
+
+(defonce ^:private sparkline-timer (atom nil))
+
+(rf/reg-fx
+ ::refresh-sparklines-every
+ (fn [ms]
+   (when-let [id @sparkline-timer]
+     (js/clearInterval id))
+   (reset! sparkline-timer (js/setInterval #(rf/dispatch [::refresh-sparklines]) ms))))
+
+(rf/reg-event-db
+ ::refresh-sparklines
+ (fn [db _]
+   (assoc db :spark-log (:stream-log db))))
 
 (rf/reg-event-fx
  ::load-catalog
@@ -218,12 +238,14 @@
 (rf/reg-event-fx
  :stream/snapshot
  ;; Sent on connect, and again with empty data whenever the source changes.
- (fn [{:keys [db]} [_ {:keys [status info recording samples signals dids frames] :as snapshot}]]
+ (fn [{:keys [db]} [_ {:keys [status info recording position samples signals dids frames] :as snapshot}]]
    (let [dids-by-did (index-by-did dids)]
      {:db (-> db
               (assoc :status status
                      :info info
                      :recording recording
+                     :position position
+                     :spark-log nil
                      :firmware (:firmware status)
                      :samples (index-by-name samples)
                      :signals (index-by-signal signals)
@@ -280,6 +302,27 @@
  (fn [db [_ status]]
    (cond-> (assoc db :status status)
      (:firmware status) (assoc :firmware (:firmware status)))))
+
+(rf/reg-event-db
+ :stream/position
+ (fn [db [_ position]]
+   (assoc db :position position)))
+
+(rf/reg-event-fx
+ ::control-replay
+ ;; `command` is {:action :pause}, {:action :resume}, {:action :seek
+ ;; :position-ms n}, or {:action :speed :speed x}.
+ (fn [_ [_ command]]
+   {:http {:method "POST"
+           :url "/api/replay"
+           :body command
+           :on-success [::replay-accepted]
+           :on-failure [::request-failed]}}))
+
+(rf/reg-event-db
+ ::replay-accepted
+ (fn [db _]
+   (assoc db :request nil)))
 
 (rf/reg-event-db
  :stream/info
