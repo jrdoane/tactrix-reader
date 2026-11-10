@@ -11,7 +11,8 @@
   matched to no PID, so not confirmed. See lib/device/docs/can-broadcast.md."
   #{:gear :steering-angle :brake :brake-pressure :parking-brake :driver-seatbelt
     :wheel-speeds :longitudinal-acceleration :lateral-acceleration :yaw-rate
-    :fuel-flow :outside-temp})
+    :fuel-flow :outside-temp
+    :door-front-left :door-front-right :door-rear-left :door-rear-right})
 
 (def ^:private wheel-tiles
   "Tiles for each wheel in the :wheel-speeds signal."
@@ -42,6 +43,7 @@
    ["Motion" [:longitudinal-acceleration :lateral-acceleration :yaw-rate]]
    ["Wheel speeds" [:wheel-front-left :wheel-front-right
                     :wheel-rear-left :wheel-rear-right]]
+   ["Doors" [:door-front-left :door-front-right :door-rear-left :door-rear-right]]
    ["Engine and outside" [:fuel-flow :outside-temp]]])
 
 (defn- paired-notes
@@ -108,6 +110,9 @@
 (defn- on-off [value]
   (if value "on" "off"))
 
+(defn- open-closed [value]
+  (if value "open" "closed"))
+
 (def ^:private value-formats
   "Display for values that read better as words than as numbers."
   {:gear #(if (= :neutral %) "N" (str %))
@@ -119,6 +124,10 @@
    :brake on-off
    :parking-brake on-off
    :driver-seatbelt name
+   :door-front-left open-closed
+   :door-front-right open-closed
+   :door-rear-left open-closed
+   :door-rear-right open-closed
    :monitor-status (fn [{:keys [mil-on? dtc-count monitors]}]
                      (str "check engine " (if mil-on? "on" "off")
                           ", " dtc-count " stored codes, "

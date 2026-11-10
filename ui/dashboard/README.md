@@ -20,7 +20,7 @@ The page has:
 - A "From the CAN bus" section, tagged inferred, with signals identified from
   that traffic but matched to no PID: steering angle, brake, brake pressure,
   parking brake, driver's seatbelt, accelerations, yaw rate, the four wheel
-  speeds, fuel flow, and outside temperature. Gear, shown with the main
+  speeds, whether each door is open, fuel flow, and outside temperature. Gear, shown with the main
   readouts, is tagged inferred on its own. See
   [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
 - A table of every PID received, with where each came from.

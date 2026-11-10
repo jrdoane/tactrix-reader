@@ -51,8 +51,8 @@
 
 (def inferred-signals
   "Signals the project's 2015 Impreza broadcasts that were identified from how
-  they behave in the 2026-10-28-drive recording but match no mode 01 PID, by
-  CAN ID. Scales marked approximate come from fits against quantities derived
+  they behave, in the 2026-10-28-drive recording and, for the doors,
+  2026-11-09-194644, but match no mode 01 PID, by CAN ID. Scales marked approximate come from fits against quantities derived
   from other signals; see docs/can-broadcast.md. Unlike `broadcast-signals`,
   these are not confirmed."
   {0x002 [{:signal :steering-angle :unit :degrees :byte-count 2
@@ -84,7 +84,12 @@
            :decode #(if (bit-test (nth % 5) 0) :unbuckled :buckled)}]
    0x360 [;; Approximate scale.
           {:signal :fuel-flow :unit :grams-per-second :byte-count 2
-           :decode #(round-to 2 (* 0.185 (nth % 1)))}]})
+           :decode #(round-to 2 (* 0.185 (nth % 1)))}]
+   ;; True while the door is open. Front left is the driver's door.
+   0x374 [{:signal :door-front-left :byte-count 4 :decode #(bit-test (nth % 3) 0)}
+          {:signal :door-front-right :byte-count 4 :decode #(bit-test (nth % 3) 1)}
+          {:signal :door-rear-right :byte-count 4 :decode #(bit-test (nth % 3) 2)}
+          {:signal :door-rear-left :byte-count 4 :decode #(bit-test (nth % 3) 3)}]})
 
 (defn signal-samples
   "Decodes a received message carrying signals in `signals` (by default

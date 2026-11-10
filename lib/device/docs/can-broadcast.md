@@ -16,6 +16,10 @@ It comes from two [reference recordings](recordings.md#reference-recordings), ea
   warm idle in neutral with the parking brake on at the end. When the wheel
   was turned, doors opened, or lights switched wasn't noted.
 
+The doors come from a third, `2026-11-09-194644` (61 seconds, parked, engine
+on a cold fast idle), in which each door was opened and closed in a noted
+order; see [Doors](#doors).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -49,7 +53,7 @@ second. The drive has the same 24 IDs at the same rates.
 | `141` | 10 ms | 8 | Engine | Engine speed; two load-like fields; gear and flags; parity |
 | `144` | 20 ms | 8 | CruiseControl | Brake pedal; parity |
 | `152` | 20 ms | 8 | Stalk | Brake light, parking brake; counter, parity |
-| `154` | 1 s | 7 | | Brake light and parking brake again |
+| `154` | 1 s | 7 | | Brake light and parking brake again; any door open |
 | `156` | 20 ms | 8 | | Nearly constant |
 | `282` | 50 ms | 8 | Dashlights | Driver's seatbelt; outside temperature; counter |
 | `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow |
@@ -57,8 +61,8 @@ second. The drive has the same 24 IDs at the same rates.
 | `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque; counter |
 | `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque |
 | `372` | 100 ms | 8 | | Counter and parity bit in byte 1 |
-| `374` | 1 s | 8 | BodyInfo | Two bits changed once |
-| `375` | 1 s | 8 | | Vehicle-stopped flag |
+| `374` | 1 s, and on change | 8 | BodyInfo | Each door open; b4.7 clears while one is |
+| `375` | 1 s, and on change | 8 | | Vehicle-stopped flag; each door open again; door-close pulse and timer |
 | `376` | 50 ms | 1 | | Constant `FA` |
 | `3D1` | 100 ms | 8 | Dash_State2 | Unexplained |
 | `660` | 500 ms | 8 | | 0.1 s timer in bytes 6-7 |
@@ -164,6 +168,10 @@ shows them tagged inferred.
 | `:outside-temp` | `282` byte 4 minus 40, as °F | °C |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` byte 1, about 0.185 g/s per bit | Grams per second |
+| `:door-front-left` | `374` b3.0 | Boolean, true while the driver's door is open |
+| `:door-front-right` | `374` b3.1 | Boolean, true while the front passenger door is open |
+| `:door-rear-right` | `374` b3.2 | Boolean, true while the rear passenger-side door is open |
+| `:door-rear-left` | `374` b3.3 | Boolean, true while the rear driver-side door is open |
 
 The left/right directions assume opendbc's wheel order. Move a signal to
 `broadcast-signals` only if it comes to match a polled PID.
@@ -359,11 +367,58 @@ idle, do move while driving.
   would be cranking. `0D3` byte 3, `152` b0.5, `361` b1.5 and b4.5, and `370`
   b2.5 and b7.7 also change once during the start.
 
+### Doors
+
+`2026-11-09-194644` was recorded parked with the engine running. The
+driver's door was open at the start; it was closed, and then the front
+passenger, rear passenger-side, and rear driver-side doors were each opened
+and closed in turn, and finally the driver's door again. One bit of `374`
+byte 3 follows each door, and nothing else in the recording changes with
+them except the signals listed after the table:
+
+| Bit | Open | Closed | Door |
+|---|---|---|---|
+| `374` b3.0 | from the start | 8.51 s | Driver's (front left) |
+| `374` b3.1 | 14.37 s | 20.61 s | Front passenger |
+| `374` b3.2 | 27.57 s | 33.96 s | Rear passenger-side (rear right) |
+| `374` b3.3 | 38.17 s | 45.12 s | Rear driver-side (rear left) |
+| `374` b3.0 | 49.55 s | 55.93 s | Driver's again |
+
+Front left and right assume a left-hand-drive car, as this one is.
+opendbc names b3.0 DOOR_OPEN_FR, but here it is the driver's door, so
+opendbc's door names don't fit this car. b3.0 being set throughout
+`2026-10-24-idle` probably means the driver's door was open then.
+
+These change with the doors too:
+
+- **`375` b1.0-b1.3** copy `374` b3.0-b3.3 exactly.
+- **`154` b6.0** is set whenever any door is open.
+- **`374` b4.7** clears while any door is open, here and in the two other
+  recordings in which a door bit was set briefly (`2026-10-30-did-drive`
+  and `2026-11-09-150052`). In all three, `374` b3.7 was set throughout. It
+  doesn't simply mean "all doors closed": in `2026-10-24-idle` b4.7 was set
+  with b3.0 set and b3.7 clear, and in the drives, with no door bit set,
+  it followed b3.7 (see [Still unexplained](#still-unexplained-or-untested)).
+- **`375` b3.2** pulses for 20 ms each time a door closes.
+- **`375` b3.0** clears when a door closes and sets 2.00 s later, and
+  **`375` b3.1** clears 2.00 s after a door closes and sets when one opens.
+  Inference: a timer started by the door closing, perhaps for the interior
+  light.
+
+`374`, `375`, and `154` are sent once a second and also as soon as a door
+changes: each change came 210-960 ms after the frame before, off the 1 s
+beat.
+
 ## Still unexplained or untested
 
-- **Doors (`374`):** b3.7 and b4.7, and `375` b3.7, cleared together at
-  92.5 s while moving at about 54 km/h. opendbc's door bits (b3.0-b3.4)
-  didn't change; b3.0 (DOOR_OPEN_FR) was set throughout the idle recording.
+- **`374` b3.7 and b4.7, and `375` b3.7,** were set until 92.5 s in
+  `2026-10-28-drive` and then cleared together while moving at about
+  54 km/h; both `374` bits were clear throughout `2026-10-29-did-drive` and
+  set in the later recordings. b4.7 also clears while a door is open (see
+  [Doors](#doors)), but not in `2026-10-24-idle`, where b3.7 was clear.
+- **`374` b3.4,** the fifth of opendbc's door bits, was clear in all seven
+  recordings. It may be the hatch (a guess; the hatch hasn't been opened
+  while recording).
 - **Blinkers** (`282` bits 44-45), **headlights and wipers** (`152` byte 7),
   and **cruise control** (`144`): never changed in either recording.
 - **`144`:** b3 changed from `23` to `24` at 6.4 s, and b4 from `0B` to `0C`
@@ -378,7 +433,7 @@ A recording with these done one at a time, and a note of when, would settle
 most of what's left:
 
 1. Parked, engine running: the wheel straight ahead, then at full lock each
-   way; each door opened and closed; each blinker, the headlights, the high
+   way; the hatch opened and closed; each blinker, the headlights, the high
    beams, and the wipers; the parking brake on and off; the clutch pressed
    and released in neutral; and a few throttle blips.
 2. A drive like `2026-10-28-drive`. The polling schedule now includes PIDs

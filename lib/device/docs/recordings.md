@@ -173,8 +173,9 @@ microsecond clock, so PID values line up with bus traffic. `id`, `status`,
 The analysis in these docs used the recordings below. They were committed
 under `lib/device/recordings` until the move to `~/.tactrix-reader`, so they
 are in git history before that commit, and they now live in the author's
-recordings folder. All four are from the same car (calibration `EA1T002C`),
-which was added to their `meta.edn` when they moved.
+recordings folder, along with those made since. All are from the same car
+(calibration `EA1T002C`); the first four had it added to their `meta.edn`
+when they moved.
 
 ### `2026-10-24-idle`
 
@@ -215,3 +216,14 @@ and 28,771 DID samples (25 requests got no reply). Coolant was 84-96 °C and
 oil warmed from 74 to 98 °C. It covers 0-123 km/h, up to 5,463 rpm, full-load
 pulls, coasting in fuel cut, and an idle at each end. What it added is in
 [A second drive](subaru-ssm.md#a-second-drive-2026-10-30).
+
+### `2026-11-09-194644`
+
+61 seconds parked with the engine on a cold fast idle (1,190-1,820 rpm,
+coolant 48-55 °C), recorded from the dashboard with the note "door opening".
+The driver's door was open at the start; it was closed, then the front
+passenger, rear passenger-side, and rear driver-side doors were each opened
+and closed in turn, and finally the driver's door again. It is the first
+recording paced by replies: 12,095 polling requests in 60.7 s, all but one
+answered, with each fast PID sampled about every 70 ms. What it showed is in
+[Doors](can-broadcast.md#doors).
