@@ -41,6 +41,14 @@
   [kind value-name part]
   (keyword (name kind) (cond-> (name value-name) part (str "." (name part)))))
 
+(defn override-text
+  "The text a tile shows instead of its value, or nil: its `:override`'s
+  `:text` while the signal the override names is true in `signals`, the
+  latest signals by name. The gear shows R this way while reverse is on."
+  [{:keys [override]} signals]
+  (when (true? (get-in signals [(:signal override) :value]))
+    (:text override)))
+
 (defn tiles
   "The tiles an entry is shown as: one, or one for each of its `:parts`. A
   lone part keeps the entry's label."
@@ -53,7 +61,7 @@
               :unit (or (:unit part-entry) unit)
               :part part}
              (select-keys part-entry [:decimals])))
-    [(merge (select-keys entry [:kind :name :format :raw? :can-id :pid])
+    [(merge (select-keys entry [:kind :name :format :raw? :can-id :pid :override])
             {:id (series-key kind name nil) :label label :unit unit})]))
 
 (defn primary-tiles

@@ -406,7 +406,8 @@
   minute."
   [class tile badges?]
   (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])
-        text (tile-text tile value unit)]
+        text (or @(rf/subscribe [::subs/tile-override tile])
+                 (tile-text tile value unit))]
     [:div {:class class :title "The line is the last minute"}
      [:div.readout-label
       [:span (:label tile)]

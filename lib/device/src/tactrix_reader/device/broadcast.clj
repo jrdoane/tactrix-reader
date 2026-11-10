@@ -68,7 +68,9 @@
   for `catalog/catalog`, which tells a display how to show each signal:
   `:label`, the `:group` it belongs to (one of `catalog/groups`), a `:format`
   for values that read better as words, `:raw? true` for a count with no
-  known scale, and `:parts` for a value that is a map."
+  known scale, `:parts` for a value that is a map, and `:override
+  {:signal :text}` for a text to show instead of the value while another
+  signal is true."
   {0x002 [{:signal :steering-angle :unit :degrees :byte-count 2
            :label "Steering angle" :group :driver :format :steering
            ;; Positive is a left turn, assuming opendbc's wheel order in 0D4.
@@ -108,7 +110,10 @@
            :label "Clutch" :group :driver :format :pressed-released}]
    0x141 [{:signal :gear :byte-count 7
            :label "Gear" :group :driver :format :gear
-           ;; 1-5, or 7 with no gear engaged. Reverse reads 1.
+           ;; The gear comes from the ratio, so reverse reads 1; the
+           ;; reverse switch is in another message.
+           :override {:signal :reverse :text "R"}
+           ;; 1-5, or 7 with no gear engaged.
            :decode #(let [gear (bit-and (nth % 6) 0x07)]
                       (cond (<= 1 gear 5) gear
                             (= 7 gear) :neutral))}

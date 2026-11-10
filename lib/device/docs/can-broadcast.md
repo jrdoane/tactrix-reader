@@ -195,7 +195,8 @@ matched to no PID, so their scales and directions aren't confirmed.
 :timestamp-us}` maps, and the live and replay sources emit them as
 `{:type :signal ...}` events (`:signals {}` turns them off). The dashboard
 shows them tagged inferred. Each entry also carries how to show it (`:label`,
-`:group`, and where they apply `:format`, `:raw?`, and `:parts`), which
+`:group`, and where they apply `:format`, `:raw?`, `:parts`, and
+`:override`), which
 `catalog/catalog` passes to the dashboard, so a signal added here appears
 there with no other change.
 
@@ -210,7 +211,7 @@ there with no other change.
 | `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
 | `:pedal-travel` | `140` byte 0 ÷ 2.55 | Percent of the byte's range; full pedal is about 45% on PID `5A` |
 | `:clutch` | `140` b1.7 | Boolean, true while the clutch pedal is pressed |
-| `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7; reverse reads 1 |
+| `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7; reverse reads 1, and a display shows R from `:reverse` |
 | `:requested-torque` | `141` bits 0-14 LE, minus 10000, 0.1 Nm per bit | Newton metres, what the pedal asks for |
 | `:engine-torque` | `141` bytes 2-3 LE, minus 10000, 0.1 Nm per bit | Newton metres, negative on the overrun |
 | `:fuel-cut` | `141` b7.3 | Boolean |
@@ -436,8 +437,10 @@ times in the five drives, for 7-22 s each: at the end of every drive,
 parking, and in `2026-10-30-did-drive` also backing out at the start and
 once mid-drive. `154` b6.1 follows it. In reverse `141`'s gear reads 1 (in
 all but 11 of 11,676 frames) and `361`'s reads 0 or 1.
-`inferred-signals` decodes the bit as `:reverse`; `:gear` is left as it is,
-so it shows 1.
+`inferred-signals` decodes the bit as `:reverse`. `:gear` still decodes to
+1, since the two are in different messages, but its entry carries
+`:override {:signal :reverse :text "R"}`, and the dashboard's gear tile
+shows R while `:reverse` is true.
 
 ### Unexplained engine bytes
 

@@ -30,8 +30,11 @@
   (let [entries (by-name :signal)]
     (is (= (set (for [[_ signals] broadcast/inferred-signals, {:keys [signal]} signals] signal))
            (set (keys entries))))
-    (is (= {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear}
+    (is (= {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear
+            :override {:signal :reverse :text "R"}}
            (:gear entries)))
+    ;; An override names a signal that exists.
+    (is (every? entries (keep (comp :signal :override) (vals entries))))
     (is (= {:kind :signal :name :fuel-gauge :can-id 0x156 :label "Fuel gauge" :group :counters :raw? true}
            (:fuel-gauge entries)))
     (is (= [:front-left :front-right :rear-left :rear-right]

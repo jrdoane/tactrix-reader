@@ -135,6 +135,14 @@
      (and sample part) (update :value get part))))
 
 (rf/reg-sub
+ ::tile-override
+ ;; The text a tile shows instead of its value, such as R for the gear in
+ ;; reverse, or nil.
+ :<- [::signals]
+ (fn [signals [_ tile]]
+   (catalog/override-text tile signals)))
+
+(rf/reg-sub
  ::position
  ;; Where a replay is, or nil.
  (fn [db _]

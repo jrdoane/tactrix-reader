@@ -20,7 +20,8 @@
              {:kind :pid :name :monitor-status :pid 0x01 :label "Monitor status" :group :other
               :polled? true :tile? false}
              {:kind :pid :name :absolute-load :pid 0x43 :label "Absolute load" :group :other :unit :percent}
-             {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear}
+             {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear
+              :override {:signal :reverse :text "R"}}
              {:kind :signal :name :wheel-speeds :can-id 0x0D4 :label "Wheel speeds" :group :wheels
               :unit :km-per-hour
               :parts [{:part :front-left :label "Front left"} {:part :front-right :label "Front right"}]}]
@@ -65,6 +66,15 @@
 (deftest primary-tiles-follow-the-catalog-order
   (is (= [:pid/engine-rpm :signal/gear]
          (map :id (catalog/primary-tiles server-catalog (:signals server-catalog))))))
+
+(deftest an-override-replaces-the-value-while-its-signal-is-true
+  (let [gear (first (catalog/primary-tiles server-catalog (filter (comp #{:gear} :name)
+                                                                  (:signals server-catalog))))]
+    (is (= {:signal :reverse :text "R"} (:override gear)))
+    (is (= "R" (catalog/override-text gear {:gear {:value 1} :reverse {:value true}})))
+    (is (nil? (catalog/override-text gear {:gear {:value 1} :reverse {:value false}})))
+    (is (nil? (catalog/override-text gear {:gear {:value 1}})))
+    (is (nil? (catalog/override-text {:name :brake} {:reverse {:value true}})))))
 
 (deftest labels-cover-signals-and-dids
   (is (= {:engine-rpm "RPM" :lambda "Measured λ"}

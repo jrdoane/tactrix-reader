@@ -116,7 +116,7 @@
                     :can-id can-id
                     :label (name-label signal)
                     :group :other}
-                   (select-keys entry [:label :group :format :raw? :parts]))
+                   (select-keys entry [:label :group :format :raw? :parts :override]))
       unit (assoc :unit unit))))
 
 (defn- did-entries []
@@ -131,9 +131,10 @@
   - `:sections` and `:groups`, as above.
   - `:primary`, the names to show largest.
   - `:signals`, one entry per PID and inferred signal: `{:kind :pid|:signal
-    :name :label :group}` with `:unit`, `:format`, `:parts`, and `:raw?` where
-    they apply, `:pid` and `:polled?` (in the default poll schedule) for a
-    PID, and `:can-id` for a signal or a PID also decoded from the bus.
+    :name :label :group}` with `:unit`, `:format`, `:parts`, `:raw?`, and
+    `:override` where they apply, `:pid` and `:polled?` (in the default poll
+    schedule) for a PID, and `:can-id` for a signal or a PID also decoded
+    from the bus.
   - `:dids`, one entry per DID in `uds/did-signals`, and `:did-notes`, what
     is known about the others."
   []
