@@ -78,7 +78,9 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    recording and emit `{:type :recording :state :recording|:saved ...}`. The
    replay source's `:control!` pauses, resumes, seeks, and sets the speed,
    and with `:position-ms` it emits `{:type :position ...}`; a seek shifts
-   emitted timestamps, as a loop does, so they always increase.
+   emitted timestamps, as a loop does, so they always increase, and first
+   emits the ten seconds before its target at once, so the latest values
+   are right there even while paused.
    Consumers must not depend on which source is running.
 2. **Source manager** (`engine_server/sources.clj`): an agent that switches
    between replay, a live adapter, and no source, one switch at a time. Each

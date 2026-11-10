@@ -260,13 +260,15 @@
         (is (wait-for #(= 1500 (:position-ms (last (positions)))) 2000))
         (is (= {:type :position :position-ms 1500 :duration-ms 2000 :paused? true :speed 1.0}
                (last (positions))))
-        (is (= paused-at (count (samples))))
+        ;; The seek emitted what led up to 1.5 s, so the latest value is the
+        ;; one from just before it, though playback is still paused.
+        (is (= (map double (range 1000 2500 100)) (map :value (drop paused-at (samples)))))
         (is (= {:ok? true} (control! {:action :speed :speed 4})))
         (is (= {:ok? true} (control! {:action :resume})))
         (is (wait-for #(some (comp #{:stopped} :state) @events) 3000))
         ;; Playback went on from 1.5 s, at 2500 rpm, and timestamps kept
         ;; increasing across the seek.
-        (is (= [2500.0 2600.0 2700.0 2800.0 2900.0 3000.0] (map :value (drop paused-at (samples)))))
+        (is (= [2500.0 2600.0 2700.0 2800.0 2900.0 3000.0] (map :value (drop (+ paused-at 15) (samples)))))
         (is (apply < (map :timestamp-us (samples))))
         (is (= 4.0 (:speed (last (positions))))))
       (is (= {:ok? false :error :invalid-command} (control! {:action :speed :speed 0})))

@@ -249,7 +249,8 @@ and `:speed` scales playback.
 Its map also has `:control!`, which takes `{:action :pause}`,
 `{:action :resume}`, `{:action :seek :position-ms n}`, or
 `{:action :speed :speed x}`. A seek shifts timestamps as a loop does, so
-they still increase. With `:position-ms`, it emits
+they still increase, and first emits the ten seconds before its target at
+once, so the latest of each value is as it was there, even while paused. With `:position-ms`, it emits
 `{:type :position :position-ms :duration-ms :paused? :speed}` that often and
 whenever a control changes it.
 

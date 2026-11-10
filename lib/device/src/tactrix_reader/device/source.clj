@@ -178,6 +178,13 @@
   "The longest the replay sleeps before looking at its controls again."
   20)
 
+(def ^:private seek-lead-ms
+  "How much of the recording before a seek's target is emitted at once, so
+  the latest value of everything is as it was at the target. It covers the
+  slowest PIDs, which a recording that also polled DIDs read about every
+  6 seconds."
+  10000)
+
 (defn- first-index-at
   "The index of the first of `messages` at or after `target-us`, or their
   count when there is none."
@@ -224,7 +231,10 @@
   - `:control!` takes `{:action :pause}`, `{:action :resume}`, `{:action
     :seek :position-ms n}`, or `{:action :speed :speed x}` (0.1 to 16) and
     returns `{:ok? true}`, or `{:ok? false :error :invalid-command}`. A seek
-    is clamped to the recording, and works while paused."
+    is clamped to the recording, and works while paused. It first emits the
+    ten seconds of the recording before its target, all at once, so a
+    consumer keeping the latest of each value has them as they were there,
+    even while paused."
   [dir {:keys [emit loop? speed broadcast signals frames? position-ms]
         :or {loop? true
              speed 1.0
@@ -293,10 +303,21 @@
                                (status :stopped)
 
                                seek-ms
-                               (let [to (min (dec total) (first-index-at messages (+ t0 (* 1000 seek-ms))))]
+                               (let [to (min (dec total) (first-index-at messages (+ t0 (* 1000 seek-ms))))
+                                     from (first-index-at messages (- (stamp to) (* 1000 seek-lead-ms)))
+                                     offset (jump from)]
                                  (swap! controls assoc :seek-ms nil)
+                                 ;; The lead-in, with a pause now and then so
+                                 ;; a consumer's buffer keeps up.
+                                 (doseq [j (range from to)]
+                                   (when (zero? (mod (- j from) 100))
+                                     (Thread/sleep 1))
+                                   (doseq [event (message-events rx-id broadcast signals frames? (nth messages j))]
+                                     (emit (update event :timestamp-us + offset))))
                                  (report! to)
-                                 (recur to (now-ms) (at-ms to) speed (jump to) last (now-ms) was-paused?))
+                                 (recur to (now-ms) (at-ms to) speed offset
+                                        (if (< from to) (dec to) last)
+                                        (now-ms) was-paused?))
 
                                paused?
                                (do
