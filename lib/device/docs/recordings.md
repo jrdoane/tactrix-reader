@@ -217,6 +217,29 @@ oil warmed from 74 to 98 °C. It covers 0-123 km/h, up to 5,463 rpm, full-load
 pulls, coasting in fuel cut, and an idle at each end. What it added is in
 [A second drive](subaru-ssm.md#a-second-drive-2026-10-30).
 
+### `2026-11-09-144943`
+
+8.7 minutes of town and highway driving from a cold start, recorded from
+the dashboard with the note "Quick cold start drive": about 528,800 frames
+and 34,900 PID samples. The engine was already running, on a fast idle
+(1,810 rpm), when it began. Coolant warmed from 37 to 95 °C and oil from 24
+to 85 °C. It covers all five gears, 0-118 km/h, up to 5,940 rpm and 100%
+load, and an idle in neutral at the end. It sent one request every 15 ms,
+so each fast PID was sampled about every 210 ms. It and the next recording
+are the first drives without DID polling to have PIDs `45`, `49`, `4C`, and
+`65`; what they showed is marked "2026-11-09" in
+[Broadcast CAN traffic](can-broadcast.md).
+
+### `2026-11-09-150052`
+
+9.8 minutes of town and highway driving, recorded from the dashboard two
+minutes after the one above ended, with the note "warm start and drive":
+about 593,800 frames and 39,200 PID samples. The engine was running when it
+began; coolant was 92-96 °C and oil 85-98 °C. It covers all five gears,
+0-94 km/h, up to 5,500 rpm and 100% load, and an idle at each end. The rear
+passenger-side door was open from 581.8 s to 585.1 s. It was paced like the
+one above.
+
 ### `2026-11-09-194644`
 
 61 seconds parked with the engine on a cold fast idle (1,190-1,820 rpm,
