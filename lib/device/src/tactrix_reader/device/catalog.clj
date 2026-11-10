@@ -1,0 +1,145 @@
+(ns tactrix-reader.device.catalog
+  "How to show every value the sources emit: a label, unit, and group for
+  each PID, inferred CAN signal, and UDS data identifier, as plain data a
+  display can be built from. The engine server sends it to the dashboard, so
+  a signal added to `broadcast/inferred-signals` or a PID added to the poll
+  schedule appears there without the dashboard changing.
+
+  PIDs get their display here, in `pid-display`. Inferred signals and DIDs
+  carry theirs in `broadcast/inferred-signals` and `uds/did-signals`."
+  (:require [clojure.string :as str]
+            [tactrix-reader.device.broadcast :as broadcast]
+            [tactrix-reader.device.can :as can]
+            [tactrix-reader.device.pids :as pids]
+            [tactrix-reader.device.uds :as uds]))
+
+(def sections
+  "The blocks a display is divided into, in order. `:provenance` is how
+  everything in the section is known, when that is the same for all of it."
+  [{:id :obd :title "OBD-II PIDs"}
+   {:id :can :title "From the CAN bus" :provenance :inferred
+    :note (str "Identified from the car's own traffic by how they behave, but matched "
+               "to no PID, so scales and directions are not confirmed.")}])
+
+(def groups
+  "The groups in each section, in order. A value whose group is missing or
+  unknown goes in its section's `:other` group."
+  [{:id :throttle :section :obd :title "Throttle and pedal"}
+   {:id :air :section :obd :title "Air and load"}
+   {:id :temperatures :section :obd :title "Temperatures"}
+   {:id :fuel :section :obd :title "Fuel"}
+   {:id :electrical :section :obd :title "Electrical and gearbox"}
+   {:id :other :section :obd :title "Other PIDs"}
+   {:id :driver :section :can :title "Driver"}
+   {:id :motion :section :can :title "Motion"}
+   {:id :wheels :section :can :title "Wheel speeds"}
+   {:id :doors :section :can :title "Doors"}
+   {:id :engine :section :can :title "Engine and outside"}
+   {:id :counters :section :can :title "Fuel gauge and counters"}
+   {:id :other :section :can :title "Other signals"}])
+
+(def primary
+  "The values a display should show largest, by name."
+  [:engine-rpm :vehicle-speed :gear :coolant-temp :throttle-position])
+
+(def pid-display
+  "A shorter label than the PID's name gives, and the group it is shown in,
+  by PID name. `:format` names how to show a value that reads better as
+  words, `:parts` picks what to show of a PID that decodes to a map, and
+  `:tile? false` keeps a PID out of the tiles because a display shows it
+  another way. A PID with no entry is labelled from its name and goes in
+  `:other`."
+  {:engine-rpm {:label "RPM" :group :air}
+   :vehicle-speed {:label "Speed" :group :air}
+   :coolant-temp {:label "Coolant" :group :temperatures}
+   :throttle-position {:label "Throttle" :group :throttle}
+   :relative-throttle-position {:label "Relative throttle" :group :throttle}
+   :commanded-throttle-actuator {:label "Commanded throttle" :group :throttle}
+   :relative-accelerator-pedal-position {:label "Accelerator pedal" :group :throttle}
+   :accelerator-pedal-position-d {:label "Pedal position D" :group :throttle}
+   :engine-load {:label "Engine load" :group :air}
+   :maf-air-flow {:label "Mass air flow" :group :air}
+   :intake-manifold-pressure {:label "Manifold pressure" :group :air}
+   :barometric-pressure {:label "Barometric pressure" :group :air}
+   :timing-advance {:label "Timing advance" :group :air}
+   :oil-temp {:label "Oil" :group :temperatures}
+   :intake-air-temp {:label "Intake air" :group :temperatures}
+   :ambient-air-temp {:label "Ambient air" :group :temperatures}
+   :catalyst-temp-bank-1-sensor-1 {:label "Catalyst" :group :temperatures}
+   ;; The Impreza has one fuel system.
+   :fuel-system-status {:label "Fuel system" :group :fuel :format :fuel-system}
+   :commanded-lambda {:label "Commanded λ" :group :fuel}
+   :wideband-oxygen-sensor-1-current {:label "Measured λ" :group :fuel
+                                      :parts [{:part :lambda :unit :lambda}]}
+   :short-term-fuel-trim-bank-1 {:label "Short-term trim" :group :fuel}
+   :long-term-fuel-trim-bank-1 {:label "Long-term trim" :group :fuel}
+   :oxygen-sensor-bank-1-sensor-2 {:label "Rear O₂ sensor" :group :fuel
+                                   :parts [{:part :volts :unit :volts :decimals 3}]}
+   :fuel-level {:label "Fuel level" :group :fuel}
+   :control-module-voltage {:label "ECU voltage" :group :electrical}
+   :auxiliary-io-status {:label "Neutral switch" :group :electrical :format :in-gear}
+   ;; Shown with the trouble codes.
+   :monitor-status {:label "Monitor status" :format :monitor-status :tile? false}})
+
+(defn- name-label [value-name]
+  (str/capitalize (str/replace (name value-name) "-" " ")))
+
+(defn- broadcast-ids
+  "The CAN ID each PID is also decoded from, by PID."
+  []
+  (into {}
+        (for [[can-id signals] broadcast/broadcast-signals
+              {:keys [pid]} signals]
+          [pid can-id])))
+
+(defn- pid-entries []
+  (let [polled (set can/default-poll-schedule)
+        can-ids (broadcast-ids)]
+    (for [[pid {:keys [name unit pid-list?]}] (sort-by key pids/mode-01-pids)
+          :when (not pid-list?)
+          :let [display (get pid-display name)]]
+      (cond-> (merge {:kind :pid
+                      :name name
+                      :pid pid
+                      :label (name-label name)
+                      :group :other}
+                     display)
+        unit (assoc :unit unit)
+        (polled pid) (assoc :polled? true)
+        (can-ids pid) (assoc :can-id (can-ids pid))))))
+
+(defn- signal-entries []
+  (for [[can-id signals] (sort-by key broadcast/inferred-signals)
+        {:keys [signal unit] :as entry} signals]
+    (cond-> (merge {:kind :signal
+                    :name signal
+                    :can-id can-id
+                    :label (name-label signal)
+                    :group :other}
+                   (select-keys entry [:label :group :format :raw? :parts]))
+      unit (assoc :unit unit))))
+
+(defn- did-entries []
+  (for [[did {:keys [name] :as entry}] (sort-by key uds/did-signals)]
+    (merge {:did did :label (name-label name)}
+           (select-keys entry [:name :label :unit :matches :compare]))))
+
+(defn catalog
+  "Everything a display needs, with no functions in it, so it can be sent as
+  Transit or EDN:
+
+  - `:sections` and `:groups`, as above.
+  - `:primary`, the names to show largest.
+  - `:signals`, one entry per PID and inferred signal: `{:kind :pid|:signal
+    :name :label :group}` with `:unit`, `:format`, `:parts`, and `:raw?` where
+    they apply, `:pid` and `:polled?` (in the default poll schedule) for a
+    PID, and `:can-id` for a signal or a PID also decoded from the bus.
+  - `:dids`, one entry per DID in `uds/did-signals`, and `:did-notes`, what
+    is known about the others."
+  []
+  {:sections sections
+   :groups groups
+   :primary primary
+   :signals (vec (concat (pid-entries) (signal-entries)))
+   :dids (vec (did-entries))
+   :did-notes uds/did-notes})

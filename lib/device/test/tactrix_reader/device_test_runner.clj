@@ -3,6 +3,7 @@
             [tactrix-reader.device.adapter-test]
             [tactrix-reader.device.broadcast-test]
             [tactrix-reader.device.can-test]
+            [tactrix-reader.device.catalog-test]
             [tactrix-reader.device.codec-test]
             [tactrix-reader.device.config-test]
             [tactrix-reader.device.iso15765-test]
@@ -22,6 +23,7 @@
   (let [{:keys [fail error]} (test/run-tests 'tactrix-reader.device.adapter-test
                                              'tactrix-reader.device.broadcast-test
                                              'tactrix-reader.device.can-test
+                                             'tactrix-reader.device.catalog-test
                                              'tactrix-reader.device.codec-test
                                              'tactrix-reader.device.config-test
                                              'tactrix-reader.device.iso15765-test

@@ -286,6 +286,11 @@
         (is (= {:calibration-ids ["EA1T002C"] :state "idling" :description "2015 Subaru Impreza"}
                (:vehicle (second (:recordings body)))))
         (is (not (contains? (second (:recordings body)) :counts))))
+      (let [{:keys [status body]} (get-transit client (str base "/api/catalog"))]
+        (is (= 200 status))
+        (is (= {:kind :signal :name :gear :can-id 0x141 :label "Gear" :group :driver :format :gear}
+               (some #(when (= :gear (:name %)) %) (:signals body))))
+        (is (= "Supported-DID bitmap" (get-in body [:did-notes 0x1000]))))
       (is (= {:status 400 :body {:error :unknown-recording}}
              (post-transit client (str base "/api/source") "application/transit+json"
                            {:type :replay :recording "../../etc"})))

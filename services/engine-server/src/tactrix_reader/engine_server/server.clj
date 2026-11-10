@@ -1,7 +1,7 @@
 (ns tactrix-reader.engine-server.server
   "Pedestal routes: the dashboard page, its assets, the SSE stream, and the
-  API that lists adapters and recordings, gives a recording's values as time
-  series, switches the source, and starts and stops recording."
+  API that describes the values to show, lists adapters and recordings, gives
+  a recording's values as time series, switches the source, and starts and stops recording."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -11,6 +11,7 @@
             [io.pedestal.http.jetty :as jetty]
             [io.pedestal.http.sse :as sse]
             [io.pedestal.service.resources :as resources]
+            [tactrix-reader.device.catalog :as catalog]
             [tactrix-reader.device.config :as config]
             [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.series :as series]
@@ -100,6 +101,11 @@
 (defn- adapters-handler [_request]
   (transit-response 200 {:adapters (mapv #(select-keys % [:vendor :product :serial :path :paths])
                                          (usb/scan-devices))}))
+
+(defn- catalog-handler
+  "How to show each PID, inferred signal, and DID, from `catalog/catalog`."
+  [_request]
+  (transit-response 200 (catalog/catalog)))
 
 (defn- recordings
   "The recordings in the configured directory, each vehicle with its
@@ -213,6 +219,7 @@
         #{["/" :get index-handler :route-name ::index]
           ["/stream" :get (stream-interceptor hub) :route-name ::stream]
           ["/api/snapshot" :get (snapshot-handler hub) :route-name ::snapshot]
+          ["/api/catalog" :get [local-api-guard catalog-handler] :route-name ::catalog]
           ["/api/adapters" :get [local-api-guard adapters-handler] :route-name ::adapters]
           ["/api/source" :post [local-api-guard (source-handler sources config)] :route-name ::source]
           ["/api/recordings" :get [local-api-guard (recordings-handler config)] :route-name ::recordings]

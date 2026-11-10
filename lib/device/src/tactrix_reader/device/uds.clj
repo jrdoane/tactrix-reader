@@ -46,23 +46,60 @@
   2026-10-29-did-drive and 2026-10-30-did-drive recordings, not documented;
   see docs/subaru-ssm.md. `10B2` behaves like a charging voltage target
   rather than a measurement, so it matches ECU voltage only once the
-  alternator catches up."
+  alternator catches up.
+
+  `:label` and `:compare` are for `catalog/catalog`: `:compare` names the
+  polled value a display can show beside the DID's, as `{:pid name}`, with
+  `:part` for a PID that decodes to a map, or `{:derived :air-per-revolution}`
+  for MAF over rpm."
   {0x10A1 {:name :mass-air-flow :matches 0x10 :unit :grams-per-second
+           :label "Mass air flow" :compare {:pid :maf-air-flow}
            ;; Probably the MAF sensor's own output, which rises with about
            ;; the fourth root of the flow.
            :decode #(round-to 2 (Math/pow (+ (* 0.0177 %) 0.186) 4))}
    0x10A3 {:name :air-per-revolution :unit :grams-per-revolution
+           :label "Air per revolution" :compare {:derived :air-per-revolution}
            :decode #(round-to 3 (* 0.019 %))}
    0x10A6 {:name :accelerator-pedal :matches 0x5A :unit :percent
+           :label "Accelerator pedal" :compare {:pid :relative-accelerator-pedal-position}
            :decode #(round-to 1 (* 0.178 %))}
    0x10B2 {:name :charging-voltage-target :matches 0x42 :unit :volts
+           :label "Charging target" :compare {:pid :control-module-voltage}
            :decode #(round-to 2 (+ (* 0.05 %) 10.73))}
    0x10BA {:name :wideband-current :matches 0x34 :unit :milliamps
+           :label "Wideband current"
+           :compare {:pid :wideband-oxygen-sensor-1-current :part :milliamps}
            :decode #(round-to 3 (/ (- % 128) 8.0))}
    0x10BE {:name :lambda :matches 0x34 :unit :lambda
+           :label "Measured λ"
+           :compare {:pid :wideband-oxygen-sensor-1-current :part :lambda}
            :decode #(round-to 3 (/ % 128.0))}
    0x10DF {:name :throttle-position :matches 0x11 :unit :percent
+           :label "Throttle" :compare {:pid :throttle-position}
            :decode #(round-to 1 (- (* 0.8 %) 40))}})
+
+(defn- paired-notes
+  "Notes for DIDs that move together, each naming the other in its pair."
+  [note & pairs]
+  (into {} (for [[a b] pairs
+                 [did other] [[a b] [b a]]]
+             [did (str note "; pairs with " (format "%04X" other))])))
+
+(def did-notes
+  "What the 2026-10-29-did-drive and 2026-10-30-did-drive recordings showed
+  about DIDs that match no PID, by DID. These are inferences; see
+  docs/subaru-ssm.md."
+  (merge
+   (zipmap (range 0x1000 0x1100 0x20) (repeat "Supported-DID bitmap"))
+   (zipmap [0x101D 0x1022 0x10E3] (repeat "Held at 00; knock correction is not ruled out"))
+   (zipmap [0x10AE 0x10B1 0x10B4 0x10B5] (repeat "Varies under load"))
+   (paired-notes "Possibly cam timing" [0x10EC 0x10ED])
+   (paired-notes "Loosely follows load and timing" [0x10EE 0x10EF] [0x10F0 0x10F1])
+   (paired-notes "Drops at once in fuel cut" [0x10B6 0x10B7] [0x10B8 0x10B9])
+   (paired-notes "Opposite flags that swap at the first full throttle" [0x1088 0x1089])
+   {0x103D "Changes between drives only: 2A, 2D, 2F"
+    0x10A5 "Rises above about 50% load"
+    0x10DE "Follows load and timing advance"}))
 
 (defn did-sample
   "Adds what `did-signals` knows to a DID reply such as `can/did-reply`
