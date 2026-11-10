@@ -169,7 +169,10 @@ matched to no PID, so their scales and directions aren't confirmed.
 `signal-samples` decodes them into `{:signal :value :unit :can-id
 :timestamp-us}` maps, and the live and replay sources emit them as
 `{:type :signal ...}` events (`:signals {}` turns them off). The dashboard
-shows them tagged inferred.
+shows them tagged inferred. Each entry also carries how to show it (`:label`,
+`:group`, and where they apply `:format`, `:raw?`, and `:parts`), which
+`catalog/catalog` passes to the dashboard, so a signal added here appears
+there with no other change.
 
 | Signal | Encoding | Value |
 |---|---|---|

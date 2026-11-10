@@ -3,7 +3,7 @@
 Pedestal server for the engine dashboard. It runs one data source at a time,
 batches its samples, and streams them to browsers over Server-Sent Events. The
 dashboard can switch the source to an adapter, any saved recording, or off,
-and record what a live source receives.
+record what a live source receives, and pause and seek a replay.
 
 ## Running
 
@@ -53,12 +53,14 @@ with an `:error`.
 | `/` | Dashboard page |
 | `/assets/...` | Compiled ClojureScript and CSS from `resources/public/assets` |
 | `/stream` | Server-Sent Events with Transit JSON data |
-| `/api/snapshot` | Latest status, info, recording, samples, signals, and DIDs, as Transit JSON |
+| `/api/snapshot` | Latest status, info, recording, replay position, samples, signals, DIDs, and CAN frames, as Transit JSON |
+| `GET /api/catalog` | How to show each value, from the device library's `catalog/catalog`: `{:sections :groups :primary :signals :dids :did-notes}`. Each of `:signals` is a PID or inferred signal with its label, unit, group, and format. The dashboard builds its tiles from it |
 | `GET /api/adapters` | `{:adapters [{:vendor :product :serial :path :paths}]}` from `scan-devices` |
 | `GET /api/recordings` | `{:dir "..." :recordings [...]}`: each recording's name, time, length, vehicle (with its config.edn description), note, and size, newest first |
 | `GET /api/recordings/<name>/series` | The recording's values as time series for the dashboard's map (`series/recording-series`): `{:name :bucket-ms :duration-ms :channels {key {:unit :name}} :series {key {:t [ms ...] :v [...]}}}`. 404 `:unknown-recording` for a name `/api/recordings` doesn't list. The last one is cached |
 | `POST /api/source` | Switch source. Body: `{:type :live :path "..." :dids? true}`, `{:type :replay :recording "<name>"}`, or `{:type :none}`. Replies 202 with `{:source ...}`; progress arrives on `/stream` |
 | `POST /api/recording` | `{:action :start :note "..."}` or `{:action :stop}`: record the running live source. Replies 202, or 409 with `:not-live`, `:not-running`, `:already-recording`, or `:not-recording` |
+| `POST /api/replay` | Control the replay: `{:action :pause}`, `{:action :resume}`, `{:action :seek :position-ms n}` (clamped to the recording), or `{:action :speed :speed x}` (0.1 to 16). Replies 202, 409 `:not-replaying`, or 400 `:invalid-command` |
 
 The `/api` routes answer only requests addressed to `localhost`, `127.0.0.1`,
 or `::1` (403 otherwise), which defeats DNS rebinding. `POST` requests
@@ -71,12 +73,20 @@ write to any other file or read any other directory.
 
 `/stream` sends a `snapshot` event on connect, then:
 
-- `samples`: `{:samples [...] :signals [...]}` every 100 ms, with the latest
-  sample of each PID and the latest value of each inferred CAN signal that
-  arrived since the last batch. A sample is
+- `samples`: `{:samples [...] :signals [...] :dids [...] :frames [...]}`
+  every 100 ms, with the latest sample of each PID, value of each inferred
+  CAN signal, reply for each UDS DID, and frame of each CAN ID that arrived
+  since the last batch. A sample is
   `{:pid :name :value :unit :timestamp-us}`, plus `:can-id` when it was
   decoded from broadcast traffic. A signal is
-  `{:signal :value :unit :can-id :timestamp-us}`.
+  `{:signal :value :unit :can-id :timestamp-us}`. A frame is
+  `{:id :data [byte ...] :timestamp-us :first-us :count :changed [mask ...]}`:
+  the latest data, how many frames of that ID have arrived and when the first
+  did, and for each byte the bits that changed between any two frames since
+  the last batch, so a change shorter than a batch still shows.
+- `position`: where a replay is, about four times a second and whenever it
+  is paused, resumed, or moved:
+  `{:position-ms :duration-ms :paused? :speed}`.
 - `status`: the source's state, such as `{:source :replay :state :running}`,
   sent when it changes. A live source's `:running` status includes the
   adapter `:firmware`.

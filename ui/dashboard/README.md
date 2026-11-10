@@ -6,29 +6,62 @@ connects to the [engine server's](../../services/engine-server/README.md)
 
 The page has:
 
-- An adapter picker with Rescan, Connect, Disconnect, and Poll DIDs, which
-  alternates PID requests with the scanned UDS DIDs.
-- Record and Stop recording, with a note, while connected live.
-- Panels for the source, the adapter (serial, device, firmware, battery
-  voltage), the vehicle (VIN, calibration ID and CVN, ECU name, SSM ECU ID, or why
-  each could not be read), and diagnostics from PID 01 (check-engine light,
-  stored codes, readiness monitors).
-- Large readouts for RPM, speed, gear, coolant, and throttle, then grouped
-  tiles for the other polled PIDs. PIDs also decoded from the car's broadcast
-  CAN traffic are tagged CAN. Pressures, which the PIDs report in kPa, are
-  shown in bar (absolute).
-- A "From the CAN bus" section, tagged inferred, with signals identified from
-  that traffic but matched to no PID: steering angle, brake, brake pressure,
-  parking brake, driver's seatbelt, accelerations, yaw rate, the four wheel
-  speeds, whether each door is open, fuel flow, and outside temperature. Gear, shown with the main
-  readouts, is tagged inferred on its own. See
-  [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
-- A table of every PID received, with where each came from.
-- The saved recordings, grouped by the vehicle each was recorded on, with
-  Map and Replay buttons for each. See
-  [recordings](../../lib/device/docs/recordings.md#recording-from-the-dashboard).
+It has five tabs, kept in the URL (`#signals`, `#bus`, `#map`,
+`#recordings`), under one source bar.
 
-The **Map** view, toggled in the header, bins one value by two others, like
+The **source bar** is on every tab:
+
+- What is playing, on which car, and whether the check-engine light is on.
+- For a replay, a transport: pause, the position on a slider that seeks, and
+  the speed.
+- An adapter picker with Rescan, Connect, and Poll DIDs, which alternates
+  PID requests with the scanned UDS DIDs, and Disconnect or Stop.
+- Record and Stop recording, with a note, while connected live.
+- Details, which opens panels for the source, the adapter (serial, device,
+  firmware, battery voltage), the vehicle (VIN, calibration ID and CVN, ECU
+  name, SSM ECU ID, or why each could not be read), and diagnostics from
+  PID 01 (check-engine light, stored codes, readiness monitors).
+
+**Dashboard** shows the latest values as tiles, each with a line for its
+last minute:
+
+- Large readouts for RPM, speed, gear, coolant, and throttle.
+- OBD-II PIDs, in groups. Pressures, which the PIDs report in kPa, are shown
+  in bar (absolute).
+- "From the CAN bus": signals identified from the car's own traffic but
+  matched to no PID. See
+  [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
+- UDS data identifiers matched to a PID, each over the polled value it
+  matches, when the source has DIDs.
+
+What the tiles are, and their labels, units, and groups, comes from the
+server's `/api/catalog`, not from this code: a signal added to the device
+library's `inferred-signals`, or a PID added to its poll schedule, appears
+without a change here. A PID or signal the catalog doesn't describe goes in
+an Other group once it arrives. Groups flow across the page, each as wide as
+its tiles, and each section folds away (remembered in the browser).
+
+Badges say how a value is known, the same on tiles and in tables: **polled**
+(a mode 01 PID), **CAN** (also decoded from the bus and confirmed against
+the PID), **inferred** (from the bus, not confirmed), and **fitted** (a DID
+with a fitted scale). A count with no known scale has the unit "raw".
+
+**Signals** lists every PID, CAN signal, and DID in tables, with the badges'
+legend.
+
+**Bus** shows the latest frame of every CAN ID, with how often it comes and
+what is decoded from it. A byte is highlighted as it changes. To find what a
+control does: let the bus run for a few seconds, press Mark baseline, and
+operate the control. Bits that had not changed before the baseline are
+listed by name (`374 b3.0`, as in the docs) and filled in the bit grid of
+the ID you click. The server reports changes shorter than its 100 ms
+batches, so a 20 ms pulse still shows.
+
+**Recordings** lists the saved recordings, grouped by the vehicle each was
+recorded on (by calibration ID), with Map and Replay buttons for each. See
+[recordings](../../lib/device/docs/recordings.md#recording-from-the-dashboard).
+
+**Map** bins one value by two others, like
 an ECU table: by default timing advance by RPM and load (g/rev, MAF × 60 /
 RPM). It works on any recording, or on the current stream (live or a replay)
 as it arrives.
@@ -40,8 +73,8 @@ as it arrives.
 - Filters keep only rows where a value is at least or at most a number, such
   as coolant ≥ 75 °C.
 - The timeline plots any value over the whole log. Drag across it to map only
-  that part. Clicking a cell shows its details and marks its rows on the
-  timeline.
+  that part. Clicking a cell shows its details beside the table and marks
+  its rows on the timeline.
 
 See [mapping a recording](../../lib/device/docs/recordings.md#mapping-a-recording).
 
@@ -70,9 +103,14 @@ Namespaces are under `tactrix-reader.dashboard`:
 | `core` | Mounts the app with `reagent.dom.client` |
 | `stream` | `:stream/connect` effect: opens the `EventSource` and decodes Transit |
 | `http` | `:http` effect: calls `/api` with Transit and dispatches the reply |
-| `events` | App state: connection, source status and info, latest sample per PID and value per inferred signal, adapters |
+| `events` | App state: connection, source status and info, the catalog, latest sample per PID and value per inferred signal, CAN frames, replay position, adapters |
 | `subs` | Subscriptions |
-| `views` | Page: source controls, info panels, readouts, and a table of every value |
-| `format` | Labels, units, and number formats shared by `views` and `map-view` |
-| `series` | Pure: time-series logs from recordings or the stream, holding values on a grid, axes, and binning. Tested by `npm test` |
-| `map-view` | The Map view: controls, filters, timeline, heat table, and cell details |
+| `views` | The source bar, the Dashboard, Signals, and Recordings tabs |
+| `bus-view` | The Bus tab |
+| `map-view` | The Map tab: controls, filters, timeline, heat table, and cell details |
+| `format` | Units and number formats, and labels from the catalog |
+| `catalog` | Pure: turns the server's catalog into sections, groups, and tiles |
+| `bus` | Pure: the latest frame per CAN ID, which bits have changed, and the baseline |
+| `series` | Pure: time-series logs from recordings or the stream, holding values on a grid, axes, binning, and sparklines |
+
+`catalog`, `bus`, and `series` are tested by `npm test`.

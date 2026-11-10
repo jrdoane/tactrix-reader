@@ -180,6 +180,7 @@ The main entry points, by namespace under `tactrix-reader.device`:
 | `broadcast` | `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
 | `openport` | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
 | `source` | `start-live-source!`, `start-replay-source!` | Data sources, below |
+| `catalog` | `catalog` | How to show each PID, inferred signal, and DID (label, unit, group, format), as plain data for a display such as the dashboard |
 
 Functions that take a device accept either a path string or a device map from
 `scan-devices`.
@@ -194,6 +195,8 @@ server cannot tell them apart:
   Samples decoded from [broadcast CAN traffic](docs/can-broadcast.md#decoding)
   use the same shape, with the PID they match and `:can-id` added.
 - `{:type :status :source :live|:replay :state :running|:stopped|:failed ...}`
+- With `:frames? true`, `{:type :frame :id :data :timestamp-us}` for every CAN
+  frame received, before the events decoded from it.
 
 Each returns a map whose `:stop!` function stops the source and waits for it
 to finish. The live source's map also has `:start-recording!` and
@@ -242,6 +245,13 @@ inferred signals (`:broadcast` and `:signals` as for the live source), paced
 by their timestamps. It decodes each frame as it plays it.
 It loops by default (`:loop?`), shifting timestamps so they keep increasing,
 and `:speed` scales playback.
+
+Its map also has `:control!`, which takes `{:action :pause}`,
+`{:action :resume}`, `{:action :seek :position-ms n}`, or
+`{:action :speed :speed x}`. A seek shifts timestamps as a loop does, so
+they still increase. With `:position-ms`, it emits
+`{:type :position :position-ms :duration-ms :paused? :speed}` that often and
+whenever a control changes it.
 
 ## Tests
 

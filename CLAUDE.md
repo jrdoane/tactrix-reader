@@ -30,7 +30,7 @@ PEDESTAL_DEV_MODE=true clojure -M:run   # needed with `shadow-cljs watch` (CSP a
 # ui/dashboard
 npm install
 npx shadow-cljs release app     # or `watch app`
-npm test                        # node tests of the pure namespaces (`series`)
+npm test                        # node tests of the pure namespaces (`series`, `catalog`, `bus`)
 npm run lint                    # clj-kondo
 ```
 
@@ -71,9 +71,14 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    UDS service 22 replies (only recordings made with `record-dids` have them;
    `uds/did-sample` adds `:name`, `:matches`, `:value`, and `:unit` for the DIDs
    in `uds/did-signals`; the live source polls them with `:dids`), and
-   `{:type :status :source ... :state :running|:stopped|:failed}`. The live
+   `{:type :status :source ... :state :running|:stopped|:failed}`. With
+   `:frames? true` (which the server passes) they also emit
+   `{:type :frame :id :data :timestamp-us}` for every CAN frame. The live
    source's `:start-recording!`/`:stop-recording!` save what it receives as a
-   recording and emit `{:type :recording :state :recording|:saved ...}`.
+   recording and emit `{:type :recording :state :recording|:saved ...}`. The
+   replay source's `:control!` pauses, resumes, seeks, and sets the speed,
+   and with `:position-ms` it emits `{:type :position ...}`; a seek shifts
+   emitted timestamps, as a loop does, so they always increase.
    Consumers must not depend on which source is running.
 2. **Source manager** (`engine_server/sources.clj`): an agent that switches
    between replay, a live adapter, and no source, one switch at a time. Each
@@ -83,17 +88,23 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    recording metadata) before starting the new one. It also starts and stops
    recordings of the live source, into the configured recordings directory,
    with the identified vehicle in `meta.edn`; a switch saves any recording
-   first.
-3. **Hub** (`engine_server/hub.clj`): batches samples, signals, and DID
-   replies every 100 ms, keeping only the latest per PID, signal, and DID. It forwards status, info, and recording events immediately and keeps
+   first. `control-replay!` passes a command to the replay source.
+3. **Hub** (`engine_server/hub.clj`): batches samples, signals, DID
+   replies, and CAN frames every 100 ms, keeping only the latest per PID,
+   signal, DID, and CAN ID. A batched frame has a `:changed` mask per byte of
+   the bits that changed between any two frames in the batch, so the
+   dashboard's bus view sees a change shorter than a batch. It forwards status, info, recording, and position events immediately and keeps
    a snapshot for new connections; `:reset` clears it and sends an empty
    snapshot. Every channel uses a sliding buffer, so slow browsers drop data
    instead of back-pressuring the source.
 4. **Server** (`engine_server/server.clj`): `/stream` sends a `snapshot` SSE
-   event and then `samples`, `status`, `info`, and `recording` events, with
-   Transit JSON data. `GET /api/adapters`, `GET /api/recordings`,
-   `POST /api/source`, and `POST /api/recording` let the dashboard pick an
-   adapter or recording and record, and `GET /api/recordings/:name/series`
+   event and then `samples`, `status`, `info`, `recording`, and `position`
+   events, with Transit JSON data. `GET /api/catalog` gives the device
+   library's `catalog/catalog`, which the dashboard builds its tiles from.
+   `GET /api/adapters`, `GET /api/recordings`,
+   `POST /api/source`, `POST /api/recording`, and `POST /api/replay` let the
+   dashboard pick an adapter or recording, record, and pause or seek a
+   replay, and `GET /api/recordings/:name/series`
    gives a recording's values as time series for the map (the last one is
    cached; a long drive takes seconds to decode); `local-api-guard` limits them to local,
    Transit requests, and only paths from `scan-devices` and names from
@@ -101,16 +112,23 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    and server together.
 5. **Dashboard**: `stream.cljs` turns SSE events into `:stream/*` re-frame
    events and `http.cljs` calls the API. `events.cljs` stores samples keyed by
-   `:name`, not by PID number, signals keyed by `:signal`, and DID replies
-   keyed by `:did`, with the range each has read. `views.cljs`
+   `:name`, not by PID number, signals keyed by `:signal`, DID replies
+   keyed by `:did`, with the range each has read, and CAN frames keyed by
+   ID. It has five tabs (Dashboard, Signals, Bus, Map, Recordings) under one
+   source bar. The tiles, their labels, units, and groups come from
+   `/api/catalog` through `catalog.cljs`, not from lists in the views; a
+   name the catalog lacks goes in an Other group. `views.cljs`
    tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
+   The Bus tab (`bus_view.cljs`, `bus.cljs`) shows each CAN ID's latest frame
+   and which bits are new since a marked baseline.
    The map view (`map_view.cljs`) bins one value by two others, such as timing
    by RPM and load (MAF × 60 / RPM, g/rev), for a recording's series or for
    the stream, which `events.cljs` also appends to a log of the same shape.
    `series.cljs` holds the pure parts (that log, holding values on a 100 ms
-   grid, axes, binning) and is the one namespace with tests; its
+   grid, axes, binning, and the tiles' sparklines); its
    `event-points` repeats the device library's `series/event-points`, so
-   change both together.
+   change both together. `series.cljs`, `catalog.cljs`, and `bus.cljs` are
+   pure and are the namespaces with tests.
 
 The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The
@@ -141,6 +159,14 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
 - **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`. `start-recording!` writes `raw.bin` and `meta.edn` (first with `:in-progress? true`) for both `record` and the live source, and `list-recordings` describes a recordings folder.
 - **`config`:** `~/.tactrix-reader` (or `$TACTRIX_READER_HOME`) holds an optional hand-edited `config.edn` (`:recordings-dir`, `:vehicles` descriptions keyed by VIN or calibration ID) and, by default, `recordings/`. `resolve-recording-dir` treats a bare name as a folder there and anything with `/` as a path. Recordings are local data and are not committed.
 - **`source`:** the live and replay sources, built on `can` and `recording`.
+- **`catalog`:** `catalog` describes how to show every value, as plain data
+  with no functions: sections, groups, the primary values, and an entry for
+  each PID, inferred signal, and DID. PIDs get their label and group in
+  `pid-display`; inferred signals and DIDs carry theirs (`:label`, `:group`,
+  `:format`, `:raw?`, `:parts`, `:compare`) in `broadcast/inferred-signals`
+  and `uds/did-signals`, and `uds/did-notes` holds what is known about the
+  other DIDs. Give a new signal a `:label` and `:group` there; without them
+  it is labelled from its name and shown under Other.
 - **`series`:** `recording-series` decodes a recording, as the replay source does, into per-channel time series for the dashboard's map: keys `:pid/<name>`, `:signal/<signal>`, and `:did/x<hex>`, map values split into `key.part` channels, booleans as 1/0, other non-numbers as nil, and at most one point per channel per 100 ms, matching the hub's batches.
 
 The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`
