@@ -27,6 +27,12 @@ them, checked where it says so against the two DID drives
 (`2026-10-29-did-drive` and `2026-10-30-did-drive`) and the recordings
 above.
 
+Findings marked "2026-11-10" come from a pass over all seven recordings
+that tested what other people have published about related cars (see
+below) against this one. It found the clutch, reverse, torque, and several
+others, and overturned one earlier reading: the yaw rate and the lateral
+acceleration in `0D0` had been taken for each other.
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -37,6 +43,17 @@ written for the 2015-19 Outback and Legacy, plus the `371` definition from
 [`subaru_outback_2015.dbc`](https://github.com/commaai/opendbc/blob/master/opendbc/dbc/generator/subaru/subaru_outback_2015.dbc)
 in the same directory. Their IDs match this car's, but several scales and
 layouts don't; differences are noted below.
+
+Two more lists were used as hypotheses, and each claim taken from them was
+tested here before it was written down:
+
+- **RaceChrono:** the
+  [BRZ, 86, and FR-S notes](https://github.com/timurrrr/RaceChronoDiyBleDevice/blob/master/can_db/ft86.md)
+  from the RaceChrono DIY project, for the 2013-20 cars, which share this
+  bus layout.
+- **WRX list:** a
+  [list for a 2016 WRX](https://github.com/afreiday/2016-wrx-can-ids). It
+  numbers bytes from 1.
 
 Bytes are numbered from 0, bits from 0 at the least significant end, and
 `b5.6` means byte 5 bit 6. "LE" means little-endian. Bit positions written
@@ -51,28 +68,28 @@ second. The drive has the same 24 IDs at the same rates.
 | ID | Period | DLC | opendbc name | Contents on this car |
 |---|---|---|---|---|
 | `002` | 10 ms | 8 | Steering | **Steering angle**; counter, checksum |
-| `0D0` | 20 ms | 8 | G_Sensor | **Steering angle**; lateral and longitudinal acceleration; probably yaw rate |
+| `0D0` | 20 ms | 8 | G_Sensor | **Steering angle**; yaw rate; lateral and longitudinal acceleration; a value updated every 60 m |
 | `0D1` | 20 ms | 4 | Brake_Pedal | **Vehicle speed**; brake pressure |
-| `0D2` | 20 ms | 8 | Brake_2 | Constant in both recordings |
-| `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; counter |
+| `0D2` | 20 ms | 8 | Brake_2 | Constant, but for one pulse of b5.5 |
+| `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; distance counter; counter |
 | `0D4` | 20 ms | 8 | Wheel_Speeds | **Four wheel speeds** |
-| `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; off-throttle flags; counter, parity |
-| `141` | 10 ms | 8 | Engine | Engine speed; two load-like fields; gear and flags; parity |
-| `144` | 20 ms | 8 | CruiseControl | Brake pedal; probably engine-start and warm-up counters; parity |
-| `152` | 20 ms | 8 | Stalk | Brake light, parking brake; lighting bits in byte 7; counter, parity |
-| `154` | 1 s | 7 | | Brake light and parking brake again; any door open |
+| `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; clutch; off-throttle flags; counter, parity |
+| `141` | 10 ms | 8 | Engine | Engine speed; requested and actual torque; gear and flags; fuel cut; parity |
+| `144` | 20 ms | 8 | CruiseControl | Brake pedal; a curve of RPM; probably engine-start and warm-up counters; drive-cycle flag; parity |
+| `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; lighting bits in byte 7; counter, parity |
+| `154` | 1 s | 7 | | Brake light, parking brake, and reverse again; any door open |
 | `156` | 20 ms | 8 | | Nearly constant; byte 7 follows fuel level |
-| `282` | 50 ms | 8 | Dashlights | Driver's seatbelt; outside temperature; counter |
-| `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow |
-| `361` | 50 ms | 8 | | Gear; counter, parity |
-| `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque; counter |
-| `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque |
+| `282` | 50 ms | 8 | Dashlights | Fuel sender; driver's seatbelt; outside temperature; counter |
+| `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow; drive-cycle and steering-load flags |
+| `361` | 50 ms | 8 | | Gear; probably barometric pressure; counter, parity |
+| `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque, as in `371`; assist level and load flag; counter |
+| `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque and assist |
 | `372` | 100 ms | 8 | | Counter and parity bit in byte 1 |
 | `374` | 1 s, and on change | 8 | BodyInfo | Each door open; b4.7 is b3.7 XOR any door open |
 | `375` | 1 s, and on change | 8 | | Vehicle-stopped flag; each door open again; door-close pulse and timer |
 | `376` | 50 ms | 1 | | Constant `FA` |
-| `3D1` | 100 ms | 8 | Dash_State2 | Unexplained |
-| `660` | 500 ms | 8 | | 0.1 s timer in bytes 6-7 |
+| `3D1` | 100 ms | 8 | Dash_State2 | Outside temperature, finer than `282`'s |
+| `660` | 500 ms | 8 | | Ignition cycle counter in bytes 2-3; 0.1 s timer in bytes 4-7 |
 | `6FA` | 1 s | 5 | | Byte 0 low nibble is a counter |
 
 Bold signals are confirmed against polled PIDs or against each other; the
@@ -124,6 +141,14 @@ is within 1 count in about 95% of all of them. The pedal still isn't
 decoded. Why the first drive fitted a shallower line with a dead band isn't
 known.
 
+2026-11-10: byte 0 is the same byte as DID `10A6`, which
+[`uds/did-signals`](subaru-ssm.md) fits to PID `5A` as 0.178 × x percent
+(0.455 ÷ 2.55, the line above). In the two DID drives it equalled the DID
+reply in 92.5% and 96.9% of 741 replies and was within 2 counts in all but
+one. So it is the ECU's own pedal value, and PID `5A` is derived from it
+inexactly. `inferred-signals` decodes it on its own scale, as
+`:pedal-travel`, 0-100% of the byte's range.
+
 Nothing broadcast matches engine load (`04`), MAF (`10`), timing advance
 (`0E`), intake air temperature (`0F`), battery voltage (`42`), the fuel trims
 (`06`, `07`), or commanded lambda (`44`). Several fields track load closely
@@ -155,7 +180,7 @@ decoded:
 
 - **`141`'s engine speed (below):** it would report as PID `0C` too, and at
   idle it lags.
-- **The pedal:** see above.
+- **The pedal:** see above. It is an inferred signal, on its own scale.
 - **The four wheel speeds:** no PID reports a single wheel's speed.
 
 The IDs and layouts are this car's. On another vehicle the same IDs may carry
@@ -177,24 +202,31 @@ there with no other change.
 | Signal | Encoding | Value |
 |---|---|---|
 | `:steering-angle` | `002` bytes 0-1, big-endian, signed, 0.1° per bit | Degrees, positive for a left turn |
-| `:lateral-acceleration` | `0D0` bytes 2-3, signed LE, about 0.0073 g per bit | g, positive to the left |
-| `:yaw-rate` | `0D0` byte 6, signed, about 0.68°/s per bit | Degrees per second, positive to the left; reads about 1 at rest |
+| `:yaw-rate` | `0D0` bytes 2-3, signed LE, about 0.2865°/s (0.005 rad/s) per bit | Degrees per second, positive to the left |
+| `:lateral-acceleration` | `0D0` byte 6, signed, about 0.0204 g (0.2 m/s²) per bit | g, positive to the left; reads 0.02-0.04 at rest |
 | `:longitudinal-acceleration` | `0D0` byte 7, signed, about −0.0091 g per bit | g, positive when speeding up |
 | `:brake-pressure` | `0D1` byte 2 | Raw count, 0-18 |
 | `:brake` | `0D3` b2.5 | Boolean |
 | `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
-| `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7 |
+| `:pedal-travel` | `140` byte 0 ÷ 2.55 | Percent of the byte's range; full pedal is about 45% on PID `5A` |
+| `:clutch` | `140` b1.7 | Boolean, true while the clutch pedal is pressed |
+| `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7; reverse reads 1 |
+| `:requested-torque` | `141` bits 0-14 LE, minus 10000, 0.1 Nm per bit | Newton metres, what the pedal asks for |
+| `:engine-torque` | `141` bytes 2-3 LE, minus 10000, 0.1 Nm per bit | Newton metres, negative on the overrun |
+| `:fuel-cut` | `141` b7.3 | Boolean |
 | `:engine-starts` | `144` byte 3 | Raw count, 0-255; see [Counters and fuel level](#counters-and-fuel-level) |
 | `:warm-up-cycles` | `144` byte 4 | Raw count, 0-255 |
 | `:parking-brake` | `152` b6.3 | Boolean |
+| `:reverse` | `152` b6.2 | Boolean |
 | `:fuel-gauge` | `156` byte 7 | Raw count, about 2.4% of the tank each: 35 at 97% and 15 at 51% |
-| `:outside-temp` | `282` byte 4 minus 40, as °F | °C |
+| `:fuel-sender` | `282` bits 0-11 LE | Raw count that rises as the tank empties, about 8 for each 1%: 97 at 98% and 483 at 51% |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
-| `:fuel-flow` | `360` byte 1, about 0.185 g/s per bit | Grams per second |
+| `:fuel-flow` | `360` bytes 0-1 LE, about 0.00072 g/s per bit | Grams per second |
 | `:door-front-left` | `374` b3.0 | Boolean, true while the driver's door is open |
 | `:door-front-right` | `374` b3.1 | Boolean, true while the front passenger door is open |
 | `:door-rear-right` | `374` b3.2 | Boolean, true while the rear passenger-side door is open |
 | `:door-rear-left` | `374` b3.3 | Boolean, true while the rear driver-side door is open |
+| `:outside-temp` | `3D1` bits 0-14 LE, minus 3600, 0.2 °F per bit above −40 °F | °C |
 
 The left/right directions assume opendbc's wheel order. Move a signal to
 `broadcast-signals` only if it comes to match a polled PID.
@@ -217,7 +249,9 @@ Confirmed from the frames alone, in all frames of both recordings:
 - **`660` timer:** bytes 6-7, big-endian, count tenths of a second (10.00
   per second over the drive). The drive's first frame read 255 (25.5 s); the
   idle recording's read 21,575 (36 minutes). Time since ignition on fits
-  both, but wasn't checked against a known ignition time.
+  both, but wasn't checked against a known ignition time. Bytes 4-5 were 0
+  throughout, so the timer is probably bytes 4-7. Bytes 2-3 are a
+  [counter](#counters-and-fuel-level).
 
 ## Engine
 
@@ -239,16 +273,52 @@ Most of the time the value is `140`'s RPM: equal to the latest `140` frame in
 - Drive, cold idle in neutral after the start (1,840 rpm): unfiltered.
 
 So something else besides neutral, perhaps a warm engine or the idle speed
-controller's mode, switches the filter on. That condition is unknown.
+controller's mode, switches the filter on.
 
-### Load-like fields in `141`
+2026-11-10: the filter needs the car stopped, the pedal released, and a
+warm engine. Taking each moment in the five drives when the filtered and
+unfiltered values were at least 25 rpm apart, `141` was nearer the filtered
+one in 1,144 samples, and in 1,128 of those `375` b0.4 (vehicle stopped)
+was set, `140` byte 0 read 0, and coolant was at least 70 °C. The clutch
+and the gear don't matter. Those three aren't enough, though: in 1,319
+samples with all three, `141` was unfiltered, so the filter probably comes
+on a while after the stop. That delay wasn't measured.
+
+### Torque in `141`
 
 `141` bits 0-14 (opendbc Engine_Torque) and bits 16-27 (Wheel_Torque) both
 track engine load: r = 0.94 and 0.96 against PID `04`, ranging 9,372-12,032
 and 1,183-3,648. Neither is PID `04` itself, and the car supports no torque
-PID (`62`-`64`) to check them against, so their units are unknown. At idle,
-byte 2, the low byte of bits 16-27, happened to track timing advance; while
-driving it doesn't (r = 0.13).
+PID (`62`-`64`) to check them against. At idle, byte 2, the low byte of
+bits 16-27, happened to track timing advance; while driving it doesn't
+(r = 0.13).
+
+2026-11-10: both are engine torque in tenths of a newton metre, offset by
+10000. The second is bytes 2-3 whole: its top four bits always read 2,
+which is just where 9,375-11,850 falls, so both fields are 16-bit values
+around 10000 on one scale. Read as (raw − 10000) × 0.1 Nm:
+
+- **The peak fits the engine.** Over the five drives the first field
+  reaches 203 Nm and the second 185 Nm, both at 4,000-4,500 rpm. The FB20
+  is rated at 196 Nm at 4,200 rpm.
+- **The floor is the engine's drag.** With the pedal released both fields
+  read the same negative torque, which depends only on engine speed: −17 Nm
+  up to 1,000 rpm, −22 at 2,000, −30 at 3,000, −41 at 4,000, −53 at 5,000,
+  and −63 at 6,000.
+- **The car's mass comes out right.** In gear with the clutch out and the
+  brake off, torque × engine speed was fitted to mass × acceleration ×
+  speed plus drag, over 1 s windows (161-393 per drive). The mass came out
+  at 1,560-1,710 kg from either field in all five drives (r = 0.93-0.97).
+  The car weighs about 1,350 kg empty; a driver, the inertia of the wheels
+  and engine, and drivetrain loss make up the rest.
+
+The first field is what the pedal asks for and the second what the engine
+delivers. The first follows the pedal (r = 0.92-0.94 against DID `10A6`)
+and the second the air per revolution (r = 0.98 against DID `10A3`). At a
+warm idle in neutral the first reads −17.1 Nm, the drag at that speed, and
+the second +4.5 Nm; on the cold fast idle, −17.4 and +9.0. Which is
+"requested" and which "actual" is an inference from that, and so are the
+names `:requested-torque` and `:engine-torque` in `inferred-signals`.
 
 ### Pedal and fuel cut flags
 
@@ -256,7 +326,9 @@ driving it doesn't (r = 0.13).
   (Off_Throttle_2, bit 56) are set when the pedal is released. They switch at
   slightly different pedal positions, around 1-5%.
 - **`141` b5.7** is set at idle and during most deceleration with the pedal
-  released.
+  released. 2026-11-10: it means the pedal is released. It equals "`140`
+  byte 0 is 0" in 99.8% of the 282,381 frames in the five drives, and was
+  never set with the pedal pressed.
 - **`141` b6.6** is set during deceleration with the pedal released and the
   clutch out, and clears when the clutch goes in, even with the pedal still
   released. That suggests decel fuel cut, but it agrees with `360` byte 1
@@ -267,9 +339,17 @@ driving it doesn't (r = 0.13).
   also read 0 in 170 and 183 samples with the bit clear. `360` byte 1 is a
   poor check, because it also reads 0 at idle, where the fuel flow is below
   one count.
-- **`141` byte 7** takes `00`, `08`, or `10` during deceleration; unexplained.
+- **`141` byte 7** takes `00`, `08`, or `10` during deceleration.
+  2026-11-10: **b7.3 is fuel cut.** With byte 7 at `08`, the 16-bit fuel
+  flow in `360` (below) read exactly 0 in 42,720 of 42,861 frames (99.7%).
+  When the pedal is released at speed, byte 7 first reads `10` for
+  0.2-0.45 s, during which the flow falls to 0 (it read 0 in 54% of those
+  frames), and then `08` until fuel comes back. So b7.4 marks the cut
+  starting. b6.6 above is wider than either: it was set in 21,335 frames
+  with byte 7 at `00` and fuel flowing. `inferred-signals` decodes b7.3 as
+  `:fuel-cut`.
 
-### `360` byte 1: fuel flow
+### `360` bytes 0-1: fuel flow
 
 `360` byte 1 tracks fuel mass flow computed from polled PIDs,
 MAF / (14.7 × commanded lambda): r = 0.996 when load is above 0, about
@@ -278,6 +358,20 @@ PID `04` reads 0, which on this car happens during deceleration. The car
 doesn't support PID `5E` (fuel rate), so this can't be confirmed directly.
 Inference: it may be the fuel consumption the instrument cluster uses for
 its fuel economy display.
+
+2026-11-10: byte 0 is the low byte of the same value, so bytes 0-1,
+little-endian, are fuel flow 256 times as fine. Byte 0 alone looked random
+while driving because it wraps.
+
+- **Scale:** 0.00069-0.00073 g/s per bit against the same computed flow,
+  r = 0.992-0.997 in each of the five drives, with an intercept near 0.
+  That is about one cubic millimetre of petrol a second. `:fuel-flow` uses
+  0.00072.
+- **Idle:** it now reads at idle, where byte 1 was 0: 165-175 at a warm
+  idle (0.12 g/s), and 330-535 on the cold fast idle, where it follows the
+  computed flow with r = 0.985.
+- **Over a drive:** summed, it gives 0.25-0.83 litres for the five drives,
+  or 8.4-11.3 l/100 km, the most for the cold start on 2026-11-09.
 
 ### Gear
 
@@ -316,23 +410,101 @@ gear selected while the clutch is pressed or slipping, such as stopped in
 before `141` reads 7, and "in gear" about 1.5-2 s after `141` reads the
 new gear. So PID `65` isn't a copy of this field, and no single broadcast
 bit matches it: the closest, `141` b6.5 inverted, agrees in 87% and 90% of
-replies.
+replies. Two bits together do; see the clutch, next.
+
+### Clutch and reverse
+
+2026-11-10. Both were found from other people's lists and then tested
+here.
+
+**`140` b1.7 is the clutch switch.** The RaceChrono notes name it. PID `65`
+says "in gear" exactly when this bit is clear and `141`'s gear isn't 7: in
+99.7%, 99.85%, 99.96%, and 99.75% of the 8,061 PID `65` replies in the four
+drives that polled it. The few misses are at changes. The bit is clear in
+every frame of both parked recordings, when the pedal wasn't touched, and
+it changes a median 0.12-0.26 s before the next PID `65` reply shows it,
+which is about the wait for that reply. It is a switch, not a position: it
+doesn't say how far the pedal is down, and it is set through most of
+pulling away. `inferred-signals` decodes it as `:clutch`.
+
+**`152` b6.2 is reverse.** The wheel speeds have no sign, but the yaw
+sensor does. Going forwards, the yaw rate in `0D0` has the same sign as the
+yaw rate worked out from the rear wheels in 4,386 of 4,395 samples taken
+while turning at 7-54 km/h. With this bit set it has the opposite sign in
+all 2,364. The steering angle gives the same answer. The bit was set eight
+times in the five drives, for 7-22 s each: at the end of every drive,
+parking, and in `2026-10-30-did-drive` also backing out at the start and
+once mid-drive. `154` b6.1 follows it. In reverse `141`'s gear reads 1 (in
+all but 11 of 11,676 frames) and `361`'s reads 0 or 1.
+`inferred-signals` decodes the bit as `:reverse`; `:gear` is left as it is,
+so it shows 1.
 
 ### Unexplained engine bytes
 
 - **`360` byte 0** (165-175 at idle) rose and fell with RPM at idle
   (r = 0.80), but not while driving (r = −0.07, at most 0.29 against any
-  PID).
+  PID). 2026-11-10: it is the low byte of the
+  [fuel flow](#360-bytes-0-1-fuel-flow).
 - **`144` byte 2** rises with RPM (r = 0.86 while driving) without matching
-  it. At idle it mirrored `141` byte 2.
+  it. At idle it mirrored `141` byte 2. 2026-11-10: it depends on engine
+  speed alone. With the median for each 100 rpm taken away, what is left
+  stays within −1 to +2 counts in 90% of frames. It reads 57 with the
+  engine stopped, 60-63 at a warm idle, 80 at 1,000-1,500 rpm, 96 at 2,000,
+  106 at 3,000, 114 at 4,000, peaks at 115 around 4,500, and falls to 105
+  by 6,000 (the spread was measured in `2026-10-30-did-drive`). That is the
+  shape of a full-load torque curve, at a little over half the newton
+  metres the [torque](#torque-in-141) fields reach. What it is for is
+  unknown.
 - **`361`:** byte 7 rose from 115 to 157 over the first 6 minutes of the
-  drive and then held at 157, but read 51-52 during the warm idle
+  drive and then held at 157, but read 81-82 during the warm idle
   recording, so it isn't a temperature. In the later recordings it stayed
   within 74-127, 122-137, 139-145, 129-145, and 128-130, with no match.
-  Byte 5's high nibble plus byte 6 remain a noisy value with no PID match.
-- **`3D1` byte 0** varies widely and slowly; no match.
-- **`141` bytes 0-1** were a constant `65 26` at idle; they are the load-like
-  field above.
+  2026-11-10: it rises while driving and falls slowly at idle, and it
+  started a cold drive at 139, so it carries over. It isn't coolant,
+  catalyst temperature, or an average fuel economy (a fit of distance over
+  fuel doesn't hold). Byte 5's high nibble plus byte 6, as 12 bits, are
+  noise centred on 2048 (mean 2,034-2,058, standard deviation 73-122),
+  which follows nothing else on the bus.
+- **`361` byte 3 is probably barometric pressure.** 2026-11-10. It read
+  222, 221, 218, 218, 216, 215, and 216 in the seven recordings, moving by
+  a count or two within a drive. In the two 2026-11-09 drives it follows
+  PID `33` (r = 0.83 and 0.81), stepping down a count when the PID stepped
+  from 100 to 99 kPa and back up with it. PID `33` read 100-101 kPa at 218
+  and 99-100 at 215-216, so a count is about half a kilopascal. The first
+  two recordings didn't poll PID `33`.
+- **`3D1` byte 0** varies widely and slowly; no match. 2026-11-10: it is
+  the [outside temperature](#outside-temperature-in-3d1).
+- **`141` bytes 0-1** were a constant `65 26` at idle; they are the
+  requested torque above.
+
+### Drive-cycle flag
+
+2026-11-10. `360` b5.7 and `144` b1.1 set together, once, in two of the
+drives, and stayed set to the end. Inference: they mark the conditions
+OBD-II calls the general denominator, which a drive meets once the engine
+has run for 600 s, the car has spent 300 s at 25 mph (40 km/h) or more, and
+it has idled for 30 s on end.
+
+| Recording | Flag | Since ignition on | At 40.2 km/h or more | First 30 s idle |
+|---|---|---|---|---|
+| `2026-10-30-did-drive` | Set at 665.7 s | 692 s | 302.6 s when it set | 470 s |
+| `2026-11-09-150052` | Set at 572.5 s | 600.6 s when it set | 300 s reached at 505 s | 92 s |
+| `2026-10-28-drive` | Never | 581 s at the end | 383 s | None |
+| `2026-11-09-144943` | Never | 587 s at the end | 250 s | 407 s |
+| `2026-10-29-did-drive` | Never | 953 s at the end | 146 s in the recording | None |
+
+"Since ignition on" is from [`660`'s timer](#message-structure), and the
+time at speed is counted from `0D1`. In the first drive the flag set while
+accelerating through 50 km/h, with nothing else happening, 2.6 s of
+time-at-speed after the count passed 300 s. Counting from 40.5 km/h
+instead, it set 0.9 s after, and the second drive still reaches 300 s (at
+505 s, with half a second to spare over the whole drive). So the ECU's
+threshold is probably a little above 40.2 km/h on this speed signal. In
+the second drive the last condition met was the 600 s. In the three drives
+where the flag never set, at least one condition was never met; what
+happened in the 11 minutes before `2026-10-29-did-drive` began isn't
+known. Two events is not many, and the idle condition was never the last
+one met, so that part is untested.
 
 ## Speed, brakes, and chassis
 
@@ -349,17 +521,57 @@ replies.
   matches the rate of change of wheel speed with r = −0.96; the offset
   includes road grade. opendbc reads bytes 6-7 together, which doesn't fit:
   byte 6 is a separate signal.
-- **Probably yaw rate:** `0D0` byte 6, signed. Over 0.5 s windows it matches
-  the yaw rate computed from the rear wheel speed difference with r = 0.83,
-  about 0.7°/s per bit. It reads 1-2 at rest, which explains its 1-or-2
+- **Yaw rate:** `0D0` bytes 2-3, signed LE (byte 3 is only ever a sign
+  extension), about 0.27°/s per bit (0.26-0.33 across speeds and drives),
+  positive to the left.
+- **Lateral acceleration:** `0D0` byte 6, signed, about 0.2 m/s² per bit
+  (0.18-0.26), positive to the left. It reads 1-2 at rest, which explains its 1-or-2
   flicker at idle.
-- **Lateral acceleration:** `0D0` bytes 2-3, signed LE (byte 3 is only ever
-  a sign extension), about 0.072 m/s² per bit. It matches speed × yaw rate
-  with r = 0.87 over 0.5 s windows.
+- **Distance:** `0D3` byte 4's top six bits count up as the car moves and
+  wrap, and its low two bits are always 0. 2026-11-10: a count is 0.1959 m
+  in all five drives, against `0D1`'s speed summed over each drive
+  (2.9-9.1 km), and over 2 s windows the two agree with r of at least
+  0.99997. At most 4 counts pass between frames. opendbc calls the byte
+  Speed_Counter.
 
-The yaw rate here assumes opendbc's wheel order (FL, FR, RL, RR) and a
-1.51 m track width. Both are assumptions, so the yaw-rate and lateral scales
-are approximate.
+**These two were first read the other way round,** with bytes 2-3 as
+lateral acceleration and byte 6 as yaw rate. While driving the two
+quantities rise and fall together, since lateral acceleration is speed ×
+yaw rate, and the first drive alone couldn't separate them (r = 0.87 and
+0.83). 2026-11-10: what separates them is speed. Over 0.5 s windows above
+7 km/h in the five drives:
+
+| | Per rad/s of yaw rate, at 7-29, 29-58, and over 58 km/h | Per m/s² of speed × yaw rate, in the same bands |
+|---|---|---|
+| Bytes 2-3 | 172-213, 210-219, 194-214 | 35-39, 17-24, 8-10 |
+| Byte 6 | 25-29, 44-59, 82-124 | 4.8-5.6, 4.7-5.4, 3.8-4.6 |
+
+Bytes 2-3 keep one scale against yaw rate at every speed and byte 6 keeps
+one against lateral acceleration, and neither does against the other.
+Bytes 2-3 match the yaw rate from the rear wheels with r = 0.992 and 0.998
+in two drives (0.84-0.93 in the other three). The RaceChrono notes give
+the same layout, with 0.005 rad/s (0.2865°/s) and 0.2 m/s² per bit, and
+`inferred-signals` uses those: they are round numbers inside the range
+measured here. opendbc's Lateral is these bytes 2-3, so its name doesn't
+fit this car.
+
+The yaw rate from the wheels assumes opendbc's wheel order (FL, FR, RL, RR)
+and a 1.51 m track width. Both are assumptions, so the measured scales are
+approximate.
+
+**`0D0` bytes 4-5** hold a value that changes once every 60 m travelled
+(2026-11-10: 536 changes, 60.0-60.7 m apart in 80% of them) and reads 0
+until the car has moved. Its low 10 bits, signed, range −78 to 17, and its
+top 6 bits 1 to 18. Neither follows the yaw rate, the accelerations, the
+steering angle, or the differences between the wheel speeds (r under 0.5);
+both tend to be larger at speed (r = 0.53). Unexplained.
+
+**`0D2` b5.5** was set once in the seven recordings, in
+`2026-11-09-144943` from 438.5 s to 439.5 s: it set as the brake was
+released at a standstill in 1st with the clutch down, and cleared a second
+later as the car began to move. That is how hill-start assist would look,
+which is a guess from one event; the longitudinal sensor read about
+0.3 m/s² at that stop, a slight slope.
 
 ## Steering
 
@@ -391,6 +603,27 @@ byte 4 equalled `371` byte 4 in 99% of frames; while driving it does in only
 12%, so `370` isn't simply a slower copy. `370`'s bits 29-31, always 0 at
 idle, do move while driving.
 
+2026-11-10, in the five drives:
+
+- **`371` bits 0-9** (opendbc Steering_Motor_Flat) are the size of
+  Steer_Torque_Output, without its sign: r = 0.992-0.999. So they are how
+  hard the motor is assisting.
+- **`370` bits 29-39** are `371`'s Steer_Torque_Sensor, sent every 50 ms
+  instead of every 20: r = 0.997-0.999 against the latest `371` frame. The
+  bytes seldom match exactly while driving because the two frames are sent
+  at different moments.
+- **`370` byte 0** is the assist again at about half scale (0.47-0.53 ×
+  `371` bits 0-9, r = 0.86-0.91), up to 255.
+- **`370` b1.0 and `360` b6.1** set together, mostly within 50 ms of each
+  other, when the assist is high: `371` bits 0-9 were at least 227
+  whenever `370` b1.0 was set. That happened only in the three latest
+  drives, at a standstill or walking pace while parking, for up to a
+  couple of seconds each time. Inference:
+  the steering tells the engine about its load, and the engine answers,
+  perhaps to hold the idle up.
+
+The units of all of these are unknown, so none is decoded.
+
 ## Body
 
 - **Parking brake:** `152` b6.3 and `154` b6.3 (always equal) are set at
@@ -408,7 +641,12 @@ idle, do move while driving.
   temperature in °F. It read 108 at the start (68 °F, 20 °C) when PID `46`
   read 21 °C, and 90 (50 °F, 10 °C) when PID `46` read 10 °C. `282` byte 3
   follows byte 4 more slowly, like a dashboard display that only updates
-  while moving. Inference: no PID reports °F to compare against.
+  while moving. Inference: no PID reports °F to compare against. `3D1`
+  carries the same reading [more finely](#outside-temperature-in-3d1).
+- **Passenger's seatbelt:** the WRX list has `282` byte 5's low two bits as
+  the two seatbelts, which makes b5.1, next, the passenger's. Nobody sat
+  there in any recording, so that is untested, and the bit clearing itself
+  below doesn't look like a buckle.
 - **Vehicle stopped:** `375` b0.4 sets when wheel speed falls to about
   3 km/h and clears above about 5 km/h, at every stop in the drive.
 - **Engine start:** `0D3` b1.6 is set from 4.6 s to 5.7 s, while the starter
@@ -422,15 +660,15 @@ that carry over from one recording to the next. All three readings are
 inferences from the values below; nothing polled reports the same thing
 except fuel level.
 
-| Recording | `144` byte 3 | `144` byte 4 | `156` byte 7 | Fuel level (PID `2F`) |
-|---|---|---|---|---|
-| `2026-10-24-idle` | `03` | `02` | 24 | 70% |
-| `2026-10-28-drive` | `23`, then `24` | `0B`, then `0C` | 35, then 34 | 97%, falling to 94% |
-| `2026-10-29-did-drive` | `2D` | `0E` | 29 | 87-89% |
-| `2026-10-30-did-drive` | `2F` | `0F` | 28 | 82%, falling to 78% |
-| `2026-11-09-144943` | `65` | `23`, then `24` | 17, then 16 | 57%, falling to 55% |
-| `2026-11-09-150052` | `66` | `24` | 16 | 55%, falling to 53% |
-| `2026-11-09-194644` | `6A` | `24` | 15 | 51% |
+| Recording | `144` byte 3 | `144` byte 4 | `156` byte 7 | Fuel level (PID `2F`) | `660` bytes 2-3 | `282` bits 0-11, median |
+|---|---|---|---|---|---|---|
+| `2026-10-24-idle` | `03` | `02` | 24 | 70% | `6E70` | 308 |
+| `2026-10-28-drive` | `23`, then `24` | `0B`, then `0C` | 35, then 34 | 97%, falling to 94% | `6E91` | 97 |
+| `2026-10-29-did-drive` | `2D` | `0E` | 29 | 87-89% | `6E9B` | 179 |
+| `2026-10-30-did-drive` | `2F` | `0F` | 28 | 82%, falling to 78% | `6E9D` | 181 |
+| `2026-11-09-144943` | `65` | `23`, then `24` | 17, then 16 | 57%, falling to 55% | `6ED4` | 444 |
+| `2026-11-09-150052` | `66` | `24` | 16 | 55%, falling to 53% | `6ED5` | 452 |
+| `2026-11-09-194644` | `6A` | `24` | 15 | 51% | `6ED9` | 483 |
 
 - **`144` byte 3 is probably a count of engine starts.** It rises from each
   recording to the next, by 1 between the two drives made back to back on
@@ -456,6 +694,36 @@ except fuel level.
 `inferred-signals` decodes the three as `:engine-starts`, `:warm-up-cycles`,
 and `:fuel-gauge`, each as its raw byte.
 
+2026-11-10, the last two columns:
+
+- **`660` bytes 2-3 probably count ignition cycles.** Big-endian, they
+  rise from each recording to the next by 33, 10, 2, 55, 1, and 4, and
+  never within one. `144` byte 3 rose by 33 (counting its step in the
+  first drive), 9, 2, 54, 1, and 4, so the two keep step and `660` gained
+  two more: switching the ignition on without starting the engine would do
+  that. It read 28,272 in the first recording. Bytes 0-1 are always `FF FF`.
+- **`282` bits 0-11 are the fuel sender, undamped.** Byte 0 plus the low
+  nibble of byte 1, little-endian. The value rises as the tank empties, by
+  about 8.3 counts for each 1% on PID `2F` across the seven recordings.
+  Parked it stays within 8 and 30 counts (304-312, 468-498); driving it
+  swings by a hundred or so as the fuel moves, rising under acceleration, which
+  is what first looked like a flag in byte 1's low bits. `156` byte 7 is
+  the same level damped, in steps 20 times as coarse. `inferred-signals`
+  decodes it as `:fuel-sender`, the raw count.
+
+### Outside temperature in `3D1`
+
+2026-11-10. `3D1` bytes 0-1, little-endian, are `282` byte 4's outside
+temperature five times as fine: 3600 + 5 × byte 4, fitted over 1,476
+samples from all seven recordings as slope 4.999 and intercept 3600.0
+(r = 0.9987), with byte 4 from 90 to 126 (50-86 °F). So a count is 0.2 °F,
+and the temperature is (value − 3600) ÷ 5 − 40 in °F, or
+(value − 3600) ÷ 9 − 40 in °C. The values seen run from 4,047 to 4,229,
+which is why byte 1 flickered between `10` and `0F`: the reading was
+crossing 4,096. `inferred-signals` takes `:outside-temp` from here. It
+leaves out bit 15, which opendbc has as a units flag (metric or imperial)
+and which was never set; whether the scale changes with it is unknown.
+
 ### Lighting bits in `152` byte 7
 
 2026-11-09. `152` byte 7 is opendbc's headlights and wipers byte. Its bits
@@ -469,7 +737,17 @@ light switch wasn't noted in any recording, so this is untested.
 b7.6 pulsed eight times in the two 2026-11-09 drives, for 1.30-1.38 s each
 time, while moving, and never in the others. Nothing else on the bus
 changes with it. A pulse of fixed length could be a single wiper sweep;
-that is a guess.
+that is a guess. 2026-11-10: opendbc names this bit Wiper, and the WRX
+list has `C0` in this byte for wipers on, so two other cars agree. It is
+still untested here.
+
+2026-11-10: `375` b3.3 goes with the lights. It was set throughout the
+five recordings in which `152` byte 7 read `0C`, and clear throughout the
+two in which it read `00` or `02`. It never changed within a recording, so
+that is seven agreeing readings, not a test. The WRX list reads this byte
+of `152` as `80` with nothing on, plus `04` for parking lights, `0C` for
+headlights, and `18` for high beams, which fits the light-switch reading
+above; this car's byte has no `80`.
 
 ### Doors
 
@@ -532,7 +810,8 @@ beat.
   or faster flashes at a blinker's rate in `2026-10-30-did-drive` or
   `2026-11-09-150052` either (runs of 0.25-0.55 s; only counter bits
   qualify). Unless no blinker was used, they aren't in those messages. When
-  one was used wasn't noted.
+  one was used wasn't noted. The WRX list has them in `152` byte 7 (`10`
+  left, `20` right); those two bits were never set here either.
 - **Headlights and wipers** (`152` byte 7): see
   [Lighting bits](#lighting-bits-in-152-byte-7); the readings there are
   untested.
@@ -542,11 +821,25 @@ beat.
   [Counters and fuel level](#counters-and-fuel-level); the readings there
   are inferences.
 - **What switches on `141`'s RPM filter** (see
-  [`141` engine speed](#141-engine-speed)): the later drives were not
-  conclusive. `375` b0.4 (vehicle stopped) is the closest single bit, at
-  82-84%.
-- **`3D1` byte 1** flickered between `10` and `0F` around 67-71 s.
-- **`0D2`** and **`376`**: constant.
+  [`141` engine speed](#141-engine-speed)): it needs the car stopped, the
+  pedal released, and a warm engine, and then something more, probably
+  time.
+- **`361` byte 7** and the 12 bits before it (see
+  [Unexplained engine bytes](#unexplained-engine-bytes)), and what
+  **`144` byte 2**'s curve of RPM is for.
+- **`0D0` bytes 4-5,** updated every 60 m, and **`0D2` b5.5,** seen once
+  (see [Speed, brakes, and chassis](#speed-brakes-and-chassis)).
+- **`370` b7.7** is clear after the ignition comes on and sets once: 31 s
+  after it (as the engine started), 83 s, and 226 s in the three
+  recordings that caught it, flickering as it does in the last two.
+  **`370` b3.6** flickers through every drive.
+- **`140` b7.5** was set once, for 1.9 s, cruising at 110 km/h in
+  `2026-11-09-144943`. Nothing else changed with it.
+- **`141` b6.5** after a shift (see [Gear](#gear)): the clutch bit doesn't
+  explain it.
+- **The drive-cycle flag, barometric pressure, and the ignition counter**
+  are readings that fit, not tested ones.
+- **`376`**: constant.
 
 ## Next recording
 
@@ -554,13 +847,17 @@ A recording with these done one at a time, and a note of when, would settle
 most of what's left:
 
 1. Parked, engine running: the wheel straight ahead, then at full lock each
-   way; the hatch opened and closed; each blinker, the light switch in each
-   position, the high beams, and the wipers (one sweep, then on); the
-   parking brake on and off with the lights off; the doors locked and
-   unlocked; the clutch pressed and released in neutral; and a few throttle
-   blips.
+   way (which should also set the steering-load flags); the hatch opened
+   and closed; each blinker, the light switch in each position, the high
+   beams, and the wipers (one sweep, then on); the parking brake on and off
+   with the lights off; the doors locked and unlocked; the clutch pressed
+   and released in neutral, and reverse selected and left, to see the
+   clutch and reverse bits with nothing else going on; the passenger's
+   seatbelt buckled and unbuckled; and a few throttle blips.
 2. A cold start left to idle past 71 °C, to test the warm-up counter in
    `144` byte 4 without driving.
+3. The ignition switched on and off without starting the engine, to see
+   `660`'s counter step alone, and a start on a hill, for `0D2` b5.5.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear

@@ -49,14 +49,20 @@
 (defn- wheel-speed [[low high]]
   (round-to 1 (* 0.05625 (+ low (* 256 high)))))
 
+(defn- torque
+  "A torque from `141`: tenths of a newton metre, offset by 10000."
+  [raw]
+  (round-to 1 (/ (- raw 10000) 10.0)))
+
 (def inferred-signals
   "Signals the project's 2015 Impreza broadcasts that were identified from how
   they behave, in the 2026-10-28-drive recording and, for the doors,
-  2026-11-09-194644, but match no mode 01 PID, by CAN ID. The counters and
-  the fuel gauge were identified by comparing all seven reference
-  recordings. Scales marked approximate come from fits against quantities
-  derived from other signals; see docs/can-broadcast.md. Unlike `broadcast-signals`,
-  these are not confirmed.
+  2026-11-09-194644, but match no mode 01 PID, by CAN ID. The counters, the
+  fuel gauge, and the clutch, reverse, torque, and fuel cut signals were
+  identified by comparing all seven reference recordings. Scales marked
+  approximate come from fits against quantities derived from other signals;
+  see docs/can-broadcast.md. Unlike `broadcast-signals`, these are not
+  confirmed against the PID that reports the same thing.
 
   Decoding uses `:signal`, `:unit`, `:byte-count`, and `:decode`. The rest is
   for `catalog/catalog`, which tells a display how to show each signal:
@@ -67,13 +73,16 @@
            :label "Steering angle" :group :driver :format :steering
            ;; Positive is a left turn, assuming opendbc's wheel order in 0D4.
            :decode (fn [[high low]] (round-to 1 (* 0.1 (signed-word high low))))}]
-   0x0D0 [;; Approximate scales. Positive is to the left and forwards.
-          {:signal :lateral-acceleration :unit :g :byte-count 4
-           :label "Lateral acceleration" :group :motion
-           :decode (fn [[_ _ low high]] (round-to 2 (* 0.00734 (signed-word high low))))}
-          {:signal :yaw-rate :unit :degrees-per-second :byte-count 7
+   0x0D0 [;; Approximate scales. Positive is to the left and forwards. The
+          ;; yaw rate is 0.005 rad/s per bit and the lateral acceleration
+          ;; 0.2 m/s2 per bit, the scales the RaceChrono BRZ notes give, which
+          ;; the fits against wheel speeds agree with.
+          {:signal :yaw-rate :unit :degrees-per-second :byte-count 4
            :label "Yaw rate" :group :motion
-           :decode #(round-to 1 (* 0.68 (signed-byte (nth % 6))))}
+           :decode (fn [[_ _ low high]] (round-to 1 (* 0.2865 (signed-word high low))))}
+          {:signal :lateral-acceleration :unit :g :byte-count 7
+           :label "Lateral acceleration" :group :motion
+           :decode #(round-to 2 (* 0.0204 (signed-byte (nth % 6))))}
           {:signal :longitudinal-acceleration :unit :g :byte-count 8
            :label "Acceleration" :group :motion
            :decode #(round-to 2 (* -0.00907 (signed-byte (nth % 7))))}]
@@ -90,12 +99,29 @@
            :decode (fn [data]
                      (zipmap [:front-left :front-right :rear-left :rear-right]
                              (map wheel-speed (partition 2 data))))}]
+   0x140 [;; Byte 0 is the pedal, 0-255, the same byte as DID 10A6. Full
+          ;; travel is about 45% on PID 5A.
+          {:signal :pedal-travel :unit :percent :byte-count 1
+           :label "Pedal travel" :group :driver
+           :decode #(round-to 1 (/ (nth % 0) 2.55))}
+          {:signal :clutch :byte-count 2 :decode #(bit-test (nth % 1) 7)
+           :label "Clutch" :group :driver :format :pressed-released}]
    0x141 [{:signal :gear :byte-count 7
            :label "Gear" :group :driver :format :gear
-           ;; 1-5, or 7 with no gear engaged.
+           ;; 1-5, or 7 with no gear engaged. Reverse reads 1.
            :decode #(let [gear (bit-and (nth % 6) 0x07)]
                       (cond (<= 1 gear 5) gear
-                            (= 7 gear) :neutral))}]
+                            (= 7 gear) :neutral))}
+          ;; What the pedal asks for, and what the engine delivers. Both
+          ;; read the engine's drag, -17 to -63 Nm, with the pedal released.
+          {:signal :requested-torque :unit :newton-metres :byte-count 2
+           :label "Requested torque" :group :engine
+           :decode (fn [[low high]] (torque (+ low (* 256 (bit-and high 0x7F)))))}
+          {:signal :engine-torque :unit :newton-metres :byte-count 4
+           :label "Engine torque" :group :engine
+           :decode (fn [[_ _ low high]] (torque (+ low (* 256 high))))}
+          {:signal :fuel-cut :byte-count 8 :decode #(bit-test (nth % 7) 3)
+           :label "Fuel cut" :group :engine :format :on-off}]
    ;; Counts that carry over between drives: byte 3 steps when the engine
    ;; starts, and byte 4 once coolant reaches 71 C after a cold start.
    0x144 [{:signal :engine-starts :byte-count 4 :decode #(nth % 3)
@@ -103,22 +129,26 @@
           {:signal :warm-up-cycles :byte-count 5 :decode #(nth % 4)
            :label "Warm-up cycles" :group :counters}]
    0x152 [{:signal :parking-brake :byte-count 7 :decode #(bit-test (nth % 6) 3)
-           :label "Parking brake" :group :driver :format :on-off}]
+           :label "Parking brake" :group :driver :format :on-off}
+          {:signal :reverse :byte-count 7 :decode #(bit-test (nth % 6) 2)
+           :label "Reverse" :group :driver :format :on-off}]
    ;; A raw count that follows fuel level (PID 2F), at about 2.4% of the tank
    ;; per count: 35 at 97% and 15 at 51%.
    0x156 [{:signal :fuel-gauge :byte-count 8 :decode #(nth % 7)
            :label "Fuel gauge" :group :counters :raw? true}]
-   0x282 [{:signal :outside-temp :unit :celsius :byte-count 5
-           :label "Outside" :group :engine
-           ;; Byte 4 is degrees Fahrenheit plus 40.
-           :decode #(round-to 1 (/ (* 5 (- (nth % 4) 72)) 9.0))}
+   0x282 [;; The tank sender before the gauge's damping, so it moves as the
+          ;; fuel does. It rises as the tank empties, by about 8 counts for
+          ;; each 1% of the tank: 97 at 98% and 483 at 51%.
+          {:signal :fuel-sender :byte-count 2
+           :label "Fuel sender" :group :counters :raw? true
+           :decode (fn [[low high]] (+ low (* 256 (bit-and high 0x0F))))}
           {:signal :driver-seatbelt :byte-count 6
            :label "Driver's seatbelt" :group :driver :format :keyword
            :decode #(if (bit-test (nth % 5) 0) :unbuckled :buckled)}]
-   0x360 [;; Approximate scale.
+   0x360 [;; Approximate scale: a count is about a cubic millimetre a second.
           {:signal :fuel-flow :unit :grams-per-second :byte-count 2
            :label "Fuel flow" :group :engine
-           :decode #(round-to 2 (* 0.185 (nth % 1)))}]
+           :decode (fn [[low high]] (round-to 3 (* 0.00072 (+ low (* 256 high)))))}]
    ;; True while the door is open. Front left is the driver's door.
    0x374 [{:signal :door-front-left :byte-count 4 :decode #(bit-test (nth % 3) 0)
            :label "Driver's door" :group :doors :format :open-closed}
@@ -127,7 +157,14 @@
           {:signal :door-rear-right :byte-count 4 :decode #(bit-test (nth % 3) 2)
            :label "Rear right" :group :doors :format :open-closed}
           {:signal :door-rear-left :byte-count 4 :decode #(bit-test (nth % 3) 3)
-           :label "Rear left" :group :doors :format :open-closed}]})
+           :label "Rear left" :group :doors :format :open-closed}]
+   ;; Bytes 0-1 are 3600 plus the temperature in fifths of a degree
+   ;; Fahrenheit above -40, five times as fine as `282` byte 4. Bit 15 is
+   ;; opendbc's units flag, which this car never set.
+   0x3D1 [{:signal :outside-temp :unit :celsius :byte-count 2
+           :label "Outside" :group :engine
+           :decode (fn [[low high]]
+                     (round-to 1 (- (/ (- (+ low (* 256 (bit-and high 0x7F))) 3600) 9.0) 40)))}]})
 
 (defn signal-samples
   "Decodes a received message carrying signals in `signals` (by default

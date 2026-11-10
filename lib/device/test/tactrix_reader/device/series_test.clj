@@ -53,7 +53,7 @@
       (testing "neutral ends the gear held from before"
         (is (= {:t [200 300] :v [3 nil]} (:signal/gear series))))
       (testing "a channel that never had a number is left out"
-        (is (contains? series :signal/outside-temp))
+        (is (contains? series :signal/fuel-sender))
         (is (not (contains? series :signal/driver-seatbelt))))
       (is (= {:unit :rpm} (:pid/engine-rpm channels)))
       (is (= {:unit :grams-per-revolution :name :air-per-revolution} (:did/x10A3 channels)))

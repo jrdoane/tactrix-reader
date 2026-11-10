@@ -190,6 +190,11 @@
       (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
       ((:stop! source)))
     (is (= [{:type :signal :signal :gear :value 5 :unit nil :can-id 0x141 :timestamp-us 1000000}
+            {:type :signal :signal :requested-torque :value 30.2 :unit :newton-metres
+             :can-id 0x141 :timestamp-us 1000000}
+            {:type :signal :signal :engine-torque :value 26.5 :unit :newton-metres
+             :can-id 0x141 :timestamp-us 1000000}
+            {:type :signal :signal :fuel-cut :value false :unit nil :can-id 0x141 :timestamp-us 1000000}
             {:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 1001000}]
            (remove (comp #{:status} :type) @events)))
     (is (= 1 (:sample-count (first @events))))))

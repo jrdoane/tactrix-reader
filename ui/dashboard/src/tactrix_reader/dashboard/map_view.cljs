@@ -106,11 +106,11 @@
 
 (defn- diverging-center
   "The value a parameter is colored around, or nil to color it from its lowest
-  to highest: 0 for trims and signed motion, and 1 for lambda."
+  to highest: 0 for trims, signed motion, and torque, and 1 for lambda."
   [key unit]
   (let [key-name (name key)]
     (cond
-      (re-find #"fuel-trim|acceleration|steering|yaw" key-name) 0
+      (re-find #"fuel-trim|acceleration|steering|yaw|torque" key-name) 0
       (= :lambda unit) 1)))
 
 (defn- color-scale

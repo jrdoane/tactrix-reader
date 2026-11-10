@@ -50,6 +50,7 @@
                 :else "0.0°")
    :on-off on-off
    :open-closed open-closed
+   :pressed-released #(if % "pressed" "released")
    :keyword name
    :monitor-status (fn [{:keys [mil-on? dtc-count monitors]}]
                      (str "check engine " (if mil-on? "on" "off")

@@ -345,6 +345,11 @@ and the dashboard shows each beside the value it was matched against:
 | `10A1` | Mass airflow (PID `10`) | g/s = (0.0177 × x + 0.186)⁴, from the second drive | 0.995 against MAF^¼ |
 | `10B2` | ECU voltage (PID `42`) | V = 0.05 × x + 10.73 once the voltage settles, from the second drive | 0.92 |
 
+Two of these also appear in the car's own traffic (found 2026-11-10; see
+[broadcast CAN traffic](can-broadcast.md)): `10A6` is the same byte as
+`140` byte 0, the pedal, and `10A3` follows `141`'s engine torque
+(r = 0.98).
+
 These change, but match no PID. What they are is unknown; the notes are
 inferences:
 
