@@ -45,7 +45,7 @@
        (assoc base :ok? false :error :service-not-read-only :service service)
 
        :else
-       (iso15765/iso15765-request path (:bytes request) base :obd-request-failed opts)))))
+       (iso15765/iso15765-request device-or-path (:bytes request) base :obd-request-failed opts)))))
 
 (defn read-pid
   "Reads and decodes one mode 01 PID, given as a number such as `0x0C` or a
@@ -66,55 +66,62 @@
 
 (defn read-supported-pids
   "Reads the supported-PID bitmaps starting at PID 00, following each bitmap's
-  next-range bit. Sends traffic on the vehicle bus."
+  next-range bit, over one ISO15765 channel. Sends traffic on the vehicle bus."
   ([device-or-path]
    (read-supported-pids device-or-path {}))
   ([device-or-path opts]
-   (loop [base 0x00
-          supported []]
-     (let [result (read-pid device-or-path base opts)
-           supported (into supported (:value result))
-           next-base (+ base 0x20)]
-       (cond
-         (not (:ok? result))
-         (assoc result :supported supported)
+   (iso15765/with-channel
+    device-or-path opts
+    (fn [channel]
+      (loop [base 0x00
+             supported []]
+        (let [result (read-pid channel base opts)
+              supported (into supported (:value result))
+              next-base (+ base 0x20)]
+          (cond
+            (not (:ok? result))
+            (assoc result :supported supported)
 
-         (and (some #{next-base} (:value result))
-              (:pid-list? (get pids/mode-01-pids next-base)))
-         (recur next-base supported)
+            (and (some #{next-base} (:value result))
+                 (:pid-list? (get pids/mode-01-pids next-base)))
+            (recur next-base supported)
 
-         :else
-         {:ok? true
-          :supported supported})))))
+            :else
+            {:ok? true
+             :supported supported})))))))
 
 (defn read-all-pids
-  "Reads every decodable mode 01 PID the vehicle reports as supported.
-  Sends traffic on the vehicle bus."
+  "Reads every decodable mode 01 PID the vehicle reports as supported, over
+  one ISO15765 channel. Sends traffic on the vehicle bus."
   ([device-or-path]
    (read-all-pids device-or-path {}))
   ([device-or-path opts]
-   (let [supported (read-supported-pids device-or-path opts)]
-     (if-not (:ok? supported)
-       supported
-       (let [supported? (set (:supported supported))
-             decodable (sort (for [[pid {:keys [pid-list?]}] pids/mode-01-pids
-                                   :when (not pid-list?)]
-                               pid))
-             results (for [pid decodable
-                           :when (supported? pid)]
-                       (assoc (read-pid device-or-path pid opts)
-                              :pid pid
-                              :name (get-in pids/mode-01-pids [pid :name])))
-             errors (vec (for [result results
-                               :when (not (:ok? result))]
-                           (select-keys result [:pid :name :error :nrc :step])))]
-         {:ok? (empty? errors)
-          :supported-hex (mapv codec/byte->hex (:supported supported))
-          :values (vec (for [result results
-                             :when (:ok? result)]
-                         (select-keys result [:pid :name :value :unit])))
-          :errors errors
-          :not-supported (vec (remove supported? decodable))})))))
+   (iso15765/with-channel
+    device-or-path opts
+    (fn [channel]
+      (let [supported (read-supported-pids channel opts)]
+        (if-not (:ok? supported)
+          supported
+          (let [supported? (set (:supported supported))
+                decodable (sort (for [[pid {:keys [pid-list?]}] pids/mode-01-pids
+                                      :when (not pid-list?)]
+                                  pid))
+                ;; Read them all before the channel closes.
+                results (vec (for [pid decodable
+                                   :when (supported? pid)]
+                               (assoc (read-pid channel pid opts)
+                                      :pid pid
+                                      :name (get-in pids/mode-01-pids [pid :name]))))
+                errors (vec (for [result results
+                                  :when (not (:ok? result))]
+                              (select-keys result [:pid :name :error :nrc :step])))]
+            {:ok? (empty? errors)
+             :supported-hex (mapv codec/byte->hex (:supported supported))
+             :values (vec (for [result results
+                                :when (:ok? result)]
+                            (select-keys result [:pid :name :value :unit])))
+             :errors errors
+             :not-supported (vec (remove supported? decodable))})))))))
 
 (defn- ascii-text
   "Decodes ASCII bytes, dropping zero padding and surrounding spaces."
@@ -207,14 +214,22 @@
    [:calibration-verification-numbers "0906"]
    [:ecu-name "090A"]])
 
+(def ssm-init-timeout-ms
+  "How long `read-vehicle-info` waits for the SSM `AA` reply. An ECU that
+  speaks SSM answers within a few milliseconds, as it does mode 01, and one
+  that does not, such as the project's 2015 Impreza, never answers, so the
+  full `obd-request` timeout would only delay identification."
+  250)
+
 (defn read-vehicle-info
   "Reads what identifies the vehicle and its engine ECU: the VIN, calibration
   IDs, calibration verification numbers, and ECU name (mode 09), and the ECU
-  ID (SSM `AA`, see `ssm-init`).
+  ID (SSM `AA`, see `ssm-init`), over one ISO15765 channel.
 
   Each item the ECU does not answer is nil, with its error under `:errors`.
   `:ok?` is true when at least one item was read. Takes the same options as
-  `obd-request`.
+  `obd-request`, plus `:ssm-init-timeout-ms` (by default
+  `ssm-init-timeout-ms`) for the ECU ID.
 
   Sends traffic on the vehicle bus."
   ([device-or-path]
@@ -224,13 +239,18 @@
      (if-not (seq path)
        {:ok? false
         :error :missing-path}
-       (let [results (vec (for [[item request-hex] vehicle-info-requests]
-                            (let [result (obd-request path request-hex opts)]
-                              [item (if (:ok? result)
-                                      (decode-mode-09 (get-in result [:response :bytes]))
-                                      result)])))
-             ecu-id (ssm/ssm-init path opts)]
-         (combine-reads path (conj results [:ecu-id (assoc ecu-id :value (:ecu-id ecu-id))])))))))
+       (iso15765/with-channel
+        device-or-path opts
+        (fn [channel]
+          (let [results (vec (for [[item request-hex] vehicle-info-requests]
+                               (let [result (obd-request channel request-hex opts)]
+                                 [item (if (:ok? result)
+                                         (decode-mode-09 (get-in result [:response :bytes]))
+                                         result)])))
+                ecu-id (ssm/ssm-init channel (assoc opts :timeout-ms (:ssm-init-timeout-ms
+                                                                      opts
+                                                                      ssm-init-timeout-ms)))]
+            (combine-reads path (conj results [:ecu-id (assoc ecu-id :value (:ecu-id ecu-id))])))))))))
 
 (def ^:private dtc-systems
   "A trouble code's first letter, from the top two bits of its first byte:
@@ -282,8 +302,8 @@
 
 (defn read-trouble-codes
   "Reads the engine ECU's stored (service 03), pending (07), and permanent
-  (0A) trouble codes, each a list such as `[\"P0133\"]`. It only reads them:
-  clearing codes (service 04) is never sent.
+  (0A) trouble codes, each a list such as `[\"P0133\"]`, over one ISO15765
+  channel. It only reads them: clearing codes (service 04) is never sent.
 
   Each list the ECU does not answer is nil, with its error under `:errors`.
   `:ok?` is true when at least one list was read. Takes the same options as
@@ -297,10 +317,13 @@
      (if-not (seq path)
        {:ok? false
         :error :missing-path}
-       (combine-reads path
-                      (vec (for [[item request-hex] trouble-code-requests]
-                             (let [result (obd-request path request-hex opts)]
-                               [item (if (:ok? result)
-                                       (decode-dtc-reply (get-in result [:response :bytes]))
-                                       result)]))))))))
+       (iso15765/with-channel
+        device-or-path opts
+        (fn [channel]
+          (combine-reads path
+                         (vec (for [[item request-hex] trouble-code-requests]
+                                (let [result (obd-request channel request-hex opts)]
+                                  [item (if (:ok? result)
+                                          (decode-dtc-reply (get-in result [:response :bytes]))
+                                          result)]))))))))))
 

@@ -142,7 +142,7 @@
           :else
           (do
             (when-not (read-events! session)
-              (Thread/sleep 5))
+              (Thread/sleep 1))
             (recur)))))))
 
 (defn write-command!

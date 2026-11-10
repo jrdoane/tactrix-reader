@@ -232,9 +232,11 @@ clojure -M:run uds-scan 1000 10FF
 
 It prints each DID found, and a line every 256 DIDs, to stderr as it goes,
 then the result as EDN: `:found` (data, or the error for anything other than
-out of range), `:out-of-range` (a count), and `:scanned`. Each request takes
-about 40 ms, so 256 DIDs take about 10 seconds and the full `0000`-`FFFF`
-range about 45 minutes. It stops early with `:error :no-reply` once three
+out of range), `:out-of-range` (a count), and `:scanned`. When each request
+opened its own channel, it took about 40 ms, so 256 DIDs took about 10
+seconds and the full `0000`-`FFFF` range about 45 minutes. The scan now
+shares one channel for every request, which should be faster, but that has
+not been timed on the vehicle. It stops early with `:error :no-reply` once three
 requests in a row get no reply, such as when the ignition is turned off.
 
 **`1000`-`10FF` on this project's 2015 Impreza.** Observed on 2026-10-29,

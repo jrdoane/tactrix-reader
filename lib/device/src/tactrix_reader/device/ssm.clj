@@ -38,7 +38,7 @@
                :rx-id rx-id}]
      (if-not (seq path)
        (assoc base :ok? false :error :missing-path)
-       (let [result (iso15765/iso15765-request path [ssm-init-command] base :ssm-init-failed opts)
+       (let [result (iso15765/iso15765-request device-or-path [ssm-init-command] base :ssm-init-failed opts)
              data (get-in result [:response :bytes])]
          (cond
            (not (:ok? result))
@@ -90,7 +90,7 @@
        (let [request (into [ssm-read-addresses-command 0x00]
                            (mapcat #(subvec (codec/u32->bytes %) 1))
                            addresses)
-             result (iso15765/iso15765-request path request base :ssm-read-failed opts)
+             result (iso15765/iso15765-request device-or-path request base :ssm-read-failed opts)
              data (get-in result [:response :bytes])]
          (cond
            (not (:ok? result))

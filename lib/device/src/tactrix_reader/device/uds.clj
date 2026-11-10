@@ -105,7 +105,7 @@
        :else
        (let [did-bytes (subvec (codec/u32->bytes did) 2)
              base (assoc base :did-hex (format "%04X" did))
-             result (iso15765/iso15765-request path
+             result (iso15765/iso15765-request device-or-path
                                                (into [read-data-by-identifier-service] did-bytes)
                                                base :uds-read-failed opts)
              reply (get-in result [:response :bytes])
@@ -139,7 +139,7 @@
 
 (defn scan-dids
   "Reads every DID from `start` to `end`, inclusive, with `read-did`, one
-  request each. Only reads are sent, but a wide range is thousands of
+  request each, over one ISO15765 channel. Only reads are sent, but a wide range is thousands of
   requests, so both ends must be given.
 
   Returns the DIDs whose reply was anything other than `request-out-of-range`
@@ -170,29 +170,32 @@
        (assoc base :ok? false :error :invalid-did-range)
 
        :else
-       (loop [did start
-              found []
-              out-of-range 0
-              unanswered 0]
-         (if (or (> did end) (>= unanswered stop-after))
-           (cond-> (assoc base
-                          :ok? (> did end)
-                          :start-hex (format "%04X" start)
-                          :end-hex (format "%04X" end)
-                          :scanned (- did start)
-                          :stopped-early? (<= did end)
-                          :out-of-range out-of-range
-                          :found found)
-             (<= did end) (assoc :error :no-reply))
-           (let [result (read-did path did opts)]
-             (when on-result
-               (on-result result))
-             (if (= :request-out-of-range (:nrc-name result))
-               (recur (inc did) found (inc out-of-range) 0)
-               (recur (inc did)
-                      (conj found (scan-finding result))
-                      out-of-range
-                      (if (:response result) 0 (inc unanswered)))))))))))
+       (iso15765/with-channel
+        device-or-path opts
+        (fn [channel]
+          (loop [did start
+                 found []
+                 out-of-range 0
+                 unanswered 0]
+            (if (or (> did end) (>= unanswered stop-after))
+              (cond-> (assoc base
+                             :ok? (> did end)
+                             :start-hex (format "%04X" start)
+                             :end-hex (format "%04X" end)
+                             :scanned (- did start)
+                             :stopped-early? (<= did end)
+                             :out-of-range out-of-range
+                             :found found)
+                (<= did end) (assoc :error :no-reply))
+              (let [result (read-did channel did opts)]
+                (when on-result
+                  (on-result result))
+                (if (= :request-out-of-range (:nrc-name result))
+                  (recur (inc did) found (inc out-of-range) 0)
+                  (recur (inc did)
+                         (conj found (scan-finding result))
+                         out-of-range
+                         (if (:response result) 0 (inc unanswered)))))))))))))
 
 (defn bitmap-dids
   "Returns the DIDs a 4-byte supported-DID bitmap read from `base` marks as
@@ -209,7 +212,7 @@
   starting at `start` (`0x1000` by default). Each bitmap is a DID whose
   4-byte value marks the next 32 DIDs, and the last of those is the next
   bitmap, so the walk reads one DID for every 32 and stops at the first
-  bitmap whose last bit is clear.
+  bitmap whose last bit is clear. The reads share one ISO15765 channel.
 
   Returns the bitmaps read in `:bitmaps` and every other supported DID in
   `:dids`. If a read fails or a bitmap is not 4 bytes, it stops there with
@@ -240,31 +243,34 @@
        (assoc base :ok? false :error :invalid-did)
 
        :else
-       (loop [bitmap start
-              bitmaps []
-              dids []]
-         (let [result (read-did path bitmap opts)
-               data (get-in result [:data :bytes])]
-           (cond
-             (not (:ok? result))
-             (merge (done bitmaps dids)
-                    {:ok? false :failed-at (:did-hex result)}
-                    (select-keys result [:error :nrc :nrc-name]))
+       (iso15765/with-channel
+        device-or-path opts
+        (fn [channel]
+          (loop [bitmap start
+                 bitmaps []
+                 dids []]
+            (let [result (read-did channel bitmap opts)
+                  data (get-in result [:data :bytes])]
+              (cond
+                (not (:ok? result))
+                (merge (done bitmaps dids)
+                       {:ok? false :failed-at (:did-hex result)}
+                       (select-keys result [:error :nrc :nrc-name]))
 
-             (not= 4 (count data))
-             (assoc (done bitmaps dids)
-                    :ok? false
-                    :error :unexpected-bitmap
-                    :failed-at (:did-hex result)
-                    :data (:data result))
+                (not= 4 (count data))
+                (assoc (done bitmaps dids)
+                       :ok? false
+                       :error :unexpected-bitmap
+                       :failed-at (:did-hex result)
+                       :data (:data result))
 
-             :else
-             (let [marked (bitmap-dids bitmap data)
-                   next-bitmap (+ bitmap 0x20)
-                   bitmaps (conj bitmaps {:did bitmap
-                                          :did-hex (:did-hex result)
-                                          :data (:data result)})]
-               (if (and (some #{next-bitmap} marked) (did? next-bitmap))
-                 (recur next-bitmap bitmaps (into dids (remove #{next-bitmap}) marked))
-                 (assoc (done bitmaps (into dids (remove #{next-bitmap}) marked))
-                        :ok? true))))))))))
+                :else
+                (let [marked (bitmap-dids bitmap data)
+                      next-bitmap (+ bitmap 0x20)
+                      bitmaps (conj bitmaps {:did bitmap
+                                             :did-hex (:did-hex result)
+                                             :data (:data result)})]
+                  (if (and (some #{next-bitmap} marked) (did? next-bitmap))
+                    (recur next-bitmap bitmaps (into dids (remove #{next-bitmap}) marked))
+                    (assoc (done bitmaps (into dids (remove #{next-bitmap}) marked))
+                           :ok? true))))))))))))

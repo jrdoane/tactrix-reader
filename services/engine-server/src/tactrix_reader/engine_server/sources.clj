@@ -15,6 +15,7 @@
   (:require [clojure.java.io :as io]
             [tactrix-reader.device.adapter :as adapter]
             [tactrix-reader.device.config :as config]
+            [tactrix-reader.device.iso15765 :as iso15765]
             [tactrix-reader.device.obd :as obd]
             [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.source :as source]
@@ -55,10 +56,14 @@
 
           :else
           (let [_ (status {:state :identifying})
-                vehicle-info (obd/read-vehicle-info path)]
+                [vehicle-info trouble-codes] (iso15765/with-channel
+                                              path {}
+                                              (fn [channel]
+                                                [(obd/read-vehicle-info channel)
+                                                 (obd/read-trouble-codes channel)]))]
             (emit (assoc info
                          :vehicle (dissoc vehicle-info :ok? :error :path)
-                         :trouble-codes (dissoc (obd/read-trouble-codes path) :ok? :error :path)))
+                         :trouble-codes (dissoc trouble-codes :ok? :error :path)))
             (some-> (source/start-live-source! path (cond-> {:emit emit}
                                                       dids? (assoc :dids uds/scanned-dids)))
                     (assoc :vehicle (recording/vehicle-meta vehicle-info)))))))))

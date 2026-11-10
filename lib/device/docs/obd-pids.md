@@ -45,6 +45,11 @@ Each request:
    multi-frame replies such as the VIN.
 4. Closes the channel.
 
+Functions that send several requests (`read-all-pids`, `read-vehicle-info`,
+`read-trouble-codes`, `uds-scan`, `uds-supported`) do steps 1, 2, and 4 once
+and repeat only step 3, using `iso15765/with-channel`. From Clojure, pass
+the channel it gives to any request function to do the same.
+
 A negative response returns `:negative-response` with its `:nrc`. NRC `0x78`
 (response pending) is waited through. From Clojure, `obd-request` also takes
 `:tx-id`, `:rx-id`, `:baud`, and `:timeout-ms` options for other ECUs and
