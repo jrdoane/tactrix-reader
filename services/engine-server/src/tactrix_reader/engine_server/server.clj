@@ -244,6 +244,10 @@
           ["/api/recordings/:name/series" :get [local-api-guard (series-handler config)] :route-name ::series]
           ["/api/recording" :post [local-api-guard (recording-handler sources)] :route-name ::recording]
           ["/api/replay" :post [local-api-guard (replay-handler sources)] :route-name ::replay]}
+        ;; Not cached: Pedestal's cache keeps a file's length from the first
+        ;; request, so a stylesheet or build that changed while the server
+        ;; ran was answered with a 500.
         (resources/resource-routes {:resource-root "public/assets"
-                                    :prefix "/assets"}))
+                                    :prefix "/assets"
+                                    :cache? false}))
       (jetty/create-connector {:container-options {:configurator configurator}})))

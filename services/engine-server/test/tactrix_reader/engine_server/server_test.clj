@@ -171,6 +171,24 @@
 (defn- event-where [events event-name pred]
   (some #(when (and (= event-name (:event %)) (pred (:data %))) (:data %)) events))
 
+(deftest serves-an-asset-that-changed-while-running
+  ;; Assets are served from the classpath, so the test writes one there.
+  (let [asset (io/file (.getParentFile (.getParentFile (io/file (io/resource "public/assets/css/app.css"))))
+                       "changing-test-asset.css")
+        system (main/start-system {:source {:type :none} :port 0})
+        client (java.net.http.HttpClient/newHttpClient)
+        fetch #(let [response (get-response client (str "http://localhost:" (:port system) "/assets/changing-test-asset.css")
+                                            (java.net.http.HttpResponse$BodyHandlers/ofString))]
+                 [(.statusCode response) (.body response)])]
+    (try
+      (spit asset "a { color: red; }")
+      (is (= [200 "a { color: red; }"] (fetch)))
+      (spit asset "a { color: red; }\nb { color: blue; }")
+      (is (= [200 "a { color: red; }\nb { color: blue; }"] (fetch)))
+      (finally
+        (.delete asset)
+        (main/stop-system system)))))
+
 (deftest lists-adapters-and-switches-sources
   (with-redefs [usb/scan-devices (fn [] [fake-adapter])
                 adapter/read-vbat (fn [_] {:ok? true :volts 12.3 :state :present})
