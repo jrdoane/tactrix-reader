@@ -396,17 +396,24 @@
     [:svg.spark {:viewBox "0 0 100 24" :preserveAspectRatio "none" :aria-hidden true}
      (when path [:path {:d path}])]))
 
+(def ^:private long-text-length
+  "The most characters a tile's value shows on one line at full size."
+  9)
+
 (defn- readout
   "One value: a `catalog/tiles` tile with its latest value and its last
   minute."
   [class tile badges?]
-  (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])]
+  (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])
+        text (tile-text tile value unit)]
     [:div {:class class :title "The line is the last minute"}
      [:div.readout-label
       [:span (:label tile)]
       (when badges? [tile-badge tile])]
-     [:div.readout-value
-      (tile-text tile value unit)
+     ;; Words too long for one line, such as a fuel system state, are set
+     ;; smaller and wrap.
+     [:div.readout-value {:class (when (< long-text-length (count text)) "long")}
+      text
       [:span.readout-unit (tile-unit tile unit)]]
      [sparkline (:id tile)]]))
 

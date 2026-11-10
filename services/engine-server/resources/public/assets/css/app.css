@@ -276,6 +276,14 @@ button.fold {
   white-space: nowrap;
 }
 
+/* A value in words too long for one line: smaller, and it wraps. */
+.readout-value.long {
+  font-size: 22px;
+  line-height: 1.2;
+  white-space: normal;
+}
+.tile .readout-value.long { font-size: 14px; }
+
 .readout-unit {
   margin-left: 6px;
   font-size: 18px;
