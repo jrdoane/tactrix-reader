@@ -212,8 +212,10 @@ interrupting polling, and emit `{:type :recording :state :recording|:saved ...}`
 The live source keeps one adapter session open on the raw CAN channel and
 polls with the default schedule:
 
-- One read-only mode 01 request to `7E0` every 15 ms
-  (`default-poll-interval-ms`).
+- One read-only mode 01 request to `7E0` at a time. Each is sent once the
+  ECU has answered the one before on `7E8`, or after 50 ms without an answer
+  (`default-reply-timeout-ms`), and at least 5 ms after it
+  (`default-poll-interval-ms`), so at most 200 a second.
 - The schedule (`default-poll-schedule`) requests every fast-changing PID
   (RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing,
   relative and commanded throttle, a second pedal position, the neutral
@@ -221,8 +223,9 @@ polls with the default schedule:
   catalyst, voltage, fuel level, trims, commanded lambda, fuel system status,
   the rear oxygen sensor, barometric pressure, check-engine status), and
   repeats.
-- Each fast PID is sampled about every 210 ms and each slow PID about every
-  2.9 seconds.
+- With the ECU answering in time, each fast PID is sampled about every 70 ms
+  and each slow PID about every second. Recordings made before reply pacing
+  sent one request every 15 ms, sampling them every 210 ms and 2.9 seconds.
 
 It also decodes the signals in `broadcast-signals` from the car's own traffic,
 as samples, and those in `inferred-signals` as
@@ -230,7 +233,8 @@ as samples, and those in `inferred-signals` as
 `:broadcast {}` or `:signals {}` to turn either off.
 
 `record` uses the same session code and schedule. Pass `:schedule`,
-`:interval-ms`, `:tx-id`, `:rx-id`, or `:baud` to change them, and `:dids`
+`:interval-ms`, `:reply-timeout-ms`, `:tx-id`, `:rx-id`, or `:baud` to
+change them, and `:dids`
 to alternate PID requests with service 22 requests for those DIDs.
 
 The replay source plays a recording's PID samples, broadcast samples, and

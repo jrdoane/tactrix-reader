@@ -112,8 +112,10 @@
 
 (defn session-meta
   "The meta.edn description of a polling session: the adapter firmware, the
-  bus settings, and what was polled."
-  [{:keys [firmware pids dids interval-ms tx-id rx-id baud]}]
+  bus settings, and what was polled. `:reply-timeout-ms` marks a session
+  paced by the ECU's replies, with `:interval-ms` the shortest time between
+  requests; recordings without it sent one request every `:interval-ms`."
+  [{:keys [firmware pids dids interval-ms reply-timeout-ms tx-id rx-id baud]}]
   {:adapter {:firmware firmware}
    :bus {:channel can/can-channel
          :protocol :can
@@ -123,6 +125,7 @@
    :polling (cond-> {:tx-id tx-id
                      :rx-id rx-id
                      :interval-ms interval-ms
+                     :reply-timeout-ms reply-timeout-ms
                      :pids (mapv codec/byte->hex pids)
                      :request-frame "02 01 <pid> 00 00 00 00 00"}
               (seq dids) (assoc :dids (mapv #(format "%04X" %) dids)
@@ -187,16 +190,19 @@
   are saved in meta.edn. Records for `:duration-ms` (60 seconds by default;
   nil for no limit), or until the `:stop` promise is delivered. If the
   adapter fails partway through, the files are still written from what was
-  captured, and the result has `:ok? false`. Polling sends one read-only
-  request every `:interval-ms`, rotating through `:pids`; pass `:pids []` to
-  only listen. With `:dids`, it alternates between a PID and a service 22 DID
-  request (see `run-can-session!`)."
+  captured, and the result has `:ok? false`. Polling sends read-only
+  requests rotating through `:pids`, each once the last is answered (or
+  after `:reply-timeout-ms`) and at least `:interval-ms` after it; pass
+  `:pids []` to only listen. With `:dids`, it alternates between a PID and a
+  service 22 DID request (see `run-can-session!`)."
   ([device-or-path out-dir]
    (record device-or-path out-dir {}))
-  ([device-or-path out-dir {:keys [pids dids interval-ms tx-id rx-id baud stop vehicle note]
+  ([device-or-path out-dir {:keys [pids dids interval-ms reply-timeout-ms tx-id rx-id baud stop
+                                   vehicle note]
                             :or {pids can/default-poll-schedule
                                  dids []
                                  interval-ms can/default-poll-interval-ms
+                                 reply-timeout-ms can/default-reply-timeout-ms
                                  tx-id 0x7E0
                                  rx-id 0x7E8
                                  baud 500000}
@@ -235,7 +241,9 @@
                                                  {:pids pids
                                                   :dids dids
                                                   :interval-ms interval-ms
+                                                  :reply-timeout-ms reply-timeout-ms
                                                   :tx-id tx-id
+                                                  :rx-id rx-id
                                                   :baud baud
                                                   :continue? #(cond
                                                                 (and stop (realized? stop))
@@ -258,6 +266,7 @@
                                                                                                   :pids pids
                                                                                                   :dids dids
                                                                                                   :interval-ms interval-ms
+                                                                                                  :reply-timeout-ms reply-timeout-ms
                                                                                                   :tx-id tx-id
                                                                                                   :rx-id rx-id
                                                                                                   :baud baud})

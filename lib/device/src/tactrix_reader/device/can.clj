@@ -16,8 +16,17 @@
   5)
 
 (def default-poll-interval-ms
-  "Gap between polling requests. The ECU answers in about 1 ms."
-  15)
+  "The shortest time from one polling request to the next. Each request also
+  waits for the reply to the one before, so this caps the request rate (at
+  200 a second) rather than setting it."
+  5)
+
+(def default-reply-timeout-ms
+  "How long a polling request waits for its reply before the next is sent.
+  The project's 2015 Impreza answers in about 1 ms and always within 5 ms
+  (see docs/recordings.md); 50 ms is ISO 15765-4's P2 limit for a server's
+  reply."
+  50)
 
 (def ^:private fast-pids
   "RPM, speed, load, throttle, pedal, MAF, manifold pressure, timing, plus
@@ -34,8 +43,9 @@
 
 (def default-poll-schedule
   "Request order for recording and the live source: all fast PIDs, then one
-  slow PID, and repeat. At the default interval, each fast PID is sampled
-  about every 210 ms and each slow PID about every 2.9 seconds."
+  slow PID, and repeat. At the default interval, with replies in time, each
+  fast PID is sampled about every 70 ms and each slow PID about every
+  second; polling DIDs as well doubles both."
   (vec (mapcat #(conj fast-pids %) slow-pids)))
 
 (defn- collect! [input ^java.io.ByteArrayOutputStream sink ms]
@@ -88,6 +98,22 @@
       (even? i) (pid-request (quot i 2))
       :else (did-request (quot i 2)))))
 
+(defn- answers?
+  "True when `message`, a received message from `rx-id`, answers `request`:
+  a positive reply to its service and parameters, as a single frame or the
+  first frame of a longer reply, or a negative reply to its service other
+  than response pending (NRC 78), after which the ECU replies again."
+  [rx-id request {:keys [type id data]}]
+  (when (and (= :message type) (= rx-id id) (seq data))
+    (let [payload (case (bit-shift-right (first data) 4)
+                    0 (rest data)
+                    1 (drop 2 data)
+                    nil)
+          [service & params] request]
+      (or (= (cons (+ service 0x40) params) (take (count request) payload))
+          (and (= [0x7F service] (take 2 payload))
+               (not= 0x78 (nth payload 2 nil)))))))
+
 (defn message-samples
   "Returns the samples in one received message: a mode 01 reply from `rx-id`,
   or broadcast signals from `signals`."
@@ -108,15 +134,22 @@
 
 (defn run-can-session!
   "Opens the raw CAN channel with a pass-all filter and polls `pids`
-  round-robin, one request every `interval-ms`, while `continue?` returns true.
+  round-robin while `continue?` returns true. Each request is sent once the
+  reply to the one before has come from `rx-id`, or `reply-timeout-ms` has
+  passed without one, and at least `interval-ms` after the one before.
   With `dids`, it alternates between a PID and a service 22 DID request, each
   rotating through its own list. DIDs whose reply needs more than one frame
-  get no reply, because the channel sends no flow control.
+  get only the first frame, because the channel sends no flow control.
   Every byte the adapter sends from the connect command on is passed to
   `on-bytes`. `on-connected` is called with the firmware version once the
-  channel is open. Always closes the channel it opened."
-  [{:keys [input output]} {:keys [pids dids interval-ms tx-id baud continue? on-bytes on-connected]
-                           :or {on-connected (fn [_])}}]
+  channel is open. Always closes the channel it opened. Returns the number
+  of requests sent, and of those that got no reply in time, in
+  `:request-count` and `:unanswered-count`."
+  [{:keys [input output]} {:keys [pids dids interval-ms reply-timeout-ms tx-id rx-id baud
+                                  continue? on-bytes on-connected]
+                           :or {reply-timeout-ms default-reply-timeout-ms
+                                rx-id 0x7E8
+                                on-connected (fn [_])}}]
   (let [channel can-channel
         setup (java.io.ByteArrayOutputStream.)
         connect (java.io.ByteArrayOutputStream.)]
@@ -135,16 +168,26 @@
          :step :connect
          :reply connect-reply
          :error :connect-failed}
-        (let [request-count (atom 0)]
+        (let [request-count (atom 0)
+              unanswered-count (atom 0)]
           (try
             (openport/write-command! output (str "atf" channel " 1 0 4") (repeat 8 0))
             (on-connected firmware)
+            ;; `awaiting` is the request still waiting for its reply, and
+            ;; `reply-due` when the next may be sent without one.
             (loop [i 0
-                   next-request (System/currentTimeMillis)]
+                   next-request (System/currentTimeMillis)
+                   awaiting nil
+                   reply-due 0
+                   remainder []]
               (when (continue?)
                 (let [now (System/currentTimeMillis)]
-                  (if (and (or (seq pids) (seq dids)) (>= now next-request))
+                  (if (and (or (seq pids) (seq dids))
+                           (>= now next-request)
+                           (or (nil? awaiting) (>= now reply-due)))
                     (let [request (poll-request pids dids i)]
+                      (when awaiting
+                        (swap! unanswered-count inc))
                       (openport/write-command! output (str "att" channel " 12 0")
                                                (concat (codec/u32->bytes tx-id)
                                                        (take 8 (concat [(count request)] request
@@ -152,15 +195,23 @@
                       (swap! request-count inc)
                       ;; Never schedule in the past, so a stall does not
                       ;; cause a burst of catch-up requests.
-                      (recur (inc i) (max (+ next-request interval-ms) now)))
-                    (do
-                      (if-let [chunk (serial/read-chunk input)]
-                        (on-bytes chunk)
-                        (Thread/sleep 1))
-                      (recur i next-request))))))
+                      (recur (inc i) (max (+ next-request interval-ms) now)
+                             request (+ now reply-timeout-ms) remainder))
+                    (if-let [chunk (serial/read-chunk input)]
+                      (let [_ (on-bytes chunk)
+                            parsed (openport/parse-adapter-stream
+                                    (into remainder (codec/unsigned-bytes chunk)))
+                            answered? (and awaiting
+                                           (some #(answers? rx-id awaiting %) (:events parsed)))]
+                        (recur i next-request (when-not answered? awaiting) reply-due
+                               (:remainder parsed)))
+                      (do
+                        (Thread/sleep 1)
+                        (recur i next-request awaiting reply-due remainder)))))))
             {:ok? true
              :firmware firmware
-             :request-count @request-count}
+             :request-count @request-count
+             :unanswered-count @unanswered-count}
             (finally
               (let [tail (java.io.ByteArrayOutputStream.)]
                 (collect! input tail 300)

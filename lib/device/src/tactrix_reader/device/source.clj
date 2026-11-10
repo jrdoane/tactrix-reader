@@ -87,10 +87,12 @@
   also happens when the source stops.
 
   Sends read-only mode 01 and service 22 requests on the vehicle bus."
-  [device-or-path {:keys [emit schedule dids interval-ms tx-id rx-id baud broadcast signals]
+  [device-or-path {:keys [emit schedule dids interval-ms reply-timeout-ms tx-id rx-id baud
+                          broadcast signals]
                    :or {schedule can/default-poll-schedule
                         dids []
                         interval-ms can/default-poll-interval-ms
+                        reply-timeout-ms can/default-reply-timeout-ms
                         tx-id 0x7E0
                         rx-id 0x7E8
                         baud 500000
@@ -112,7 +114,9 @@
                                      {:pids schedule
                                       :dids dids
                                       :interval-ms interval-ms
+                                      :reply-timeout-ms reply-timeout-ms
                                       :tx-id tx-id
+                                      :rx-id rx-id
                                       :baud baud
                                       :continue? #(deref running?)
                                       :on-bytes (message-decoder
@@ -149,6 +153,7 @@
                                                                                    :pids schedule
                                                                                    :dids dids
                                                                                    :interval-ms interval-ms
+                                                                                   :reply-timeout-ms reply-timeout-ms
                                                                                    :tx-id tx-id
                                                                                    :rx-id rx-id
                                                                                    :baud baud})

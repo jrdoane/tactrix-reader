@@ -72,14 +72,26 @@ get the CSVs. A recording that never opens the CAN channel writes no files.
 
 It opens CAN at 500 kbps with a pass-all filter and polls with the same
 schedule as the [live source](../README.md#live-and-replay-sources): one
-read-only request to `7E0` every 15 ms, covering RPM, speed, load,
+read-only request to `7E0` at a time, each sent once the last is answered
+(or after 50 ms) and at least 5 ms after it, covering RPM, speed, load,
 temperatures, trims, commanded and measured lambda, fuel system status, the
 rear oxygen sensor, throttle and pedal, the neutral input, voltage,
-barometric pressure, and fuel level. Fast PIDs are sampled about every 210 ms
-and slow ones about every 2.9 seconds.
+barometric pressure, and fuel level. Fast PIDs are sampled about every 70 ms
+and slow ones about every second. `meta.edn` records the pacing under
+`:polling`; recordings without `:reply-timeout-ms` there sent one request
+every `:interval-ms` (15) instead, sampling fast PIDs every 210 ms and slow
+ones every 2.9 seconds.
+
+**Reply times.** In the adapter's timestamps, from its copy of each request
+to the reply on `7E8`, the 2015 Impreza answered in 1.0 ms at the median,
+2.5 ms at the 99th percentile, and 4.4 ms at most, over 96,743 answered
+requests in `2026-10-30-did-drive` and `2026-11-09-150052`. 39 requests
+(0.04%) got no reply. That is the basis for the 50 ms reply timeout, which is
+also ISO 15765-4's P2 limit. The time the host adds, for USB and polling,
+is not in these timestamps and has not been measured.
 
 From Clojure, `record` takes `:duration-ms`, `:stop`, `:pids`,
-`:interval-ms`, `:tx-id`, `:rx-id`, `:baud`, and `:vehicle` and `:note` for
+`:interval-ms`, `:reply-timeout-ms`, `:tx-id`, `:rx-id`, `:baud`, and `:vehicle` and `:note` for
 `meta.edn`. It records for 60 seconds by
 default; `:duration-ms nil` removes the limit, and delivering the `:stop`
 promise ends the recording early. Pass `:pids []` to only listen.
@@ -100,10 +112,11 @@ clojure -M:run record-dids my-drive 10A5,10BA,10BE 120 /dev/cu.usbmodemTAlgJ3P81
 ```
 
 Each DID request is the single frame `03 22 <hi> <lo> 00 00 00 00` to
-`7E0`. Requests still go out every 15 ms, but half of them are now DIDs, so
-each fast PID is sampled about every 420 ms and each slow PID about every
-5.9 seconds. With `scanned`, each DID is read about every 1.6 seconds; with
-three DIDs, about every 90 ms.
+`7E0`. Requests are paced as for `record`, but half of them are now DIDs, so
+with the ECU answering in time each fast PID is sampled about every 140 ms
+and each slow PID about every 2 seconds. With `scanned`, each DID is read
+about every 0.5 seconds; with three DIDs, about every 30 ms. (Before reply
+pacing these were 420 ms, 5.9 seconds, 1.6 seconds, and 90 ms.)
 
 Only single-frame replies (up to 4 data bytes) are decoded. A DID whose reply
 needs more than one frame, such as `101E`, gets only a first frame: the raw
