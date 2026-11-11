@@ -39,6 +39,13 @@ the battery current, confirmed the barometer against the road's height,
 and checked the scales against the car's published figures; see
 [Worked out from the decoded signals](#worked-out-from-the-decoded-signals).
 
+Findings marked "2026-11-11" test a DBC file published for a 2015 WRX,
+which lists the CAN messages that car's ECU sends and reads, worked out
+from its ROM. The WRX has a different engine and ECU, so each reading was
+checked against the seven recordings. It explained `144` byte 2, gave the
+barometer its scale, and named several flags; see
+[A 2015 WRX's ECU](#a-2015-wrxs-ecu).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -83,19 +90,19 @@ second. The drive has the same 24 IDs at the same rates.
 | `002` | 10 ms | 8 | Steering | **Steering angle**; counter, checksum |
 | `0D0` | 20 ms | 8 | G_Sensor | **Steering angle**; yaw rate; lateral and longitudinal acceleration; an axle comparison updated every 60 m |
 | `0D1` | 20 ms | 4 | Brake_Pedal | **Vehicle speed**; brake pressure |
-| `0D2` | 20 ms | 8 | Brake_2 | Constant, but for one pulse of b5.5 |
+| `0D2` | 20 ms | 8 | Brake_2 | The stability control's torque request and limit to the engine, never used: constant `00 00 FF FF`, but for one pulse of b5.5 |
 | `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; distance counter; counter |
 | `0D4` | 20 ms | 8 | Wheel_Speeds | **Four wheel speeds** |
 | `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; clutch; off-throttle flags; counter, parity |
 | `141` | 10 ms | 8 | Engine | Engine speed; requested and actual torque; gear and flags; fuel cut; parity |
-| `144` | 20 ms | 8 | CruiseControl | Brake pedal; a curve of RPM; probably engine-start and warm-up counters; drive-cycle flag; parity |
+| `144` | 20 ms | 8 | CruiseControl | Brake pedal; available torque; engine-start and warm-up counters; drive-cycle flag; parity |
 | `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; lighting bits in byte 7; counter, parity |
 | `154` | 1 s | 7 | | Brake light, parking brake, and reverse again; any door open |
 | `156` | 20 ms | 8 | | Nearly constant; byte 7 follows fuel level |
 | `282` | 50 ms | 8 | Dashlights | Fuel sender; driver's seatbelt; outside temperature; counter |
 | `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow; drive-cycle and steering-load flags |
-| `361` | 50 ms | 8 | | Gear; barometric pressure; battery current and probably temperature; counter, parity |
-| `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque, as in `371`; assist level and load flag; counter |
+| `361` | 50 ms | 8 | | Gear; check engine lamp; barometric pressure; engine stopped; battery current and probably temperature; counter, parity |
+| `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque, as in `371`; the assist's load on the engine; counter |
 | `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque and assist |
 | `372` | 100 ms | 8 | | Counter and parity bit in byte 1 |
 | `374` | 1 s, and on change | 8 | BodyInfo | Each door open; b4.7 is b3.7 XOR any door open |
@@ -234,6 +241,7 @@ The dashboard's Bus tab colours those bits.
 | `:requested-torque` | `141` bits 0-14 LE, minus 10000, 0.1 Nm per bit | Newton metres, what the pedal asks for |
 | `:engine-torque` | `141` bytes 2-3 LE, minus 10000, 0.1 Nm per bit | Newton metres, negative on the overrun |
 | `:fuel-cut` | `141` b7.3 | Boolean |
+| `:available-torque` | `144` byte 2, 1.6 Nm per bit | Newton metres, the most the engine can make at its present speed; see [A 2015 WRX's ECU](#a-2015-wrxs-ecu) |
 | `:engine-starts` | `144` byte 3 | Raw count, 0-255; see [Counters and fuel level](#counters-and-fuel-level) |
 | `:warm-up-cycles` | `144` byte 4 | Raw count, 0-255 |
 | `:parking-brake` | `152` b6.3 | Boolean |
@@ -242,6 +250,9 @@ The dashboard's Bus tab colours those bits.
 | `:fuel-sender` | `282` bits 0-11 LE | Raw count that rises as the tank empties, about 8 for each 1%: 97 at 98% and 483 at 51% |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` bytes 0-1 LE, about 0.00072 g/s per bit | Grams per second |
+| `:check-engine-lamp` | `361` b1 bits 5-7 | `:on` for 0, `:off` for 1, and `:flashing` for 4, which is the WRX's reading and hasn't been seen here |
+| `:barometer` | `361` byte 3, 0.4 kPa per bit, plus 13.2 | kPa |
+| `:engine-stopped` | `361` b4.5 | Boolean, true while the engine isn't turning |
 | `:battery-current` | `361` byte 5 high nibble plus byte 6, 12 bits LE, minus 2048 | Raw count, positive while the battery charges; see [Battery current and temperature](#battery-current-and-temperature-in-361) |
 | `:door-front-left` | `374` b3.0 | Boolean, true while the driver's door is open |
 | `:door-front-right` | `374` b3.1 | Boolean, true while the front passenger door is open |
@@ -477,7 +488,8 @@ shows R while `:reverse` is true.
   by 6,000 (the spread was measured in `2026-10-30-did-drive`). That is the
   shape of a full-load torque curve, at a little over half the newton
   metres the [torque](#torque-in-141) fields reach. What it is for is
-  unknown.
+  unknown. 2026-11-11: it is the torque the engine can make at that
+  speed, at 1.6 Nm per count; see [A 2015 WRX's ECU](#a-2015-wrxs-ecu).
 - **`361`:** byte 7 rose from 115 to 157 over the first 6 minutes of the
   drive and then held at 157, but read 81-82 during the warm idle
   recording, so it isn't a temperature. In the later recordings it stayed
@@ -502,7 +514,9 @@ shows R while `:reverse` is true.
   it fell a count for every 27-61 m climbed in the four drives that covered
   25 m or more of height (r² 0.14-0.54; the byte only moved 2-3 counts).
   Air pressure falls about 0.12 kPa for each 10 m, so 40 m is half a
-  kilopascal, the same scale PID `33` gave.
+  kilopascal, the same scale PID `33` gave. 2026-11-11: the WRX's ECU
+  sends 0.4 kPa per count plus 13.2, and that is what is decoded; see
+  [A 2015 WRX's ECU](#a-2015-wrxs-ecu).
 - **`3D1` byte 0** varies widely and slowly; no match. 2026-11-10: it is
   the [outside temperature](#outside-temperature-in-3d1).
 - **`141` bytes 0-1** were a constant `65 26` at idle; they are the
@@ -542,6 +556,17 @@ ignition-on draw 20 A and the sensor's floor 112 A, both believable, but
 output, not a current. `inferred-signals` decodes the field as
 `:battery-current`, the count less 2,048, with no unit.
 
+2026-11-11: the low nibble of byte 5 is always 0, so bytes 5-6 are one
+16-bit word that is always a multiple of 16. The WRX sends its battery
+current, from a sensor on a LIN bus, in `362` at 0.004 A per count of a
+16-bit word, less 125 A. This car has no `362`. A sixteenth of an amp for
+each of the 12 bits is 0.0039 A per count of the word, so the scale guessed
+above agrees with the WRX's, but the WRX's ROM keeps what would go in
+`361` bytes 5-6 in a different variable (next to the current) and sends
+zeros there, so that is support and not a test. The zero points differ: the
+WRX's would put it at 31,250 on the word, where this car's readings centre
+on 32,768.
+
 **Byte 7 is probably the same sensor's temperature,** on a scale that
 falls as it warms. It follows intake air temperature (PID `0F`) across
 the seven recordings: r = −0.94 as it stands and −0.97 against the PID
@@ -579,6 +604,10 @@ where the flag never set, at least one condition was never met; what
 happened in the 11 minutes before `2026-10-29-did-drive` began isn't
 known. Two events is not many, and the idle condition was never the last
 one met, so that part is untested.
+
+2026-11-11: the WRX's ECU sets `144` b1.1 once three of its counters reach
+600, 300, and 30, the same three figures. That ROM has `360` b5.7 as an
+unidentified flag from another module.
 
 ## Speed, brakes, and chassis
 
@@ -740,7 +769,13 @@ idle, do move while driving.
   drives, at a standstill or walking pace while parking, for up to a
   couple of seconds each time. Inference:
   the steering tells the engine about its load, and the engine answers,
-  perhaps to hold the idle up.
+  perhaps to hold the idle up. 2026-11-11: the WRX's ECU reads `370`
+  bytes 0-1 as one 16-bit word, adds idle air for it, and
+  sets `360` b6.1 while it is above a threshold. Here too it is one word:
+  it reaches 527, so b1.0 is its bit 8, not a flag, and b1.1, seen once,
+  its bit 9. `360` b6.1 was set with the word as low as 133 and clear with
+  it as high as 297, which is a threshold near 256 with some hysteresis
+  and the delay between the two frames.
 
 The units of all of these are unknown, so none is decoded.
 
@@ -779,7 +814,9 @@ The units of all of these are unknown, so none is decoded.
   3 km/h and clears above about 5 km/h, at every stop in the drive.
 - **Engine start:** `0D3` b1.6 is set from 4.6 s to 5.7 s, while the starter
   would be cranking. `0D3` byte 3, `152` b0.5, `361` b1.5 and b4.5, and `370`
-  b2.5 and b7.7 also change once during the start.
+  b2.5 and b7.7 also change once during the start. 2026-11-11: `361` b1.5
+  is the check engine lamp going out and b4.5 the engine beginning to turn;
+  see [A 2015 WRX's ECU](#a-2015-wrxs-ecu).
 
 ### Counters and fuel level
 
@@ -830,6 +867,10 @@ and `:fuel-gauge`, each as its raw byte.
   first drive), 9, 2, 54, 1, and 4, so the two keep step and `660` gained
   two more: switching the ignition on without starting the engine would do
   that. It read 28,272 in the first recording. Bytes 0-1 are always `FF FF`.
+  2026-11-11: the WRX's ECU stamps each stored trouble code with bytes 2-3
+  and with bytes 5-7, which fits a count of ignition cycles and a time
+  within one. Its author guessed bytes 5-7 are a distance; here they count
+  ten a second while parked.
 - **`282` bits 0-11 are the fuel sender, undamped.** Byte 0 plus the low
   nibble of byte 1, little-endian. The value rises as the tank empties, by
   about 8.3 counts for each 1% on PID `2F` across the seven recordings.
@@ -851,6 +892,10 @@ which is why byte 1 flickered between `10` and `0F`: the reading was
 crossing 4,096. `inferred-signals` takes `:outside-temp` from here. It
 leaves out bit 15, which opendbc has as a units flag (metric or imperial)
 and which was never set; whether the scale changes with it is unknown.
+2026-11-11: the WRX's ECU reads only bits 0-12, takes `1FFF` to mean no
+reading yet, and sets a sensor fault below 3,523 or above 4,873, which on
+this scale are −49 °C and 101 °C. Bits 13 and 14 were never set here, so
+the two readings can't be told apart, and the decoding is unchanged.
 
 ### Lighting bits in `152` byte 7
 
@@ -1018,6 +1063,93 @@ They agree with what was found here on `375` b3.3 (lights on), `152`
 byte 7 (the light switch), `141` byte 7 (16, then 8, then 0 on lifting
 off), and `282`'s fuel sender. Nothing published explains `0D0` bytes 4-5
 or `361` bytes 3 and 5-7, so those readings rest on the recordings alone.
+2026-11-11: the WRX's ECU, below, gives `361` byte 3.
+
+### A 2015 WRX's ECU
+
+2026-11-11. The DBC file `extras/can/FA20DIT_LF75404S.dbc` in
+`github.com/Jengacat/subaru-dit-defs` lists the messages a 2015 WRX's ECU
+(ROM `LF75404S`) sends and reads, and where in each it keeps every bit,
+worked out from the ROM. It is one person's reading of a disassembly, for
+a turbocharged engine with a different ECU, and it hadn't been tried
+against a car. So a name from it counts here only where the recordings
+bear it out. It has nothing on messages the ECU neither sends nor reads:
+`002`, `154`, `156`, `371`, `374`, `375`, `376`, and `6FA`.
+
+Its layouts of `0D1`, `0D4`, `140`, `141` bytes 0-6, `144`, and `360`
+agree field for field with what is already decoded here: speed, wheel
+speeds, pedal, clutch, RPM, throttle, both torques, gear, the two
+counters, fuel flow, and the temperatures and manifold pressure. Its
+scales agree too, except the fuel flow's (below).
+
+Borne out by the recordings:
+
+| Where | The WRX's ECU | Here |
+|---|---|---|
+| `144` byte 2 | The most torque available, less friction, 1.6 Nm per count | With the pedal on the floor, `141`'s engine torque is 96-101% of it in every 1,000 rpm band of all five drives (median of each band; about 2,000 samples), and over a drive the two peak at 182-186 and 182-185 Nm. Decoded as `:available-torque`. |
+| `361` byte 3 | Barometric pressure, 0.4 kPa per count plus 13.2 | Rounds to PID `33` in 564 of its 633 replies and is within 1 kPa in the rest, over bytes 214-218 (98.8-100.4 kPa). Decoded as `:barometer`. |
+| `361` b1 bits 5-7 | The check engine lamp: 0 lit, 1 off, 4 flashing | 0 from ignition on in `2026-10-28-drive`, 1 from 4.64 s, as the starter began to crank, and 1 in every other frame of the seven recordings. Decoded as `:check-engine-lamp`. |
+| `361` b4.5 | Engine not rotating | Set in 91 frames, all of them among the 97 with `140` at 0 rpm. Decoded as `:engine-stopped`. |
+| `141` b6.3, b6.4 | Two flags held until the supply voltage is up and a timer has run out after a start | Both set from ignition on and cleared together at 5.40 s, 0.55 s after the engine first turned. |
+| `144` b1.1 | A drive cycle is done: counters at 600, 300, and 30 | See [Drive-cycle flag](#drive-cycle-flag). |
+| `144` bytes 3, 4 | Counts of engine starts and of a coolant event, kept with the ignition off | See [Counters and fuel level](#counters-and-fuel-level). |
+| `0D2` bytes 0-1, 2-3 | The stability control's torque request and torque limit, as `141`'s torques are scaled; the request counts only above 10,000 with b4.1 set | `00 00` and `FF FF` in every frame: nothing asked for and no limit. They should move when the traction control cuts in, which no recording has. |
+| `144` b6.7, `360` b6.0 | Set on a car coded as a manual | Set in every frame. |
+| `370` bytes 0-1, `360` b6.1 | A load the engine adds idle air for, and a flag while it is high | See [Steering](#steering). |
+
+The barometer stays in `inferred-signals`, though it follows a PID: five
+values of the byte, 1.6 kPa apart, can't tell 0.4 kPa per count from the
+0.5 found before, so the scale is the WRX's and not this car's own. A
+drive over a few hundred metres of height would settle it, and then it
+belongs in `broadcast-signals`.
+
+Named, in bits that never changed in a recording, so untested:
+
+| Where | The WRX's ECU |
+|---|---|
+| `144` b0.2-b0.7 | The cruise control's lever switches. `C0` throughout here. |
+| `144` b6.0, b6.1, b6.2 | Cruise standing by, controlling, and overridden by the pedal |
+| `144` b6.5 | Cruise unavailable. Set throughout here. |
+| `360` b5.4, b5.5, byte 7 | The cruise lamp, the SET lamp, and the set speed, 0 with the main switch off |
+| `140` byte 4 | The pedal position the cruise control is asking for, 0 when it isn't |
+| `360` b6.4, b6.5 | Radiator fan, first and second stage |
+| `360` b6.6, b6.7; `140` b1.6 | The air conditioning's switch and request; its compressor engaged |
+| `140` b1.4, b1.5 | Check engine lamp requested; electronic throttle fault |
+| `140` b3.7 | A tester has switched off the setting of trouble codes |
+| `361` byte 2 | Brake booster pressure. 0 throughout here, so probably no sensor. |
+| `282` byte 6 high nibble | A market or units code. 2 throughout here. |
+
+The cruise and lamp names agree with the leads above from other cars.
+
+Other things it says that fit:
+
+- **`140` byte 5** is the pedal position the torque request uses: the
+  pedal, or the cruise control's if that is higher. Here it equals byte 0
+  in 93-100% of frames.
+- **`144` b6.3** is a switch input the WRX's author couldn't name. Here it
+  is the brake pedal.
+- **`152` b7.2 and b7.3** each add idle air, as an electrical load would.
+  That fits their being the [light switch](#lighting-bits-in-152-byte-7).
+  The ECU also reads b6.2, b6.3, and most of the rest of bytes 6 and 7.
+- **`282` byte 3** picks between two fan tables at 148, which would be
+  108 °F if it is the [outside temperature](#body) as byte 4 is.
+- **`140` b7.5,** seen once here for 1.9 s, is a flag that lets the idle
+  air be raised for an accessory. Nothing here shows which.
+
+Where it doesn't carry over to this car:
+
+- **`141` byte 7** holds the WRX's drive mode. Here b7.3 is
+  [fuel cut](#pedal-and-fuel-cut-flags), in 99.7% of frames.
+- **`141` b6.5** is "below the rev limit" there. Here it is set at idle
+  and comes and goes at 2,000-2,500 rpm in `2026-10-28-drive`.
+- **`360` b5.6** latches once the engine is warm there. It was never set
+  here, at up to 96 °C.
+- **`361` bytes 5-7** are zeros there, and the current is in `362`; see
+  [Battery current and temperature](#battery-current-and-temperature-in-361).
+- **`360` bytes 0-1:** its fuel flow has a scale of 0.001 in a unit its
+  author hadn't settled. The 0.00072 g/s here is fitted to this car.
+- **`0D0`:** it has only bytes 6 and 7, with no meaning found, so it says
+  nothing about the yaw rate or bytes 4-5.
 
 ## Still unexplained or untested
 
@@ -1041,7 +1173,8 @@ or `361` bytes 3 and 5-7, so those readings rest on the recordings alone.
   [Lighting bits](#lighting-bits-in-152-byte-7); the readings there are
   untested.
 - **Cruise control** (`144`): no change that looks like it has been seen.
-  Whether it was used while recording wasn't noted.
+  Whether it was used while recording wasn't noted. The bits the WRX's ECU
+  uses for it never changed, so it probably wasn't.
 - **`144` bytes 3 and 4 and `156` byte 7:** see
   [Counters and fuel level](#counters-and-fuel-level); the readings there
   are inferences.
@@ -1052,22 +1185,24 @@ or `361` bytes 3 and 5-7, so those readings rest on the recordings alone.
 - **The battery current's scale,** and whether **`361` byte 7** is the
   battery's temperature (see
   [Battery current and temperature](#battery-current-and-temperature-in-361)).
-- What **`144` byte 2**'s curve of RPM is for.
 - **The yaw rate's scale,** which the wheels put 7% lower, the exact sum
   behind **`0D0` bytes 4-5,** and **`0D2` b5.5,** seen once (see
   [Speed, brakes, and chassis](#speed-brakes-and-chassis)).
-- **`141` b6.3 and b6.4, `002` byte 2, and `370` b1.1** change only as the
-  engine starts or, the last, once for 50 ms.
+- **`002` byte 2** changes only as the engine starts.
 - **`370` b7.7** is clear after the ignition comes on and sets once: 31 s
   after it (as the engine started), 83 s, and 226 s in the three
   recordings that caught it, flickering as it does in the last two.
   **`370` b3.6** flickers through every drive.
 - **`140` b7.5** was set once, for 1.9 s, cruising at 110 km/h in
-  `2026-11-09-144943`. Nothing else changed with it.
+  `2026-11-09-144943`. Nothing else changed with it. On the WRX it lets
+  the idle air be raised for an accessory.
 - **`141` b6.5** after a shift (see [Gear](#gear)): the clutch bit doesn't
   explain it.
-- **The drive-cycle flag, barometric pressure, and the ignition counter**
-  are readings that fit, not tested ones.
+- **The drive-cycle flag and the ignition counter** are readings that fit,
+  not tested ones, and **the barometer's scale** has been seen over only
+  1.6 kPa.
+- **The radiator fans, the air conditioning, and a flashing check engine
+  lamp** have names from the WRX and have never been seen.
 - **`376`**: constant.
 
 ## Next recording
@@ -1095,6 +1230,14 @@ most of what's left:
 
 Add to the first: the cruise control's buttons, and note which side each
 turn signal was on.
+
+2026-11-11, for the names from the WRX:
+
+6. Parked at idle, the air conditioning switched on and off, and then left
+   idling until the radiator fan runs and stops.
+7. A drive that climbs or drops a few hundred metres, with PID `33`
+   polled, for the barometer's scale.
+8. Pulling away hard on a loose or wet surface, for `0D2`'s torque request.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear

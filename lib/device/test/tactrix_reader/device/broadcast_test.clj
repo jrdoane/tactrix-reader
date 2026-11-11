@@ -74,20 +74,34 @@
     ;; engine off, pinned while the starter cranks, and charging after the
     ;; start. In 2026-10-30-did-drive at 275 s, with the alternator backed
     ;; off under power.
-    (is (= {:battery-current -329} (decode 0x361 [0x00 0x09 0x00 0xDD 0x27 0x70 0x6B 0x73])))
-    (is (= {:battery-current -1798} (decode 0x361 [0x00 0x39 0x00 0xDD 0x06 0xA0 0x0F 0x73])))
-    (is (= {:battery-current 312} (decode 0x361 [0x00 0x29 0x00 0xDD 0x0F 0x80 0x93 0x73])))
-    (is (= {:battery-current -183} (decode 0x361 [0x05 0x39 0x00 0xDA 0x0D 0x90 0x74 0x85])))
+    ;; The check engine lamp is lit until the starter turns the engine,
+    ;; which `361` also reports as stopped until then. The barometer read
+    ;; 221 that day, and 218 two days later, when PID 33 read 100 kPa.
+    (let [running {:check-engine-lamp :off :engine-stopped false}]
+      (is (= {:check-engine-lamp :on :barometer 101.6 :engine-stopped true :battery-current -329}
+             (decode 0x361 [0x00 0x09 0x00 0xDD 0x27 0x70 0x6B 0x73])))
+      (is (= {:check-engine-lamp :off :barometer 101.6 :engine-stopped false :battery-current -1798}
+             (decode 0x361 [0x00 0x39 0x00 0xDD 0x06 0xA0 0x0F 0x73])))
+      (is (= (assoc running :barometer 101.6 :battery-current 312)
+             (decode 0x361 [0x00 0x29 0x00 0xDD 0x0F 0x80 0x93 0x73])))
+      (is (= (assoc running :barometer 100.4 :battery-current -183)
+             (decode 0x361 [0x05 0x39 0x00 0xDA 0x0D 0x90 0x74 0x85]))))
+    ;; The lamp's other codes: 4 is flashing on a 2015 WRX, and the rest
+    ;; are unknown.
+    (is (= :flashing (:check-engine-lamp (decode 0x361 [0x00 0x89 0x00 0xDD 0x00 0x00 0x80 0x73]))))
+    (is (nil? (:check-engine-lamp (decode 0x361 [0x00 0x49 0x00 0xDD 0x00 0x00 0x80 0x73]))))
     ;; Parked at 63 F in 2026-11-09-194644, with half a tank.
     (is (= {:outside-temp 17.3} (decode 0x3D1 [0x14 0x10 0x00 0x00 0x00 0x00 0x00 0x00])))
     (is (= {:fuel-sender 488 :driver-seatbelt :unbuckled}
            (decode 0x282 [0xE8 0xB1 0x00 0x67 0x67 0x03 0x22 0x00])))
     ;; The start of 2026-11-09-144943, and after coolant passed 71 C (200 s)
     ;; and the fuel gauge dropped a count (500 s).
-    (is (= {:engine-starts 0x65 :warm-up-cycles 0x23}
+    (is (= {:available-torque 137.6 :engine-starts 0x65 :warm-up-cycles 0x23}
            (decode 0x144 [0xC0 0x01 0x56 0x65 0x23 0xA4 0xA0 0x00])))
-    (is (= {:engine-starts 0x65 :warm-up-cycles 0x24}
+    (is (= {:available-torque 158.4 :engine-starts 0x65 :warm-up-cycles 0x24}
            (decode 0x144 [0xC0 0x00 0x63 0x65 0x24 0xA4 0xA0 0x00])))
+    ;; Near its peak, which comes around 4,500 rpm.
+    (is (= 184.0 (:available-torque (decode 0x144 [0xC0 0x00 0x73 0x65 0x24 0xA4 0xA0 0x00]))))
     (is (= {:fuel-gauge 17} (decode 0x156 [0x01 0x80 0x00 0x00 0x00 0x00 0x00 0x11])))
     (is (= {:fuel-gauge 16} (decode 0x156 [0x01 0x80 0x00 0x00 0x00 0x00 0x00 0x10])))
     ;; Each door opened and closed in turn in 2026-11-09-194644.
@@ -129,6 +143,11 @@
     (is (= [0 0 0xFF 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :yaw-rate)))
     (is (= [0 0 0 0 0 0 0 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :longitudinal-acceleration)))
     (is (= [0 0 0 0 0 0xF0 0xFF] (bits broadcast/inferred-signals 0x361 :signal :battery-current)))
+    ;; A value that is one of a few words.
+    (is (= [0 0xE0] (bits broadcast/inferred-signals 0x361 :signal :check-engine-lamp)))
+    (is (= [0 0 0 0xFF] (bits broadcast/inferred-signals 0x361 :signal :barometer)))
+    (is (= [0 0 0 0 0x20] (bits broadcast/inferred-signals 0x361 :signal :engine-stopped)))
+    (is (= [0 0 0xFF] (bits broadcast/inferred-signals 0x144 :signal :available-torque)))
     (is (= [0xFF 0x0F] (bits broadcast/inferred-signals 0x282 :signal :fuel-sender)))
     (is (= [0 0 0 0 0 0x01] (bits broadcast/inferred-signals 0x282 :signal :driver-seatbelt))))
   ;; One part of a value that is a map.

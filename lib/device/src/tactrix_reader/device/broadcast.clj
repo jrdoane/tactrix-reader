@@ -59,7 +59,10 @@
   they behave, in the 2026-10-28-drive recording and, for the doors,
   2026-11-09-194644, but match no mode 01 PID, by CAN ID. The counters, the
   fuel gauge, the battery current, and the clutch, reverse, torque, and fuel
-  cut signals were identified by comparing all seven reference recordings. Scales marked
+  cut signals were identified by comparing all seven reference recordings.
+  The available torque, check engine lamp, barometer, and engine stopped
+  signals are read as a 2015 WRX's ECU sends them and checked against the
+  recordings. Scales marked
   approximate come from fits against quantities derived from other signals;
   see docs/can-broadcast.md. Unlike `broadcast-signals`, these are not
   confirmed against the PID that reports the same thing.
@@ -131,7 +134,13 @@
            :label "Fuel cut" :group :engine :format :on-off}]
    ;; Counts that carry over between drives: byte 3 steps when the engine
    ;; starts, and byte 4 once coolant reaches 71 C after a cold start.
-   0x144 [{:signal :engine-starts :byte-count 4 :decode #(nth % 3)
+   0x144 [;; The most torque the engine can make at its present speed, less
+          ;; friction: what `141`'s engine torque reaches with the pedal
+          ;; on the floor. The scale is the one a 2015 WRX's ECU uses.
+          {:signal :available-torque :unit :newton-metres :byte-count 3
+           :label "Available torque" :group :engine
+           :decode #(round-to 1 (* 1.6 (nth % 2)))}
+          {:signal :engine-starts :byte-count 4 :decode #(nth % 3)
            :label "Engine starts" :group :counters}
           {:signal :warm-up-cycles :byte-count 5 :decode #(nth % 4)
            :label "Warm-up cycles" :group :counters}]
@@ -160,7 +169,24 @@
    ;; bits around 2048: above it the battery is charging, below it
    ;; discharging, and it pins at 250 while the starter cranks. The scale is
    ;; not known, so the value is the count less 2048.
-   0x361 [{:signal :battery-current :byte-count 7
+   ;;
+   ;; The other three are read as a 2015 WRX's ECU sends them, which the
+   ;; recordings bear out. The lamp's code is 0 while it is lit, 1 while it
+   ;; is off, and, by the WRX alone, 4 while it flashes. The barometer's
+   ;; scale rounds to PID 33.
+   0x361 [{:signal :check-engine-lamp :byte-count 2
+           :label "Check engine lamp" :group :engine :format :keyword
+           :decode #(case (bit-shift-right (nth % 1) 5)
+                      0 :on
+                      1 :off
+                      4 :flashing
+                      nil)}
+          {:signal :barometer :unit :kpa :byte-count 4
+           :label "Barometer" :group :engine
+           :decode #(round-to 1 (+ 13.2 (* 0.4 (nth % 3))))}
+          {:signal :engine-stopped :byte-count 5 :decode #(bit-test (nth % 4) 5)
+           :label "Engine stopped" :group :engine}
+          {:signal :battery-current :byte-count 7
            :label "Battery current" :group :engine :raw? true
            :decode (fn [[_ _ _ _ _ low high]]
                      (- (+ (bit-shift-right low 4) (* 16 high)) 2048))}]
