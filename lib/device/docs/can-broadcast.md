@@ -46,6 +46,12 @@ checked against the seven recordings. It explained `144` byte 2, gave the
 barometer its scale, and named several flags; see
 [A 2015 WRX's ECU](#a-2015-wrxs-ecu).
 
+Findings marked "BRZ logs" come from the same day: raw CAN logs a 2017 BRZ's
+owner published, of drives in which the lights, the cruise control, the
+doors, and more were worked on purpose. They are another car's, so they
+confirm where to look and test nothing here; see
+[A 2017 BRZ's logs](#a-2017-brzs-logs).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -74,6 +80,10 @@ The second pass found more lists, used for the
 a [Forester SJ head-unit adapter](https://github.com/Dem0nis/canbox_subaru_sj/blob/HEAD/cars/subaru_sj.c),
 [open-can-db](https://github.com/equinox311/open-can-db), and the 2015 and
 2016 Outback files from before opendbc generated them.
+
+Two more came on 2026-11-11, each with its own section below: a DBC file
+worked out from a [2015 WRX's ROM](https://github.com/Jengacat/subaru-dit-defs),
+and the logs in a [2017 BRZ owner's notes](https://github.com/painellope/BRZ-2017).
 
 Bytes are numbered from 0, bits from 0 at the least significant end, and
 `b5.6` means byte 5 bit 6. "LE" means little-endian. Bit positions written
@@ -567,6 +577,14 @@ zeros there, so that is support and not a test. The zero points differ: the
 WRX's would put it at 31,250 on the word, where this car's readings centre
 on 32,768.
 
+BRZ logs: the BRZ sends the same field, with the same low nibble of 0. It
+read a median 2,078 while driving (standard deviation 87), sat at 257-258
+for 0.6 s as the starter cranked, and ran at 2,200-2,700 for the seconds
+after the start, which is what this car's does. Its byte 7 fell from 124 to
+122 over a seven-minute drive. So the field belongs to this family of
+ECUs, and the BRZ's is nearer this car's than the WRX's is. It gives no
+scale either.
+
 **Byte 7 is probably the same sensor's temperature,** on a scale that
 falls as it warms. It follows intake air temperature (PID `0F`) across
 the seven recordings: r = −0.94 as it stands and −0.97 against the PID
@@ -708,6 +726,11 @@ byte 4 when it is positive (r² 0.91 for a fit to byte 4 and its size). Inferenc
 tyres of different sizes front and rear, which matters with all-wheel
 drive. The exact sum isn't pinned down, so neither field is decoded.
 
+BRZ logs: a rear-wheel-drive BRZ sends the same two fields, updated every
+60 m (59-61 m in 80% of 77 updates), with byte 5's low two bits extending
+byte 4's sign. So whatever the brake controller is watching for, it isn't
+particular to all-wheel drive.
+
 **`0D2` b5.5** was set once in the seven recordings, in
 `2026-11-09-144943` from 438.5 s to 439.5 s: it set as the brake was
 released at a standstill in 1st with the clutch down, and cleared a second
@@ -799,7 +822,8 @@ The units of all of these are unknown, so none is decoded.
   soon for the car to have been driven for 20 s. Inference: tyre-pressure sensors sleep when
   parked, wake after some seconds of rolling, and stay awake for minutes
   after a stop, which fits all of it. Two lists for other cars guess the
-  passenger's seatbelt instead; neither tested it.
+  passenger's seatbelt instead; neither tested it. BRZ logs: the bit was
+  clear throughout the BRZ's drive, from its first frame.
 - **Outside temperature:** `282` byte 4 minus 40 looks like outside
   temperature in °F. It read 108 at the start (68 °F, 20 °C) when PID `46`
   read 21 °C, and 90 (50 °F, 10 °C) when PID `46` read 10 °C. `282` byte 3
@@ -912,7 +936,8 @@ time, while moving, and never in the others. Nothing else on the bus
 changes with it. A pulse of fixed length could be a single wiper sweep;
 that is a guess. 2026-11-10: opendbc names this bit Wiper, and the WRX
 list has `C0` in this byte for wipers on, so two other cars agree. It is
-still untested here.
+still untested here. BRZ logs: the bit pulsed once in the BRZ's drive, for
+1.5 s.
 
 2026-11-10: `375` b3.3 goes with the lights. It was set throughout the
 five recordings in which `152` byte 7 read `0C`, and clear throughout the
@@ -921,6 +946,14 @@ that is seven agreeing readings, not a test. The WRX list reads this byte
 of `152` as `80` with nothing on, plus `04` for parking lights, `0C` for
 headlights, and `18` for high beams, which fits the light-switch reading
 above; this car's byte has no `80`.
+
+BRZ logs: in a drive where the lights were switched on purpose, b7.2 is
+the parking lights and b7.3 the low beams, b7.4 comes on with b7.3 in
+short flashes, as the high beams' flasher would, and b7.1
+is set exactly while the parking brake is off and the lights are off, as
+daytime running lights would be; see
+[A 2017 BRZ's logs](#a-2017-brzs-logs). That is the reading above, bit for
+bit, seen on a car where someone noted what they did.
 
 ### Doors
 
@@ -1109,7 +1142,7 @@ Named, in bits that never changed in a recording, so untested:
 |---|---|
 | `144` b0.2-b0.7 | The cruise control's lever switches. `C0` throughout here. |
 | `144` b6.0, b6.1, b6.2 | Cruise standing by, controlling, and overridden by the pedal |
-| `144` b6.5 | Cruise unavailable. Set throughout here. |
+| `144` b6.5 | Cruise unavailable. Set throughout here, and on a BRZ while its cruise control was working, so the name doesn't hold. |
 | `360` b5.4, b5.5, byte 7 | The cruise lamp, the SET lamp, and the set speed, 0 with the main switch off |
 | `140` byte 4 | The pedal position the cruise control is asking for, 0 when it isn't |
 | `360` b6.4, b6.5 | Radiator fan, first and second stage |
@@ -1151,6 +1184,84 @@ Where it doesn't carry over to this car:
 - **`0D0`:** it has only bytes 6 and 7, with no meaning found, so it says
   nothing about the yaw rate or bytes 4-5.
 
+### A 2017 BRZ's logs
+
+2026-11-11. `github.com/painellope/BRZ-2017` holds raw CAN logs from a
+2017 BRZ, a manual (it has no `148` or `149`). The first-generation BRZ shares this bus
+layout, which is why the RaceChrono notes were useful, and these logs are
+the recording this page keeps asking for, made on that car:
+`rdcan_2024-10-10_09-09-10.csv` is 7.5 minutes in which its owner switched
+the headlights, high beams, and fog lights, used the handbrake and the
+cruise control, pressed the stability control's buttons, opened a door,
+unbuckled, and stopped and restarted the engine. A second log locks and
+unlocks the car.
+
+They have limits. The owner listed what was done but not when, so each
+event below is placed by bits that move together and by what is already
+known. The logs keep about one frame in three (18 a second of `0D0`'s 50),
+so anything shorter than a few tenths of a second can be missed. And it is
+another car: a bit that moves there says where to look here, and no more.
+
+The BRZ sends 18 of this car's 24 IDs. It lacks `002`, `154`, `371`,
+`376`, `660`, and `6FA`, and has 19 this car lacks. `144` carries the same
+constants as here (`C0` in byte 0, `A4` in byte 5, `A0` in byte 6), where
+the WRX's ROM has `24` in byte 5.
+
+What agrees with this car:
+
+| Where | In the BRZ's drive |
+|---|---|
+| `152` b6.3, b6.2 | Parking brake off at 8 s and on at 408 s; reverse from 7 s to 23 s, backing out |
+| `282` b5.0 | Clear from 5 s, and set for a second at 252 s: the driver's seatbelt |
+| `374` b3.0, `375` b1.0 | Set together three times for 1-6 s: a door, the driver's by the notes it came with |
+| `375` b3.3 | Follows `152` b7.2, the parking lights |
+| `141` b6.3, b6.4; `361` b1.5, b4.5; `0D3` b1.6; `370` b2.5 | All change at the restart, 436-439 s, as they do at this car's start; the check engine lamp's code reads 0 for a second and then 1 |
+| `144` byte 3 | Steps by one at 438 s, a second after the engine restarted |
+| `370` b1.0, `360` b6.1 | Set together while manoeuvring at 11-24 s |
+| `361` bytes 5-7 | See [Battery current and temperature](#battery-current-and-temperature-in-361) |
+| `0D0` bytes 4-5 | Updated every 60 m; see [Speed, brakes, and chassis](#speed-brakes-and-chassis) |
+| `0D2` | `00 00 FF FF 00 00 00 00` throughout |
+
+What it shows that has never happened in a recording here:
+
+| Where | In the BRZ's drive | Here |
+|---|---|---|
+| `152` b7.2, b7.3 | b7.2 at 73-79 s, 84-91 s, and 352-355 s, and b7.3 within the first two, at 75-77 s and 85-91 s: the parking lights and the low beams | The [light switch](#lighting-bits-in-152-byte-7) reading: `0C` is the headlights on |
+| `152` b7.4 | Sets with b7.3 for a second or less, at 82 s and four times at 132-134 s, with the parking lights off, as flashing the high beams does. It was never set alone or for longer. | Never set |
+| `152` b7.1 | Set while the parking brake is off and the lights are off, in 99.5% of 7,583 frames with the ignition on | The daytime running lights, as read here |
+| `144` b6.0, `360` b5.4 | Set together from 43.5 s: the cruise control switched on | Never set |
+| `144` b6.1, `360` b5.5 | Set together nine times, for 0.4-42 s: a speed set | Never set |
+| `360` byte 7 | 49-61 while a speed is set, 5% above the car's speed in km/h (54 at 51.1), as a speedometer reads | Always 0 |
+| `144` b0.2 | A press of the main switch: `144` b6.0 changes at each of its nine pulses | Never set |
+| `144` b0.4, b0.5 | Other presses of the lever. Six of b0.5's nine pulses come at the moment a set speed ends. | Never set |
+| `144` b6.2 | Sets as b6.1 does at six of the nine, for 0.1-3 s | Never set |
+| `374` b1.6, b1.7 | Set at 84-91 s and 86-91 s, with the lights on: the fog lights, front and rear in some order. timurrrr's notes have b1.7 as fog lights. | `374` byte 1 is `08` throughout |
+| `0D3` b0.3, b0.5, b1.3 | b0.3 and b1.3 set together twice, for 4 s and 1 s, at 258-267 s; b0.5 at 397-404 s, stopped, with b1.3 from 400 s. Probably the stability and traction control buttons, which the owner says were pressed. | `0D3` byte 0 is 0 throughout |
+| `372` b2.0, b2.1 | Set for 6 s after the restart. open-can-db has `372` as the airbag's status, and an airbag lamp checks itself like that. | 0 through this car's one recorded start |
+
+Where the BRZ's body differs, so nothing carries over:
+
+- **Locks:** `375` byte 0 reads `03` unlocked and `00` locked, and byte 2
+  pulses `21` as it locks and `A1` or `B1` as it unlocks. Here `375`
+  b0.0, b0.1, and byte 2 are 0 throughout, with the doors opened and shut.
+- **`156`** is all zeros there. Here byte 7 is the fuel gauge.
+- **`375` b3.2** is set while a door is open and while the car is unlocked
+  with the engine off. Here it pulses for 20 ms as a door closes.
+- **`152` byte 7** has `80` set throughout, as the WRX list has it, and
+  this car's never has.
+- **`140` b7.5** is set throughout, but for 2 s at the restart. Here it
+  was set once, for 1.9 s.
+
+Two things it adds about the engine's messages:
+
+- **The barometer is read at the start.** `361` byte 3 held 215 through
+  the drive and read 221 from the restart, 2.4 kPa more on the WRX's
+  scale. Inference: the ECU takes the pressure from the manifold sensor
+  before the engine turns and works it out as it can afterwards. Here it
+  moved by a count or two within a drive.
+- **Nothing in `282` flashes.** `282` b5.4 and b5.5, which the old Outback
+  files have as the turn signals, never changed.
+
 ## Still unexplained or untested
 
 - **`374` b3.7 and b4.7, and `375` b3.7,** were set until 92.5 s in
@@ -1168,13 +1279,18 @@ Where it doesn't carry over to this car:
   `2026-11-09-150052` either (runs of 0.25-0.55 s; only counter bits
   qualify). Unless no blinker was used, they aren't in those messages. When
   one was used wasn't noted. The WRX list has them in `152` byte 7 (`10`
-  left, `20` right); those two bits were never set here either.
+  left, `20` right); those two bits were never set here either. BRZ logs:
+  no bit flashes at that rate in seven minutes of a BRZ's drive to work
+  either, and `152` b7.4 goes with its high beams. The turn signals
+  probably aren't on this bus.
 - **Headlights and wipers** (`152` byte 7): see
   [Lighting bits](#lighting-bits-in-152-byte-7); the readings there are
   untested.
 - **Cruise control** (`144`): no change that looks like it has been seen.
   Whether it was used while recording wasn't noted. The bits the WRX's ECU
-  uses for it never changed, so it probably wasn't.
+  uses for it never changed, so it probably wasn't. They are the bits that
+  move on a BRZ when its cruise control is used; see
+  [A 2017 BRZ's logs](#a-2017-brzs-logs).
 - **`144` bytes 3 and 4 and `156` byte 7:** see
   [Counters and fuel level](#counters-and-fuel-level); the readings there
   are inferences.
@@ -1236,8 +1352,13 @@ turn signal was on.
 6. Parked at idle, the air conditioning switched on and off, and then left
    idling until the radiator fan runs and stops.
 7. A drive that climbs or drops a few hundred metres, with PID `33`
-   polled, for the barometer's scale.
+   polled, for the barometer's scale. Switch the ignition off and on at
+   the top, to see whether the barometer steps as the BRZ's did.
 8. Pulling away hard on a loose or wet surface, for `0D2`'s torque request.
+9. In the first, also: the stability control's button, pressed and held,
+   for `0D3` b0.3, b0.5, and b1.3; the fog lights, if fitted, for `374`
+   b1.6 and b1.7; and the cruise control switched on, set at a steady
+   speed, and cancelled, for the bits the BRZ moved.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear
