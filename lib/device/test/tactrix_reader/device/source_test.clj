@@ -199,6 +199,26 @@
            (remove (comp #{:status} :type) @events)))
     (is (= 1 (:sample-count (first @events))))))
 
+(deftest replay-source-adds-derived-signals
+  ;; RPM from the PID reply, then `141`'s torque 10 ms later: 26.5 Nm at
+  ;; 800 rpm is 2.2 kW.
+  (let [dir (temp-dir)
+        replay (fn [opts]
+                 (let [events (atom [])
+                       source (source/start-replay-source! (str dir) (merge {:emit #(swap! events conj %)
+                                                                             :loop? false}
+                                                                            opts))]
+                   (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
+                   ((:stop! source))
+                   (map (juxt :signal :value) (filter (comp #{:signal} :type) @events))))]
+    (write-recording! dir [(message-bytes 5 0 1000000 0x7E8 [4 0x41 0x0C 0x0C 0x80 0 0 0])
+                           (message-bytes 5 0 1010000 0x141 [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00])])
+    (is (= [[:gear 5] [:requested-torque 30.2] [:engine-torque 26.5] [:engine-power 2.2] [:fuel-cut false]]
+           (replay {})))
+    (is (= [[:gear 5] [:requested-torque 30.2] [:engine-torque 26.5] [:fuel-cut false]]
+           (replay {:derived? false})))
+    (is (= [] (replay {:signals {}})) "nothing to work them out from")))
+
 (deftest replay-source-includes-did-replies
   (let [dir (temp-dir)
         events (atom [])]

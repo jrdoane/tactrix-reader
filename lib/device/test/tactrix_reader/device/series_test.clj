@@ -50,6 +50,10 @@
       (is (= {:t [160] :v [1]} (:signal/brake series)))
       (is (= {:t [170] :v [128]} (:did/x10B8 series)))
       (is (= {:t [180] :v [4.1]} (:did/x10A3 series)))
+      (testing "derived values are there, worked out as the sources do"
+        ;; `141`'s torque bytes are 0 here, -1,000 Nm, at 655.75 rpm.
+        (is (= {:t [200 300] :v [-68.7 -68.7]} (:signal/engine-power series)))
+        (is (= {:unit :kilowatts} (:signal/engine-power channels))))
       (testing "neutral ends the gear held from before"
         (is (= {:t [200 300] :v [3 nil]} (:signal/gear series))))
       (testing "a channel that never had a number is left out"

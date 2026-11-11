@@ -4,11 +4,13 @@
   `{:type :sample ...}`, `{:type :signal ...}`, `{:type :did ...}`, and
   `{:type :status ...}`, and with `:frames? true` a `{:type :frame :id :data
   :timestamp-us}` for every CAN frame received, before the events decoded
-  from it. The live source can also save what it receives as a recording,
+  from it. The values `derived` works out from those follow them, as
+  `:signal` events. The live source can also save what it receives as a recording,
   and reports that with `{:type :recording ...}`."
   (:require [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.codec :as codec]
+            [tactrix-reader.device.derived :as derived]
             [tactrix-reader.device.openport :as openport]
             [tactrix-reader.device.recording :as recording]))
 
@@ -31,10 +33,17 @@
 
 (defn- message-events
   "The source events for one received message: with `frames?`, the frame
-  itself, then what `can/message-events` decodes from it."
-  [rx-id broadcast signals frames? {:keys [id data timestamp-us] :as message}]
-  (cond->> (can/message-events rx-id broadcast signals message)
+  itself, then what `can/message-events` decodes from it, each followed by
+  what `derive` works out from it."
+  [rx-id broadcast signals frames? derive {:keys [id data timestamp-us] :as message}]
+  (cond->> (derive (can/message-events rx-id broadcast signals message))
     (and frames? id) (cons {:type :frame :id id :data data :timestamp-us timestamp-us})))
+
+(defn- event-deriver
+  "What a source passes its decoded events through: a `derived/deriver`, or
+  nothing with `derived?` false."
+  [derived?]
+  (if derived? (derived/deriver) identity))
 
 (defn- status-emitter [emit base]
   (fn [state & {:as details}]
@@ -80,7 +89,9 @@
   for each single-frame service 22 reply (to the DIDs in `:dids`, which it
   alternates with PID requests), and `{:type :status ...}` when the source
   is running, stopped, or failed. `{}` turns either kind of broadcast
-  decoding off. `:frames? true` also emits a `{:type :frame ...}` for every
+  decoding off. It also emits the `derived/derived-signals` those give rise
+  to, as `{:type :signal ...}` with no `:can-id`; `:derived? false` turns
+  them off. `:frames? true` also emits a `{:type :frame ...}` for every
   CAN frame received.
 
   Returns a map of functions:
@@ -98,8 +109,9 @@
 
   Sends read-only mode 01 and service 22 requests on the vehicle bus."
   [device-or-path {:keys [emit schedule dids interval-ms reply-timeout-ms tx-id rx-id baud
-                          broadcast signals frames?]
-                   :or {schedule can/default-poll-schedule
+                          broadcast signals frames? derived?]
+                   :or {derived? true
+                        schedule can/default-poll-schedule
                         dids []
                         interval-ms can/default-poll-interval-ms
                         reply-timeout-ms can/default-reply-timeout-ms
@@ -112,6 +124,7 @@
         running? (atom true)
         firmware (atom nil)
         writer (recording-writer emit)
+        derive (event-deriver derived?)
         status (status-emitter emit {:source :live :path path})
         worker (future
                  (try
@@ -131,7 +144,7 @@
                                       :continue? #(deref running?)
                                       :on-bytes (message-decoder
                                                  (fn [message]
-                                                   (run! emit (message-events rx-id broadcast signals frames? message)))
+                                                   (run! emit (message-events rx-id broadcast signals frames? derive message)))
                                                  (:write! writer))
                                       :on-connected (fn [version]
                                                       (reset! firmware version)
@@ -214,9 +227,10 @@
 (defn start-replay-source!
   "Replays a recording on a background thread, paced by its timestamps,
   calling `emit` with the same events as `start-live-source!`, including
-  broadcast signals in `:broadcast`, inferred signals in `:signals`, and the
-  DID replies of a recording made with `:dids`, and with `:frames? true`
-  every CAN frame. Loops by default. `:speed` scales playback.
+  broadcast signals in `:broadcast`, inferred signals in `:signals`, the
+  DID replies of a recording made with `:dids`, the derived signals unless
+  `:derived? false`, and with `:frames? true` every CAN frame. Loops by
+  default. `:speed` scales playback.
 
   Emitted timestamps always increase: each pass, and each seek, shifts them
   to follow the last one emitted, so a consumer sees one continuous stream.
@@ -235,14 +249,17 @@
     ten seconds of the recording before its target, all at once, so a
     consumer keeping the latest of each value has them as they were there,
     even while paused."
-  [dir {:keys [emit loop? speed broadcast signals frames? position-ms]
+  [dir {:keys [emit loop? speed broadcast signals frames? position-ms derived?]
         :or {loop? true
+             derived? true
              speed 1.0
              broadcast broadcast/broadcast-signals
              signals broadcast/inferred-signals}}]
   (let [running? (atom true)
         controls (atom {:paused? false :speed (double speed) :seek-ms nil})
         duration (atom 0)
+        ;; It starts again by itself when a loop or a seek jumps in time.
+        derive (event-deriver derived?)
         status (status-emitter emit {:source :replay :recording (str dir)})
         gap-us 25000
         now-ms #(/ (System/nanoTime) 1e6)
@@ -312,7 +329,7 @@
                                  (doseq [j (range from to)]
                                    (when (zero? (mod (- j from) 100))
                                      (Thread/sleep 1))
-                                   (doseq [event (message-events rx-id broadcast signals frames? (nth messages j))]
+                                   (doseq [event (message-events rx-id broadcast signals frames? derive (nth messages j))]
                                      (emit (update event :timestamp-us + offset))))
                                  (report! to)
                                  (recur to (now-ms) (at-ms to) speed offset
@@ -348,7 +365,7 @@
                                    (let [message (nth messages i)]
                                      (when (pos? wait-ms)
                                        (Thread/sleep (long wait-ms)))
-                                     (doseq [event (message-events rx-id broadcast signals frames? message)]
+                                     (doseq [event (message-events rx-id broadcast signals frames? derive message)]
                                        (emit (update event :timestamp-us + offset)))
                                      (recur (inc i) anchor-wall anchor-ms speed offset i reported false))))))))))
                    (catch Throwable e

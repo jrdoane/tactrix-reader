@@ -178,9 +178,10 @@ The main entry points, by namespace under `tactrix-reader.device`:
 | `recording` | `record`, `start-recording!`, `list-recordings`, `export-recording`, `recording-samples`, `recording-meta` | [Recordings](docs/recordings.md) |
 | `broadcast` | `broadcast-samples`, `broadcast-signals` | Decoding of [broadcast CAN traffic](docs/can-broadcast.md) confirmed against PIDs |
 | `broadcast` | `signal-samples`, `inferred-signals` | Decoding of [inferred CAN signals](docs/can-broadcast.md#inferred-signals), such as gear and steering angle |
+| `derived` | `step`, `deriver`, `derived-signals` | Values [worked out from the decoded ones](docs/can-broadcast.md#worked-out-from-the-decoded-signals): engine power, fuel economy, road grade, clutch slip, and injector duty |
 | `openport` | `parse-adapter-stream` | Splits raw adapter bytes into reply lines and received messages |
 | `source` | `start-live-source!`, `start-replay-source!` | Data sources, below |
-| `catalog` | `catalog` | How to show each PID, inferred signal, and DID (label, unit, group, format), as plain data for a display such as the dashboard |
+| `catalog` | `catalog` | How to show each PID, inferred signal, derived value, and DID (label, unit, group, format), as plain data for a display such as the dashboard |
 
 Functions that take a device accept either a path string or a device map from
 `scan-devices`.
@@ -235,14 +236,25 @@ as samples, and those in `inferred-signals` as
 `{:type :signal :signal :value :unit :can-id :timestamp-us}` events. Pass
 `:broadcast {}` or `:signals {}` to turn either off.
 
+Both sources also emit the values `derived` works out from those: engine
+power (kW), fuel economy (l/100 km), road grade (%), clutch slip (rpm), and,
+when DIDs are polled, injector duty (%). Each is a `:signal` event with no
+`:can-id`, following the event that completed it, at most 20 times a
+second. A value of nil means there is none just now: fuel economy below
+5 km/h, the grade below 10 km/h or in a tight turn, clutch slip in neutral
+or reverse. Pass
+`:derived? false` to turn them off. They use this car's gearing, so they
+mean nothing on another vehicle, where turning the signals off stops them
+too.
+
 `record` uses the same session code and schedule. Pass `:schedule`,
 `:interval-ms`, `:reply-timeout-ms`, `:tx-id`, `:rx-id`, or `:baud` to
 change them, and `:dids`
 to alternate PID requests with service 22 requests for those DIDs.
 
 The replay source plays a recording's PID samples, broadcast samples, and
-inferred signals (`:broadcast` and `:signals` as for the live source), paced
-by their timestamps. It decodes each frame as it plays it.
+inferred and derived signals (`:broadcast`, `:signals`, and `:derived?` as
+for the live source), paced by their timestamps. It decodes each frame as it plays it.
 It loops by default (`:loop?`), shifting timestamps so they keep increasing,
 and `:speed` scales playback.
 

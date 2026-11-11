@@ -67,7 +67,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
 1. **Sources** (`start-live-source!`, `start-replay-source!` in `device/source.clj`)
    call `:emit` with identical events: `{:type :sample :pid :name :value :unit :timestamp-us}`,
    `{:type :signal :signal :value :unit :can-id :timestamp-us}` for inferred CAN
-   signals, `{:type :did :did :did-hex :data :timestamp-us}` for single-frame
+   signals (and, with no `:can-id`, for the values `derived` works out from
+   the rest, such as engine power), `{:type :did :did :did-hex :data :timestamp-us}` for single-frame
    UDS service 22 replies (only recordings made with `record-dids` have them;
    `uds/did-sample` adds `:name`, `:matches`, `:value`, and `:unit` for the DIDs
    in `uds/did-signals`; the live source polls them with `:dids`), and
@@ -120,7 +121,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    source bar. The tiles, their labels, units, and groups come from
    `/api/catalog` through `catalog.cljs`, not from lists in the views; a
    name the catalog lacks goes in an Other group. `views.cljs`
-   tags inferred signals as inferred and PIDs also decoded from CAN as CAN.
+   tags inferred signals as inferred, PIDs also decoded from CAN as CAN,
+   and the derived values, in their own section, as derived.
    The Bus tab (`bus_view.cljs`, `bus.cljs`) shows each CAN ID's latest frame
    and which bits are new since a marked baseline, and colours the bits each
    value is decoded from, which the catalog gives as `:bits`.
@@ -161,7 +163,8 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
 - **Inferred signals (`broadcast`):** `inferred-signals` holds signals identified only from how they behave (gear, clutch, reverse, steering angle, brake, wheel speeds, accelerations, engine torque, doors, and others), which match no PID. `signal-samples` decodes them, and the sources emit them as `:signal` events (`:signals {}` turns them off). Keep them out of `broadcast-signals`; move one there only if it comes to match a polled PID. Record each in `lib/device/docs/can-broadcast.md`.
 - **`recording`:** `raw.bin` is the source of truth. `recording-samples` and the replay source re-parse `raw.bin` and take the reply ID from `meta.edn`. They do not read `pids.csv`. The CSVs are derived by `export-recording`. `start-recording!` writes `raw.bin` and `meta.edn` (first with `:in-progress? true`) for both `record` and the live source, and `list-recordings` describes a recordings folder.
 - **`config`:** `~/.tactrix-reader` (or `$TACTRIX_READER_HOME`) holds an optional hand-edited `config.edn` (`:recordings-dir`, `:vehicles` descriptions keyed by VIN or calibration ID) and, by default, `recordings/`. `resolve-recording-dir` treats a bare name as a folder there and anything with `/` as a path. Recordings are local data and are not committed.
-- **`source`:** the live and replay sources, built on `can` and `recording`.
+- **`derived`:** values worked out from decoded ones, not read from the car: engine power, fuel economy, road grade, clutch slip, and injector duty. `step` is pure (`[state event]` to `[state events]`), and `deriver` wraps it for a stream. The sources and `series/recording-series` pass every decoded event through one, so the derived values follow as `:signal` events (`:derived? false` turns them off in a source). `derived-signals` describes each for the catalog. The gearing and other constants are this car's, measured in its recordings. Each value comes at most 20 times a second, and the state starts again when time jumps, as when a replay loops or seeks. Record a new one in `lib/device/docs/can-broadcast.md`.
+- **`source`:** the live and replay sources, built on `can`, `recording`, and `derived`.
 - **`catalog`:** `catalog` describes how to show every value, as plain data
   with no functions: sections, groups, the primary values, and an entry for
   each PID, inferred signal, and DID. PIDs get their label and group in
@@ -172,8 +175,10 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
   it is labelled from its name and shown under Other. An entry decoded from
   the bus also has `:bits`, a mask per byte of the frame bits it reads.
   `broadcast/decode-bits` works them out from the `:decode` fn by flipping
-  each bit, so they are not written down anywhere.
-- **`series`:** `recording-series` decodes a recording, as the replay source does, into per-channel time series for the dashboard's map: keys `:pid/<name>`, `:signal/<signal>`, and `:did/x<hex>`, map values split into `key.part` channels, booleans as 1/0, other non-numbers as nil, and at most one point per channel per 100 ms, matching the hub's batches.
+  each bit, so they are not written down anywhere. Each of
+  `derived/derived-signals` gets a `:kind :signal` entry with `:section
+  :derived`, which puts it in the Worked out section, and `:from`.
+- **`series`:** `recording-series` decodes a recording, as the replay source does (derived values included), into per-channel time series for the dashboard's map: keys `:pid/<name>`, `:signal/<signal>`, and `:did/x<hex>`, map values split into `key.part` channels, booleans as 1/0, other non-numbers as nil, and at most one point per channel per 100 ms, matching the hub's batches.
 
 The CLI (`device/cli.clj`) is a thin `case` over these namespaces. Its `usage`
 map should stay in sync with the command table in `lib/device/README.md`.

@@ -54,7 +54,7 @@ with an `:error`.
 | `/assets/...` | Compiled ClojureScript and CSS from `resources/public/assets` |
 | `/stream` | Server-Sent Events with Transit JSON data |
 | `/api/snapshot` | Latest status, info, recording, replay position, samples, signals, DIDs, and CAN frames, as Transit JSON |
-| `GET /api/catalog` | How to show each value, from the device library's `catalog/catalog`: `{:sections :groups :primary :signals :dids :did-notes}`. Each of `:signals` is a PID or inferred signal with its label, unit, group, and format. The dashboard builds its tiles from it |
+| `GET /api/catalog` | How to show each value, from the device library's `catalog/catalog`: `{:sections :groups :primary :signals :dids :did-notes}`. Each of `:signals` is a PID, inferred signal, or derived value with its label, unit, group, and format. The dashboard builds its tiles from it |
 | `GET /api/adapters` | `{:adapters [{:vendor :product :serial :path :paths}]}` from `scan-devices` |
 | `GET /api/recordings` | `{:dir "..." :recordings [...]}`: each recording's name, time, length, vehicle (with its config.edn description), note, and size, newest first |
 | `GET /api/recordings/<name>/series` | The recording's values as time series for the dashboard's map (`series/recording-series`): `{:name :bucket-ms :duration-ms :channels {key {:unit :name}} :series {key {:t [ms ...] :v [...]}}}`. 404 `:unknown-recording` for a name `/api/recordings` doesn't list. The last one is cached |

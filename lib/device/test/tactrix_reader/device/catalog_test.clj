@@ -4,6 +4,7 @@
             [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.catalog :as catalog]
+            [tactrix-reader.device.derived :as derived]
             [tactrix-reader.device.pids :as pids]
             [tactrix-reader.device.uds :as uds]))
 
@@ -27,7 +28,7 @@
     (is (not-any? #(re-find #"^supported-pids" (name %)) (keys entries)))))
 
 (deftest describes-every-inferred-signal
-  (let [entries (by-name :signal)]
+  (let [entries (into {} (remove (comp :section val)) (by-name :signal))]
     (is (= (set (for [[_ signals] broadcast/inferred-signals, {:keys [signal]} signals] signal))
            (set (keys entries))))
     (is (= {:kind :signal :name :gear :can-id 0x141 :bits [0 0 0 0 0 0 0x07]
@@ -46,6 +47,18 @@
             {:part :rear-right :label "Rear right" :bits [0 0 0 0 0 0 0xFF 0xFF]}]
            (:parts (:wheel-speeds entries))))))
 
+(deftest describes-every-derived-value
+  (let [entries (by-name :signal)
+        names (set (map :name (:signals (catalog/catalog))))
+        did-names (set (map :name (vals uds/did-signals)))]
+    (is (= {:kind :signal :name :engine-power :section :derived :label "Power" :group :engine
+            :unit :kilowatts :from [:engine-torque :engine-rpm]}
+           (:engine-power entries)))
+    (doseq [{:keys [signal from]} derived/derived-signals]
+      (is (= :derived (:section (get entries signal))) (str signal))
+      ;; Each is worked out from values the catalog also has.
+      (is (every? #(or (names %) (did-names %)) from) (str signal)))))
+
 (deftest values-decoded-from-one-id-read-different-bits
   ;; A display colours each bit of a frame by the value it belongs to.
   (doseq [[can-id entries] (group-by :can-id (filter :can-id (:signals (catalog/catalog))))
@@ -61,8 +74,8 @@
   (let [{:keys [sections groups primary signals]} (catalog/catalog)
         group-ids (set (map (juxt :section :id) groups))]
     (is (every? (set (map :id sections)) (map :section groups)))
-    (doseq [{:keys [kind group name]} signals]
-      (is (contains? group-ids [(if (= :pid kind) :obd :can) group]) (str name)))
+    (doseq [{:keys [kind group name section]} signals]
+      (is (contains? group-ids [(or section (if (= :pid kind) :obd :can)) group]) (str name)))
     (is (every? (set (map :name signals)) primary))
     ;; Names are unique, so a display can look a value up by name alone.
     (is (apply distinct? (map :name signals)))))

@@ -1,15 +1,17 @@
 (ns tactrix-reader.device.catalog
   "How to show every value the sources emit: a label, unit, and group for
-  each PID, inferred CAN signal, and UDS data identifier, as plain data a
-  display can be built from. The engine server sends it to the dashboard, so
+  each PID, inferred CAN signal, derived value, and UDS data identifier, as
+  plain data a display can be built from. The engine server sends it to the dashboard, so
   a signal added to `broadcast/inferred-signals` or a PID added to the poll
   schedule appears there without the dashboard changing.
 
-  PIDs get their display here, in `pid-display`. Inferred signals and DIDs
-  carry theirs in `broadcast/inferred-signals` and `uds/did-signals`."
+  PIDs get their display here, in `pid-display`. Inferred signals, derived
+  values, and DIDs carry theirs in `broadcast/inferred-signals`,
+  `derived/derived-signals`, and `uds/did-signals`."
   (:require [clojure.string :as str]
             [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
+            [tactrix-reader.device.derived :as derived]
             [tactrix-reader.device.pids :as pids]
             [tactrix-reader.device.uds :as uds]))
 
@@ -19,7 +21,10 @@
   [{:id :obd :title "OBD-II PIDs"}
    {:id :can :title "From the CAN bus" :provenance :inferred
     :note (str "Identified from the car's own traffic by how they behave, but matched "
-               "to no PID, so scales and directions are not confirmed.")}])
+               "to no PID, so scales and directions are not confirmed.")}
+   {:id :derived :title "Worked out" :provenance :derived
+    :note (str "Calculated from the values above, with this car's gearing and "
+               "petrol's density. None is read from the car.")}])
 
 (def groups
   "The groups in each section, in order. A value whose group is missing or
@@ -36,7 +41,10 @@
    {:id :doors :section :can :title "Doors"}
    {:id :engine :section :can :title "Engine, battery, and outside"}
    {:id :counters :section :can :title "Fuel gauge and counters"}
-   {:id :other :section :can :title "Other signals"}])
+   {:id :other :section :can :title "Other signals"}
+   {:id :engine :section :derived :title "Engine"}
+   {:id :road :section :derived :title "Road and clutch"}
+   {:id :other :section :derived :title "Other"}])
 
 (def primary
   "The values a display should show largest, by name."
@@ -124,6 +132,14 @@
       parts (assoc :parts (mapv #(assoc % :bits (broadcast/decode-bits decode (:part %)))
                                 parts)))))
 
+(defn- derived-entries
+  "Derived values arrive as signals, so they are `:kind :signal`, with the
+  section they are shown in and what each is worked out `:from`."
+  []
+  (for [{:keys [signal] :as entry} derived/derived-signals]
+    (merge {:kind :signal :name signal :section :derived}
+           (select-keys entry [:label :group :unit :from]))))
+
 (defn- did-entries []
   (for [[did {:keys [name] :as entry}] (sort-by key uds/did-signals)]
     (merge {:did did :label (name-label name)}
@@ -135,13 +151,16 @@
 
   - `:sections` and `:groups`, as above.
   - `:primary`, the names to show largest.
-  - `:signals`, one entry per PID and inferred signal: `{:kind :pid|:signal
-    :name :label :group}` with `:unit`, `:format`, `:parts`, `:raw?`, and
-    `:override` where they apply, `:pid` and `:polled?` (in the default poll
-    schedule) for a PID, and, for a signal or a PID also decoded from the
-    bus, `:can-id` and `:bits`, the bits of that ID's frames it is decoded
-    from, as `broadcast/decode-bits` gives them. Each of a signal's `:parts`
-    has its own `:bits`.
+  - `:signals`, one entry per PID, inferred signal, and derived value:
+    `{:kind :pid|:signal :name :label :group}` with `:unit`, `:format`,
+    `:parts`, `:raw?`, and `:override` where they apply, `:pid` and
+    `:polled?` (in the default poll schedule) for a PID, and, for a signal
+    or a PID also decoded from the bus, `:can-id` and `:bits`, the bits of
+    that ID's frames it is decoded from, as `broadcast/decode-bits` gives
+    them. Each of a signal's `:parts` has its own `:bits`. A PID is shown
+    in the `:obd` section and a signal in `:can`, unless the entry names
+    its `:section`: a derived value has `:section :derived`, no `:can-id`,
+    and `:from`, the names of the values it is worked out from.
   - `:dids`, one entry per DID in `uds/did-signals`, with `:matches` and
     `:compare` for one fitted to a PID and `:published? true` for one named
     in a published list, and `:did-notes`, what is known about the others."
@@ -149,6 +168,6 @@
   {:sections sections
    :groups groups
    :primary primary
-   :signals (vec (concat (pid-entries) (signal-entries)))
+   :signals (vec (concat (pid-entries) (signal-entries) (derived-entries)))
    :dids (vec (did-entries))
    :did-notes uds/did-notes})

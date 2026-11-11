@@ -31,8 +31,12 @@ last minute:
 - "From the CAN bus": signals identified from the car's own traffic but
   matched to no PID. See
   [broadcast CAN traffic](../../lib/device/docs/can-broadcast.md#inferred-signals).
-- UDS data identifiers matched to a PID, each over the polled value it
-  matches, when the source has DIDs.
+- "Worked out": values calculated from the others, such as engine power
+  and road grade. See
+  [what they are](../../lib/device/docs/can-broadcast.md#worked-out-from-the-decoded-signals).
+- UDS data identifiers whose meaning is known, when the source has DIDs:
+  those matched to a PID over the polled value they match, and those named
+  in published lists.
 
 What the tiles are, and their labels, units, and groups, comes from the
 server's `/api/catalog`, not from this code: a signal added to the device
@@ -43,7 +47,8 @@ its tiles, and each section folds away (remembered in the browser).
 
 Badges say how a value is known, the same on tiles and in tables: **polled**
 (a mode 01 PID), **CAN** (also decoded from the bus and confirmed against
-the PID), **inferred** (from the bus, not confirmed), **fitted** (a DID
+the PID), **inferred** (from the bus, not confirmed), **derived**
+(calculated from other values, not read from the car), **fitted** (a DID
 with a scale fitted to a PID), and **published** (a DID named and scaled in a
 list published for related Subaru ECUs, checked against drives). A count with no known scale has the unit "raw". A
 tile whose catalog entry has an `:override` shows its text while the signal

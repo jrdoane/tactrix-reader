@@ -21,7 +21,9 @@
    :milliamps "mA"
    :grams-per-revolution "g/rev"
    :newton-metres "Nm"
-   :milliseconds "ms"})
+   :milliseconds "ms"
+   :kilowatts "kW"
+   :litres-per-100-km "l/100 km"})
 
 (def unit-decimals
   "Decimal places for each unit, so a value keeps its width as it updates."
@@ -39,7 +41,9 @@
    :milliamps 3
    :grams-per-revolution 3
    :newton-metres 1
-   :milliseconds 2})
+   :milliseconds 2
+   :kilowatts 1
+   :litres-per-100-km 1})
 
 (defn did-hex [did]
   (.padStart (.toUpperCase (.toString did 16)) 4 "0"))

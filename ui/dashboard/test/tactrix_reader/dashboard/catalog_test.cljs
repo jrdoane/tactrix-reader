@@ -64,6 +64,20 @@
     (is (= [:other [:signal/brake]]
            (last (:can (group-names (catalog/sections catalog (catalog/entries catalog seen) seen))))))))
 
+(deftest an-entry-that-names-its-section-goes-there
+  ;; A derived value arrives as a signal but is shown in its own section.
+  (let [catalog (-> server-catalog
+                    (update :sections conj {:id :derived :title "Worked out" :provenance :derived})
+                    (update :groups conj {:id :engine :section :derived :title "Engine"})
+                    (update :signals conj {:kind :signal :name :engine-power :section :derived
+                                           :label "Power" :group :engine :unit :kilowatts}))
+        seen {:pid #{} :signal #{}}
+        sections (catalog/sections catalog (catalog/entries catalog seen) seen)]
+    (is (= [[:engine [:signal/engine-power]]] (:derived (group-names sections))))
+    (is (= [[:wheels [:signal/wheel-speeds.front-left :signal/wheel-speeds.front-right]]]
+           (:can (group-names sections))))
+    (is (not (contains? (catalog/can-fields catalog) nil)) "it is decoded from no frame")))
+
 (deftest primary-tiles-follow-the-catalog-order
   (is (= [:pid/engine-rpm :signal/gear]
          (map :id (catalog/primary-tiles server-catalog (:signals server-catalog))))))

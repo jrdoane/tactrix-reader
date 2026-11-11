@@ -7,6 +7,7 @@
   Keep the two in step."
   (:require [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
+            [tactrix-reader.device.derived :as derived]
             [tactrix-reader.device.openport :as openport]
             [tactrix-reader.device.recording :as recording]
             [tactrix-reader.device.uds :as uds]))
@@ -87,16 +88,17 @@
   "Returns a recording's values as `{:ok? true :bucket-ms :duration-ms
   :channels {key {:unit :name}} :series {key {:t [ms ...] :v [value ...]}}}`, with
   `t` in ms from the recording's first message. Decodes raw.bin as the replay
-  source does, with broadcast and inferred signals and DID replies. Leaves
-  out channels that never had a number."
+  source does, with broadcast, inferred, and derived signals and DID
+  replies. Leaves out channels that never had a number."
   [dir]
   (let [rx-id (recording/recording-rx-id dir)
         messages (filterv #(and (= :message (:type %)) (not (:malformed? %)))
                           (:events (openport/parse-adapter-stream (recording/recording-bytes dir))))
         t0 (:timestamp-us (first messages))
+        derive (derived/deriver)
         points (for [message messages
-                     event (can/message-events rx-id broadcast/broadcast-signals
-                                               broadcast/inferred-signals message)
+                     event (derive (can/message-events rx-id broadcast/broadcast-signals
+                                                       broadcast/inferred-signals message))
                      point (event-points event)]
                  [point (quot (- (:timestamp-us event) t0) 1000)])]
     (if (empty? points)

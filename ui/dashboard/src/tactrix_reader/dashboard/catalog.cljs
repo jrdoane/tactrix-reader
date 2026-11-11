@@ -97,14 +97,16 @@
 
 (defn sections
   "The catalog's sections, each with `:groups` of `{:id :title :tiles}`, in
-  catalog order. Groups with no tiles are left out, and an entry whose group
-  its section does not have goes in `:other`."
+  catalog order. A PID goes in `:obd` and a signal in `:can`, unless its
+  entry names a `:section`, as a derived value's does. Groups with no tiles
+  are left out, and an entry whose group its section does not have goes in
+  `:other`."
   [{:keys [primary groups] :as catalog} entries seen]
   (let [primary (set primary)
         section-of {:pid :obd :signal :can}
         group-ids (into #{} (map (juxt :section :id)) groups)
-        by-group (group-by (fn [{:keys [kind group]}]
-                             (let [section (section-of kind)]
+        by-group (group-by (fn [{:keys [kind group section]}]
+                             (let [section (or section (section-of kind))]
                                [section (if (group-ids [section group]) group :other)]))
                            (filter #(shown? % primary seen) entries))]
     (for [{:keys [id] :as section} (:sections catalog)]

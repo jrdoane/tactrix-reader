@@ -928,7 +928,8 @@ Second pass. None of these is a new signal: each is arithmetic on the ones
 above, and several double as checks of their scales against the car's
 published figures (Subaru's
 [2015 Impreza specifications](https://s3.amazonaws.com/subarumedia.iconicweb.com/mediasite/specs/2015_Impreza_spec_sheet_9_24_Final.pdf)).
-None is computed by the library yet.
+The library computes five of them as it decodes; see
+[Derived signals](#derived-signals). The rest are in the table only.
 
 | Quantity | From | In the five drives | Check |
 |---|---|---|---|
@@ -952,6 +953,51 @@ recordings.
 
 The gear figures also give `141`'s 1st gear properly: 123.2, not the 124
 that the launch data [suggested](#gear).
+
+### Derived signals
+
+`derived/derived-signals` are worked out as events arrive, by the live and
+replay sources and by `series/recording-series`, so the dashboard and its
+map have them. Each is a `{:type :signal ...}` event with no `:can-id`,
+sent after the event that completed it and at most 20 times a second, from
+the latest of the other values if that is under a second old. The
+dashboard shows them in their own section, tagged derived.
+
+| Signal | Worked out as | Sent with | No value (nil) |
+|---|---|---|---|
+| `:engine-power` | Engine torque × RPM × π ÷ 30,000, in kW; negative on the overrun | `141`'s torque | |
+| `:clutch-slip` | RPM less speed × the gear's rpm per km/h (123.2, 67.2, 46.07, 34.55, 26.22), in rpm | `141`'s torque | In neutral, and in reverse, whose ratio wasn't measured |
+| `:fuel-economy` | Fuel flow ÷ 745 g/l ÷ speed, in l/100 km | `360`'s fuel flow | Below 5 km/h |
+| `:road-grade` | The mean longitudinal acceleration over the last second, less the change in `0D1`'s speed over it, ÷ g, in % | `0D0`'s acceleration | Below 10 km/h, in reverse, for a second after the yaw rate reaches 8°/s, and until most of a second has been seen |
+| `:injector-duty` | Pulse width (DID `10A3`) × RPM ÷ 1,200, in %: each injector opens once in two revolutions | The DID's reply | Not sent at all without DID polling |
+
+Run over the recordings, they give what the second pass found by hand:
+power peaks at 109.8 kW in `2026-10-28-drive` and 102.4 kW in
+`2026-10-30-did-drive`, clutch slip sits at a median of 0 rpm with 90% of
+it within −37 and +71 rpm in the first of those, and the injectors reach
+62% duty in the second.
+
+What to keep in mind when reading them:
+
+- **Clutch slip** is only as good as `141`'s gear, which holds the old gear
+  through part of a shift, so a shift shows as a spike of several hundred
+  rpm either way. Stopped in gear with the clutch down it reads the idle
+  speed, since the gearbox isn't turning.
+- **Road grade** is wrong in a tight turn, so it has no value there. The
+  sensor sits ahead of the rear axle, and in a turn it feels part of the
+  pull towards the centre as slowing down. What the sensor feels less what
+  the wheels show falls by 1.5-2.2 m/s² for each (rad/s)² of yaw rate, in
+  all five drives (r = −0.53 to −0.76 over the windows with a turn in
+  them). Left in, that read as low as −8% to −13% in the tightest turn of
+  each drive; at 8°/s it is 0.4%. With turns left out, 6-11% of the time moving, the two
+  drives checked stay within −7.4% and +6.1%. The sensor's zero isn't
+  known either, so a constant error of a fraction of a percent is likely,
+  and the body's pitch adds a little under braking and acceleration.
+- **Fuel economy** is 0 in fuel cut and passes 100 l/100 km pulling away.
+- **Power** rests on the torque scale, which is inferred, though the peak
+  matching the engine's rating supports it.
+
+They add about a tenth to the time `recording-series` takes.
 
 ### Leads from other cars
 

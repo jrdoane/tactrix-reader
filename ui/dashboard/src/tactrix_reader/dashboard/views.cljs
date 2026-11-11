@@ -307,6 +307,7 @@
   {:polled ["polled" "Read by polling an OBD-II mode 01 PID"]
    :can ["CAN" "Decoded from the car's own CAN traffic and confirmed against the polled PID"]
    :inferred ["inferred" "Identified from CAN traffic by how it behaves, not confirmed against a PID"]
+   :derived ["derived" "Worked out from other values, not read from the car"]
    :fitted ["fitted" "A UDS data identifier with a scale fitted from drives, not documented"]
    :published ["published" (str "A UDS data identifier named and scaled in a list published for "
                                 "related Subaru ECUs, and checked against drives")]})
@@ -324,7 +325,7 @@
 
 (defn- provenance-legend []
   (into [:p.legend]
-        (for [kind [:polled :can :inferred :fitted :published]]
+        (for [kind [:polled :can :inferred :derived :fitted :published]]
           ^{:key kind}
           [:span.legend-item [badge kind] (second (get provenance kind))])))
 
@@ -515,19 +516,22 @@
            (when can-id [:span.source-id (can-id-hex can-id)])]])]]]))
 
 (defn- signal-table
-  "Every inferred CAN signal the catalog has or that has arrived."
+  "Every inferred CAN signal the catalog has or that has arrived, then the
+  values derived from them, which arrive as signals too."
   []
   (let [signals @(rf/subscribe [::subs/signals])
         entries (filter (comp #{:signal} :kind) @(rf/subscribe [::subs/entries]))]
     [:section.block
      [:div.block-head
-      [:h2 "CAN signals"]
-      [:span.muted (str (count entries) " decoded")]]
+      [:h2 "CAN signals and derived values"]
+      [:span.muted (str (count (remove :section entries)) " decoded, "
+                        (count (filter :section entries)) " derived")]]
      [:table.samples.compact
       [:thead
        [:tr [:th "CAN ID"] [:th "Name"] [:th.value "Value"] [:th "Unit"] [:th "Source"]]]
       [:tbody
-       (for [{:keys [name can-id] :as entry} (sort-by (juxt :can-id :label) entries)
+       (for [{:keys [name can-id section] :as entry}
+             (sort-by (juxt (comp some? :section) :can-id :label) entries)
              :let [{:keys [value unit]} (get signals name)]]
          ^{:key name}
          [:tr
@@ -535,7 +539,7 @@
           [:td.name (:label entry)]
           [:td.value (entry-text entry value unit)]
           [:td.unit (entry-unit entry unit)]
-          [:td.source [badge :inferred]]])]]]))
+          [:td.source [badge (if (= :derived section) :derived :inferred)]]])]]]))
 
 (defn- did-table
   "Every DID that has arrived, with what is known about it."

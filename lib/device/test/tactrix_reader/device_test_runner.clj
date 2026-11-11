@@ -6,6 +6,7 @@
             [tactrix-reader.device.catalog-test]
             [tactrix-reader.device.codec-test]
             [tactrix-reader.device.config-test]
+            [tactrix-reader.device.derived-test]
             [tactrix-reader.device.iso15765-test]
             [tactrix-reader.device.obd-test]
             [tactrix-reader.device.openport-test]
@@ -26,6 +27,7 @@
                                              'tactrix-reader.device.catalog-test
                                              'tactrix-reader.device.codec-test
                                              'tactrix-reader.device.config-test
+                                             'tactrix-reader.device.derived-test
                                              'tactrix-reader.device.iso15765-test
                                              'tactrix-reader.device.obd-test
                                              'tactrix-reader.device.openport-test
