@@ -54,3 +54,10 @@ clj-kondo runs with the shared config in `.clj-kondo/config.edn`:
 (cd services/engine-server && clojure -M:lint)
 (cd ui/dashboard && npm run lint)
 ```
+
+## License
+
+Copyright 2026 Jonathan Doane.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). The software is
+provided "as is", without warranties or conditions of any kind.

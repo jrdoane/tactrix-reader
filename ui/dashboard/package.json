@@ -1,6 +1,7 @@
 {
   "name": "engine-dashboard",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "watch": "shadow-cljs watch app",
     "release": "shadow-cljs release app",
