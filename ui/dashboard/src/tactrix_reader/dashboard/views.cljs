@@ -307,7 +307,9 @@
   {:polled ["polled" "Read by polling an OBD-II mode 01 PID"]
    :can ["CAN" "Decoded from the car's own CAN traffic and confirmed against the polled PID"]
    :inferred ["inferred" "Identified from CAN traffic by how it behaves, not confirmed against a PID"]
-   :fitted ["fitted" "A UDS data identifier with a scale fitted from drives, not documented"]})
+   :fitted ["fitted" "A UDS data identifier with a scale fitted from drives, not documented"]
+   :published ["published" (str "A UDS data identifier named and scaled in a list published for "
+                                "related Subaru ECUs, and checked against drives")]})
 
 (defn- badge
   "A provenance badge, with `detail` (such as a CAN ID) added to its
@@ -322,7 +324,7 @@
 
 (defn- provenance-legend []
   (into [:p.legend]
-        (for [kind [:polled :can :inferred :fitted]]
+        (for [kind [:polled :can :inferred :fitted :published]]
           ^{:key kind}
           [:span.legend-item [badge kind] (second (get provenance kind))])))
 
@@ -411,9 +413,11 @@
        [section-block section])]))
 
 (defn- did-tile
-  "A DID matched to a PID: its fitted value, or its raw number when it has no
-  scale, over the polled value it was matched against."
-  [{:keys [did name value unit number matches]} compare samples]
+  "A DID whose meaning is known: its value, or its raw number when it has no
+  scale. One fitted to a PID is shown over the polled value it was matched
+  against, and the rest, which `published?` are, over where the scale came
+  from."
+  [{:keys [did name value unit number matches]} compare published? samples]
   (let [polled-value (catalog/compare-value compare samples)]
     [:div.tile
      [:div.readout-label
@@ -423,20 +427,23 @@
       (if (some? value) (format-value value unit) number)
       [:span.readout-unit (if (some? value) (get unit-labels unit "") "raw")]]
      [:div.readout-compare
-      (str (if matches (str "PID " (hex-byte matches)) "MAF ÷ rpm") ": "
-           (if (some? polled-value)
-             (str (format-value polled-value unit) " " (get unit-labels unit ""))
-             "—"))]
+      (cond
+        matches (str "PID " (hex-byte matches) ": "
+                     (if (some? polled-value)
+                       (str (format-value polled-value unit) " " (get unit-labels unit ""))
+                       "—"))
+        published? "published scale")]
      [sparkline (keyword "did" (str "x" (did-hex did)))]]))
 
 (defn- did-block
-  "The DIDs matched to a PID, which only recordings made with record-dids
-  and a live source polling DIDs have."
+  "The DIDs whose meaning is known, which only recordings made with
+  record-dids and a live source polling DIDs have."
   []
   (let [dids @(rf/subscribe [::subs/did-list])
         samples @(rf/subscribe [::subs/samples])
         {catalog-dids :dids} @(rf/subscribe [::subs/catalog])
         compare-by-did (into {} (map (juxt :did :compare)) catalog-dids)
+        published (into #{} (comp (filter :published?) (map :did)) catalog-dids)
         collapsed? (contains? @(rf/subscribe [::subs/collapsed]) :dids)
         matched (filter :name dids)]
     (when (seq matched)
@@ -446,18 +453,19 @@
                        :on-click #(rf/dispatch [::events/toggle-collapsed :dids])}
          [:span.chevron (if collapsed? "▸" "▾")]
          [:h2 "UDS data identifiers"]]
-        [badge :fitted]
         [:span.muted (str (count matched) " values")]]
        (when-not collapsed?
          [:<>
           [:p.block-note
-           "Read with service 22 alongside the PIDs. Each tile is a DID matched to a "
-           "PID, with a scale fitted from drives, over the polled value it was "
-           "matched against. Every DID is listed under Signals."]
+           "Read with service 22 alongside the PIDs. A tile over a PID is a DID "
+           "matched to that PID, with a scale fitted from drives. The others take "
+           "their name and scale from lists published for related Subaru ECUs, "
+           "checked against drives. Every DID is listed under Signals."]
           (into [:div.tiles.did-tiles]
                 (map (fn [reply]
                        ^{:key (:did reply)}
-                       [did-tile reply (get compare-by-did (:did reply)) samples]))
+                       [did-tile reply (get compare-by-did (:did reply))
+                        (contains? published (:did reply)) samples]))
                 matched)])])))
 
 (defn- entry-text
@@ -534,7 +542,8 @@
   []
   (let [dids @(rf/subscribe [::subs/did-list])
         ranges @(rf/subscribe [::subs/did-ranges])
-        {:keys [did-notes]} @(rf/subscribe [::subs/catalog])]
+        {:keys [did-notes] catalog-dids :dids} @(rf/subscribe [::subs/catalog])
+        published (into #{} (comp (filter :published?) (map :did)) catalog-dids)]
     [:section.block
      [:div.block-head
       [:h2 "UDS data identifiers"]
@@ -556,7 +565,7 @@
             [:td.value {:class (when (not= low high) "varies")}
              (if (= low high) (str low) (str low "–" high))]
             [:td.note (if name (label name) (get did-notes did ""))]
-            [:td.source (when name [badge :fitted])]])]])]))
+            [:td.source (when name [badge (if (published did) :published :fitted)])]])]])]))
 
 (defn- signals-view []
   [:<>

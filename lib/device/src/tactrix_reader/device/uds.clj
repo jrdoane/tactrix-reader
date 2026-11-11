@@ -32,51 +32,108 @@
 (def scanned-dids
   "The DIDs in `1000`-`10FF` that the project's 2015 Impreza returned data for
   (see docs/subaru-ssm.md), less `101E`, `1061`, and `1063`, whose replies
-  need more than one CAN frame. What each holds is not yet known."
+  need more than one CAN frame. `did-signals` and `did-notes` hold what is
+  known about them."
   [0x1000 0x1001 0x1002 0x1003 0x1004 0x1005 0x1006 0x1007 0x1008 0x1009 0x100A
    0x101D 0x1020 0x1022 0x1024 0x103C 0x103D 0x1040 0x1060 0x1080 0x1088 0x1089
    0x10A0 0x10A1 0x10A3 0x10A5 0x10A6 0x10AE 0x10B1 0x10B2 0x10B4 0x10B5 0x10B6
    0x10B7 0x10B8 0x10B9 0x10BA 0x10BC 0x10BE 0x10C0 0x10C1 0x10DE 0x10DF 0x10E0
    0x10E3 0x10E5 0x10EC 0x10ED 0x10EE 0x10EF 0x10F0 0x10F1])
 
+(defn- published
+  "Entries for DIDs named and scaled in the published lists, each with
+  `:published? true`."
+  [entries]
+  (into {} (for [[did entry] entries] [did (assoc entry :published? true)])))
+
 (def did-signals
-  "Single-byte DIDs the project's 2015 Impreza returns that track a PID, by
-  DID, with the PID in `:matches`. `10A3` matches air per revolution, MAF
-  over rpm, rather than one PID. The scales were fitted from the
-  2026-10-29-did-drive and 2026-10-30-did-drive recordings, not documented;
-  see docs/subaru-ssm.md. `10B2` behaves like a charging voltage target
-  rather than a measurement, so it matches ECU voltage only once the
-  alternator catches up.
+  "Single-byte DIDs the project's 2015 Impreza returns whose meaning is
+  known, by DID. There are two kinds; see docs/subaru-ssm.md for both.
+
+  Those with `:matches` track a PID, and their scales were fitted from the
+  2026-10-29-did-drive and 2026-10-30-did-drive recordings, not documented.
+
+  Those with `:published? true` take their name and scale from lists other
+  people have published for related Subaru ECUs (the Subaru Diesel Crew's
+  mode 22 table and OBDb's), and each was then checked against the same two
+  drives. Right and left are the lists' names for the two banks. `10A3` and
+  `10B2` were first fitted here as air per revolution and a charging voltage
+  target; the published names fit the drives better.
 
   `:label` and `:compare` are for `catalog/catalog`: `:compare` names the
   polled value a display can show beside the DID's, as `{:pid name}`, with
-  `:part` for a PID that decodes to a map, or `{:derived :air-per-revolution}`
-  for MAF over rpm."
-  {0x10A1 {:name :mass-air-flow :matches 0x10 :unit :grams-per-second
-           :label "Mass air flow" :compare {:pid :maf-air-flow}
-           ;; Probably the MAF sensor's own output, which rises with about
-           ;; the fourth root of the flow.
-           :decode #(round-to 2 (Math/pow (+ (* 0.0177 %) 0.186) 4))}
-   0x10A3 {:name :air-per-revolution :unit :grams-per-revolution
-           :label "Air per revolution" :compare {:derived :air-per-revolution}
-           :decode #(round-to 3 (* 0.019 %))}
-   0x10A6 {:name :accelerator-pedal :matches 0x5A :unit :percent
-           :label "Accelerator pedal" :compare {:pid :relative-accelerator-pedal-position}
-           :decode #(round-to 1 (* 0.178 %))}
-   0x10B2 {:name :charging-voltage-target :matches 0x42 :unit :volts
-           :label "Charging target" :compare {:pid :control-module-voltage}
-           :decode #(round-to 2 (+ (* 0.05 %) 10.73))}
-   0x10BA {:name :wideband-current :matches 0x34 :unit :milliamps
-           :label "Wideband current"
-           :compare {:pid :wideband-oxygen-sensor-1-current :part :milliamps}
-           :decode #(round-to 3 (/ (- % 128) 8.0))}
-   0x10BE {:name :lambda :matches 0x34 :unit :lambda
-           :label "Measured λ"
-           :compare {:pid :wideband-oxygen-sensor-1-current :part :lambda}
-           :decode #(round-to 3 (/ % 128.0))}
-   0x10DF {:name :throttle-position :matches 0x11 :unit :percent
-           :label "Throttle" :compare {:pid :throttle-position}
-           :decode #(round-to 1 (- (* 0.8 %) 40))}})
+  `:part` for a PID that decodes to a map."
+  (merge
+   {0x10A1 {:name :mass-air-flow :matches 0x10 :unit :grams-per-second
+            :label "Mass air flow" :compare {:pid :maf-air-flow}
+            ;; Probably the MAF sensor's own output, which rises with about
+            ;; the fourth root of the flow.
+            :decode #(round-to 2 (Math/pow (+ (* 0.0177 %) 0.186) 4))}
+    0x10A6 {:name :accelerator-pedal :matches 0x5A :unit :percent
+            :label "Accelerator pedal" :compare {:pid :relative-accelerator-pedal-position}
+            :decode #(round-to 1 (* 0.178 %))}
+    0x10BA {:name :wideband-current :matches 0x34 :unit :milliamps
+            :label "Wideband current"
+            :compare {:pid :wideband-oxygen-sensor-1-current :part :milliamps}
+            :decode #(round-to 3 (/ (- % 128) 8.0))}
+    0x10BE {:name :lambda :matches 0x34 :unit :lambda
+            :label "Measured λ"
+            :compare {:pid :wideband-oxygen-sensor-1-current :part :lambda}
+            :decode #(round-to 3 (/ % 128.0))}
+    0x10DF {:name :throttle-position :matches 0x11 :unit :percent
+            :label "Throttle" :compare {:pid :throttle-position}
+            :decode #(round-to 1 (- (* 0.8 %) 40))}}
+   (published
+    {;; The fuel in each injection, from `360`'s fuel flow, is 3.1 mg for
+     ;; each millisecond of this, less 1.8 mg (r = 0.999).
+     0x10A3 {:name :injector-pulse-width :unit :milliseconds
+             :label "Injector pulse width"
+             :decode #(round-to 2 (* 0.256 %))}
+     ;; 0 at idle, and up to 12 degrees under load.
+     0x10A5 {:name :learned-ignition-timing :unit :degrees
+             :label "Learned timing"
+             :decode #(/ (- % 128) 2.0)}
+     0x10AE {:name :purge-valve-duty :unit :percent
+             :label "Purge valve duty"
+             :decode #(round-to 1 (/ % 2.55))}
+     ;; 0 at idle and at full throttle, up to 50 at part load.
+     0x10B1 {:name :egr-steps
+             :label "EGR steps"
+             :decode identity}
+     ;; The alternator runs at about 30, 51, or 68, giving about 12.2,
+     ;; 13.3, and 14.2 V.
+     0x10B2 {:name :alternator-duty :unit :percent
+             :label "Alternator duty"
+             :decode double}
+     ;; The cam angles read 0 at idle and in fuel cut.
+     0x10B4 {:name :intake-cam-advance-right :unit :degrees
+             :label "Intake cam advance, right"
+             :decode #(double (- % 50))}
+     0x10B5 {:name :intake-cam-advance-left :unit :degrees
+             :label "Intake cam advance, left"
+             :decode #(double (- % 50))}
+     ;; The oil control valves that move the cams.
+     0x10B6 {:name :intake-ocv-duty-right :unit :percent
+             :label "Intake OCV duty, right"
+             :decode #(round-to 1 (/ % 2.55))}
+     0x10B7 {:name :intake-ocv-duty-left :unit :percent
+             :label "Intake OCV duty, left"
+             :decode #(round-to 1 (/ % 2.55))}
+     0x10DE {:name :throttle-motor-duty :unit :percent
+             :label "Throttle motor duty"
+             :decode #(round-to 1 (/ (- % 128) 1.28))}
+     0x10EC {:name :exhaust-cam-retard-right :unit :degrees
+             :label "Exhaust cam retard, right"
+             :decode #(double (- % 50))}
+     0x10ED {:name :exhaust-cam-retard-left :unit :degrees
+             :label "Exhaust cam retard, left"
+             :decode #(double (- % 50))}
+     0x10EE {:name :exhaust-ocv-duty-right :unit :percent
+             :label "Exhaust OCV duty, right"
+             :decode #(round-to 1 (/ % 2.55))}
+     0x10EF {:name :exhaust-ocv-duty-left :unit :percent
+             :label "Exhaust OCV duty, left"
+             :decode #(round-to 1 (/ % 2.55))}})))
 
 (defn- paired-notes
   "Notes for DIDs that move together, each naming the other in its pair."
@@ -86,25 +143,24 @@
              [did (str note "; pairs with " (format "%04X" other))])))
 
 (def did-notes
-  "What the 2026-10-29-did-drive and 2026-10-30-did-drive recordings showed
-  about DIDs that match no PID, by DID. These are inferences; see
-  docs/subaru-ssm.md."
+  "What is known about the DIDs that `did-signals` does not decode, by DID.
+  These are inferences from the 2026-10-29-did-drive and
+  2026-10-30-did-drive recordings and from the order of the published
+  lists; see docs/subaru-ssm.md."
   (merge
    (zipmap (range 0x1000 0x1100 0x20) (repeat "Supported-DID bitmap"))
-   (zipmap [0x101D 0x1022 0x10E3] (repeat "Held at 00; knock correction is not ruled out"))
-   (zipmap [0x10AE 0x10B1 0x10B4 0x10B5] (repeat "Varies under load"))
-   (paired-notes "Possibly cam timing" [0x10EC 0x10ED])
-   (paired-notes "Loosely follows load and timing" [0x10EE 0x10EF] [0x10F0 0x10F1])
-   (paired-notes "Drops at once in fuel cut" [0x10B6 0x10B7] [0x10B8 0x10B9])
+   (zipmap [0x101D 0x1022] (repeat "Held at 00; knock correction is not ruled out"))
+   (paired-notes "Probably intake OCV current, 32 mA per count" [0x10B8 0x10B9])
+   (paired-notes "Probably exhaust OCV current, 32 mA per count" [0x10F0 0x10F1])
    (paired-notes "Opposite flags that swap at the first full throttle" [0x1088 0x1089])
    {0x103D "Changes between drives only: 2A, 2D, 2F"
-    0x10A5 "Rises above about 50% load"
-    0x10DE "Follows load and timing advance"}))
+    0x10E3 "Held at 00; published as the cruise control's memorised speed"
+    0x10BC "Possibly the wideband sensor's resistance; holds at 49-51"}))
 
 (defn did-sample
   "Adds what `did-signals` knows to a DID reply such as `can/did-reply`
-  returns: its `:name` and the PID it `:matches`, and, for a one-byte reply
-  with a fitted scale, its `:value` and `:unit`. Other replies are returned
+  returns: its `:name`, the PID it `:matches` if it was fitted to one, and,
+  for a one-byte reply, its `:value` and `:unit`. Other replies are returned
   unchanged."
   [{:keys [did data] :as reply}]
   (let [{:keys [decode unit] :as known} (get did-signals did)]

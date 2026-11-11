@@ -116,14 +116,9 @@
 
 (defn compare-value
   "The polled value a DID is compared with, from the samples by name:
-  `compare` is `{:pid name}`, with `:part` for a PID that decodes to a map,
-  or `{:derived :air-per-revolution}` for MAF over revolutions per second."
-  [{:keys [pid part derived]} samples]
-  (cond
-    pid (cond-> (get-in samples [pid :value])
-          part (get part))
-    (= :air-per-revolution derived)
-    (let [maf (get-in samples [:maf-air-flow :value])
-          rpm (get-in samples [:engine-rpm :value])]
-      (when (and maf rpm (pos? rpm))
-        (/ maf (/ rpm 60))))))
+  `compare` is `{:pid name}`, with `:part` for a PID that decodes to a map.
+  A DID with nothing to compare gives nil."
+  [{:keys [pid part]} samples]
+  (when pid
+    (cond-> (get-in samples [pid :value])
+      part (get part))))

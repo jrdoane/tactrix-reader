@@ -58,8 +58,8 @@
   "Signals the project's 2015 Impreza broadcasts that were identified from how
   they behave, in the 2026-10-28-drive recording and, for the doors,
   2026-11-09-194644, but match no mode 01 PID, by CAN ID. The counters, the
-  fuel gauge, and the clutch, reverse, torque, and fuel cut signals were
-  identified by comparing all seven reference recordings. Scales marked
+  fuel gauge, the battery current, and the clutch, reverse, torque, and fuel
+  cut signals were identified by comparing all seven reference recordings. Scales marked
   approximate come from fits against quantities derived from other signals;
   see docs/can-broadcast.md. Unlike `broadcast-signals`, these are not
   confirmed against the PID that reports the same thing.
@@ -76,9 +76,11 @@
            ;; Positive is a left turn, assuming opendbc's wheel order in 0D4.
            :decode (fn [[high low]] (round-to 1 (* 0.1 (signed-word high low))))}]
    0x0D0 [;; Approximate scales. Positive is to the left and forwards. The
-          ;; yaw rate is 0.005 rad/s per bit and the lateral acceleration
-          ;; 0.2 m/s2 per bit, the scales the RaceChrono BRZ notes give, which
-          ;; the fits against wheel speeds agree with.
+          ;; yaw rate is 0.005 rad/s per bit, the lateral acceleration
+          ;; 0.2 m/s2 per bit, and the longitudinal 0.1 m/s2 per bit, the
+          ;; scales the RaceChrono BRZ notes give. The fits against wheel
+          ;; speeds agree with the two accelerations, and put the yaw rate
+          ;; about 7% lower.
           {:signal :yaw-rate :unit :degrees-per-second :byte-count 4
            :label "Yaw rate" :group :motion
            :decode (fn [[_ _ low high]] (round-to 1 (* 0.2865 (signed-word high low))))}
@@ -87,7 +89,7 @@
            :decode #(round-to 2 (* 0.0204 (signed-byte (nth % 6))))}
           {:signal :longitudinal-acceleration :unit :g :byte-count 8
            :label "Acceleration" :group :motion
-           :decode #(round-to 2 (* -0.00907 (signed-byte (nth % 7))))}]
+           :decode #(round-to 2 (* -0.0102 (signed-byte (nth % 7))))}]
    0x0D1 [{:signal :brake-pressure :byte-count 3 :decode #(nth % 2)
            :label "Brake pressure" :group :driver :raw? true}]
    0x0D3 [{:signal :brake :byte-count 3 :decode #(bit-test (nth % 2) 5)
@@ -154,6 +156,14 @@
           {:signal :fuel-flow :unit :grams-per-second :byte-count 2
            :label "Fuel flow" :group :engine
            :decode (fn [[low high]] (round-to 3 (* 0.00072 (+ low (* 256 high)))))}]
+   ;; Byte 5's high nibble and byte 6 are the battery current sensor, 12
+   ;; bits around 2048: above it the battery is charging, below it
+   ;; discharging, and it pins at 250 while the starter cranks. The scale is
+   ;; not known, so the value is the count less 2048.
+   0x361 [{:signal :battery-current :byte-count 7
+           :label "Battery current" :group :engine :raw? true
+           :decode (fn [[_ _ _ _ _ low high]]
+                     (- (+ (bit-shift-right low 4) (* 16 high)) 2048))}]
    ;; True while the door is open. Front left is the driver's door.
    0x374 [{:signal :door-front-left :byte-count 4 :decode #(bit-test (nth % 3) 0)
            :label "Driver's door" :group :doors :format :open-closed}

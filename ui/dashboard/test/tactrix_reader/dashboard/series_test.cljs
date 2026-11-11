@@ -10,16 +10,16 @@
                                :value {:lambda 0.998}})))
   (is (= [[:signal/brake nil 1]] (series/event-points {:type :signal :signal :brake :value true})))
   (is (= [[:signal/gear nil nil]] (series/event-points {:type :signal :signal :gear :value :neutral})))
-  (is (= [[:did/x10A3 :grams-per-revolution 0.304]]
-         (series/event-points {:type :did :did 0x10A3 :data [16] :value 0.304 :unit :grams-per-revolution})))
+  (is (= [[:did/x10A3 :milliseconds 4.1]]
+         (series/event-points {:type :did :did 0x10A3 :data [16] :value 4.1 :unit :milliseconds})))
   (is (= [[:did/x10F0 nil 258]] (series/event-points {:type :did :did 0x10F0 :data [1 2]}))))
 
 (deftest append-batch-builds-a-log-from-the-stream
   (let [log (-> nil
                 (series/append-batch {:samples [{:name :engine-rpm :value 800 :unit :rpm :timestamp-us 5000000}]})
                 (series/append-batch {:samples [{:name :engine-rpm :value 900 :unit :rpm :timestamp-us 5050000}]
-                                      :dids [{:did 0x10A3 :name :air-per-revolution :data [16] :value 0.304
-                                              :unit :grams-per-revolution :timestamp-us 5060000}]})
+                                      :dids [{:did 0x10A3 :name :injector-pulse-width :data [16] :value 4.1
+                                              :unit :milliseconds :timestamp-us 5060000}]})
                 (series/append-batch {:samples [{:name :engine-rpm :value 1000 :unit :rpm :timestamp-us 5150000}
                                                 ;; Older than the channel's last point.
                                                 {:name :engine-rpm :value 1 :unit :rpm :timestamp-us 5100000}]}))]
@@ -28,7 +28,7 @@
     (testing "the last point in a bucket is kept"
       (is (= {:t [50 150] :v [900 1000]} (get-in log [:series :pid/engine-rpm]))))
     (is (= {:pid/engine-rpm {:unit :rpm}
-            :did/x10A3 {:unit :grams-per-revolution :name :air-per-revolution}}
+            :did/x10A3 {:unit :milliseconds :name :injector-pulse-width}}
            (:channels log))))
   (is (nil? (series/append-batch nil {:samples []}))))
 

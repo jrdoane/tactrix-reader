@@ -33,6 +33,12 @@ below) against this one. It found the clutch, reverse, torque, and several
 others, and overturned one earlier reading: the yaw rate and the lateral
 acceleration in `0D0` had been taken for each other.
 
+Findings marked "second pass" come from another pass the same day, which
+asked what could be worked out from the signals already decoded. It found
+the battery current, confirmed the barometer against the road's height,
+and checked the scales against the car's published figures; see
+[Worked out from the decoded signals](#worked-out-from-the-decoded-signals).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -55,6 +61,13 @@ tested here before it was written down:
   [list for a 2016 WRX](https://github.com/afreiday/2016-wrx-can-ids). It
   numbers bytes from 1.
 
+The second pass found more lists, used for the
+[untested leads](#leads-from-other-cars) only: timurrrr's
+[first-generation BRZ notes](https://github.com/timurrrr/ft86/blob/main/can_bus/gen1.md),
+a [Forester SJ head-unit adapter](https://github.com/Dem0nis/canbox_subaru_sj/blob/HEAD/cars/subaru_sj.c),
+[open-can-db](https://github.com/equinox311/open-can-db), and the 2015 and
+2016 Outback files from before opendbc generated them.
+
 Bytes are numbered from 0, bits from 0 at the least significant end, and
 `b5.6` means byte 5 bit 6. "LE" means little-endian. Bit positions written
 `16-29` count from bit 0 of byte 0, least significant first, as opendbc does.
@@ -68,7 +81,7 @@ second. The drive has the same 24 IDs at the same rates.
 | ID | Period | DLC | opendbc name | Contents on this car |
 |---|---|---|---|---|
 | `002` | 10 ms | 8 | Steering | **Steering angle**; counter, checksum |
-| `0D0` | 20 ms | 8 | G_Sensor | **Steering angle**; yaw rate; lateral and longitudinal acceleration; a value updated every 60 m |
+| `0D0` | 20 ms | 8 | G_Sensor | **Steering angle**; yaw rate; lateral and longitudinal acceleration; an axle comparison updated every 60 m |
 | `0D1` | 20 ms | 4 | Brake_Pedal | **Vehicle speed**; brake pressure |
 | `0D2` | 20 ms | 8 | Brake_2 | Constant, but for one pulse of b5.5 |
 | `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; distance counter; counter |
@@ -81,7 +94,7 @@ second. The drive has the same 24 IDs at the same rates.
 | `156` | 20 ms | 8 | | Nearly constant; byte 7 follows fuel level |
 | `282` | 50 ms | 8 | Dashlights | Fuel sender; driver's seatbelt; outside temperature; counter |
 | `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow; drive-cycle and steering-load flags |
-| `361` | 50 ms | 8 | | Gear; probably barometric pressure; counter, parity |
+| `361` | 50 ms | 8 | | Gear; barometric pressure; battery current and probably temperature; counter, parity |
 | `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque, as in `371`; assist level and load flag; counter |
 | `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque and assist |
 | `372` | 100 ms | 8 | | Counter and parity bit in byte 1 |
@@ -211,7 +224,7 @@ The dashboard's Bus tab colours those bits.
 | `:steering-angle` | `002` bytes 0-1, big-endian, signed, 0.1° per bit | Degrees, positive for a left turn |
 | `:yaw-rate` | `0D0` bytes 2-3, signed LE, about 0.2865°/s (0.005 rad/s) per bit | Degrees per second, positive to the left |
 | `:lateral-acceleration` | `0D0` byte 6, signed, about 0.0204 g (0.2 m/s²) per bit | g, positive to the left; reads 0.02-0.04 at rest |
-| `:longitudinal-acceleration` | `0D0` byte 7, signed, about −0.0091 g per bit | g, positive when speeding up |
+| `:longitudinal-acceleration` | `0D0` byte 7, signed, about −0.0102 g (0.1 m/s²) per bit | g, positive when speeding up |
 | `:brake-pressure` | `0D1` byte 2 | Raw count, 0-18 |
 | `:brake` | `0D3` b2.5 | Boolean |
 | `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
@@ -229,6 +242,7 @@ The dashboard's Bus tab colours those bits.
 | `:fuel-sender` | `282` bits 0-11 LE | Raw count that rises as the tank empties, about 8 for each 1%: 97 at 98% and 483 at 51% |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` bytes 0-1 LE, about 0.00072 g/s per bit | Grams per second |
+| `:battery-current` | `361` byte 5 high nibble plus byte 6, 12 bits LE, minus 2048 | Raw count, positive while the battery charges; see [Battery current and temperature](#battery-current-and-temperature-in-361) |
 | `:door-front-left` | `374` b3.0 | Boolean, true while the driver's door is open |
 | `:door-front-right` | `374` b3.1 | Boolean, true while the front passenger door is open |
 | `:door-rear-right` | `374` b3.2 | Boolean, true while the rear passenger-side door is open |
@@ -473,18 +487,69 @@ shows R while `:reverse` is true.
   catalyst temperature, or an average fuel economy (a fit of distance over
   fuel doesn't hold). Byte 5's high nibble plus byte 6, as 12 bits, are
   noise centred on 2048 (mean 2,034-2,058, standard deviation 73-122),
-  which follows nothing else on the bus.
+  which follows nothing else on the bus. Second pass: the 12 bits are the
+  battery current and byte 7 is probably the battery's temperature; see
+  [Battery current and temperature](#battery-current-and-temperature-in-361).
 - **`361` byte 3 is probably barometric pressure.** 2026-11-10. It read
   222, 221, 218, 218, 216, 215, and 216 in the seven recordings, moving by
   a count or two within a drive. In the two 2026-11-09 drives it follows
   PID `33` (r = 0.83 and 0.81), stepping down a count when the PID stepped
   from 100 to 99 kPa and back up with it. PID `33` read 100-101 kPa at 218
   and 99-100 at 215-216, so a count is about half a kilopascal. The first
-  two recordings didn't poll PID `33`.
+  two recordings didn't poll PID `33`. Second pass: it falls as the road
+  climbs. Against the height worked out from the
+  [road's grade](#worked-out-from-the-decoded-signals), smoothed over 10 s,
+  it fell a count for every 27-61 m climbed in the four drives that covered
+  25 m or more of height (r² 0.14-0.54; the byte only moved 2-3 counts).
+  Air pressure falls about 0.12 kPa for each 10 m, so 40 m is half a
+  kilopascal, the same scale PID `33` gave.
 - **`3D1` byte 0** varies widely and slowly; no match. 2026-11-10: it is
   the [outside temperature](#outside-temperature-in-3d1).
 - **`141` bytes 0-1** were a constant `65 26` at idle; they are the
   requested torque above.
+
+### Battery current and temperature in `361`
+
+Second pass. **Byte 5's high nibble plus byte 6, 12 bits little-endian, are
+the battery current sensor,** centred on 2048. What looked like noise is
+the current's ripple; underneath it the value does what a battery's current
+does:
+
+| When | Value | Recording |
+|---|---|---|
+| Ignition on, engine off | 1,719-1,743, steady | `2026-10-28-drive`, to 4.5 s |
+| Starter cranking, ECU voltage 8.2 V | Pinned at 250 | `2026-10-28-drive`, 4.5-5.3 s |
+| The 15 s after the start | 2,100-2,700, falling | `2026-10-28-drive` |
+| Driving with the alternator at full duty | About 2,040 | All five drives |
+| Alternator duty (DID `10B2`) cut to about 30 | 1,760-1,900 within a second or two, then creeping up | `2026-10-30-did-drive`, each time |
+| Duty restored | About 2,250, falling back to 2,040 over several seconds | `2026-10-30-did-drive` |
+
+Over `2026-10-30-did-drive`, averaged over 1 s, it read 169 below 2,048
+with `10B2` under 40 (85 replies), 60 above with it at 40-59 (85), and 4
+above with it at 60 or more (383). Within each of those it rises with ECU
+voltage, by 0.0016-0.0026 V per count (r 0.42-0.69). So above 2,048 the
+battery is charging and below it the battery is supplying the car. In the
+three drives where the voltage stayed above 13 V, its 2 s average hardly
+moved: a standard deviation of 12-17 counts, against 77-82 in the other
+two.
+
+The scale isn't known. Inference: the ECU's own DID for battery current,
+`1135` in the lists [`subaru-ssm.md`](subaru-ssm.md#dids-past-10ff) names,
+is one byte around 128 in amps, and 12 bits around 2,048 would be that 16
+times as fine, a sixteenth of an amp per count. That would make the
+ignition-on draw 20 A and the sensor's floor 112 A, both believable, but
+`1135` hasn't been read on this car. 250 looks like the sensor's lowest
+output, not a current. `inferred-signals` decodes the field as
+`:battery-current`, the count less 2,048, with no unit.
+
+**Byte 7 is probably the same sensor's temperature,** on a scale that
+falls as it warms. It follows intake air temperature (PID `0F`) across
+the seven recordings: r = −0.94 as it stands and −0.97 against the PID
+lagged by 40 s, at about −2.1 counts per °C (81 at 50 °C, 158 at
+12 °C), with 4 counts left unexplained. So it is a temperature under the
+bonnet that moves more slowly than the intake air: it falls at idle, as
+the engine bay warms, and rises on the move. That it is the battery's is
+an inference from where it sits, next to the current. It isn't decoded.
 
 ### Drive-cycle flag
 
@@ -529,7 +594,14 @@ one met, so that part is untested.
   −0.089 m/s² per bit, positive when slowing down. Over 0.5 s windows it
   matches the rate of change of wheel speed with r = −0.96; the offset
   includes road grade. opendbc reads bytes 6-7 together, which doesn't fit:
-  byte 6 is a separate signal.
+  byte 6 is a separate signal. Second pass: the scale is nearer
+  0.1 m/s² per bit. Fitted either way round against the rate of change of
+  `0D1`'s speed, over 0.5 s and 1 s windows, it came out at 0.092-0.102
+  in each of the five drives and 0.094-0.099 with them pooled (r = −0.974),
+  and at 0.091-0.110 within bands of hard braking and acceleration. The
+  RaceChrono notes give 0.1 m/s², and the body's pitch under braking adds a
+  few percent to what the sensor reads, so `inferred-signals` now uses
+  0.1 m/s² (0.0102 g) per bit.
 - **Yaw rate:** `0D0` bytes 2-3, signed LE (byte 3 is only ever a sign
   extension), about 0.27°/s per bit (0.26-0.33 across speeds and drives),
   positive to the left.
@@ -568,12 +640,44 @@ The yaw rate from the wheels assumes opendbc's wheel order (FL, FR, RL, RR)
 and a 1.51 m track width. Both are assumptions, so the measured scales are
 approximate.
 
+Second pass: **the wheel order is right, and the yaw scale is in doubt by
+about 7%.** The first two values in `0D4` are the front wheels: in a turn
+their mean runs ahead of the other two's by an amount that grows with the
+square of the curvature, as the front axle's wider path does (r² 0.83-0.95
+in the five drives). The difference between the rear wheels' speeds,
+though, is 1.40-1.42 m times the yaw rate at 0.005 rad/s per bit, in every
+drive (r² 0.98-0.996), and the rear track is 1.515 m. Over the 39 turns of
+more than 45°, the sensor's angle was 1.07 times the wheels' at the
+median. The lateral sensor reads low against speed × yaw rate too, at
+0.87-0.93 of it. All of that fits a yaw scale near 0.0047 rad/s per bit.
+Against it, turns at junctions should bunch around a right angle, and the
+eleven nearest one came to 85-97° by the sensor (90.5° on average) and
+77-93° by the wheels. That is weak, since it picks the turns by the scale
+being tested. The steering ratio the scale gives is a believable one too
+(see [below](#worked-out-from-the-decoded-signals)). The wheels alone can't
+settle it: fitted for a track width without the yaw sensor they give
+1.58-1.68 m. A full circle driven in a car park would. `:yaw-rate` keeps
+0.005 rad/s until then.
+
 **`0D0` bytes 4-5** hold a value that changes once every 60 m travelled
 (2026-11-10: 536 changes, 60.0-60.7 m apart in 80% of them) and reads 0
 until the car has moved. Its low 10 bits, signed, range −78 to 17, and its
 top 6 bits 1 to 18. Neither follows the yaw rate, the accelerations, the
 steering angle, or the differences between the wheel speeds (r under 0.5);
 both tend to be larger at speed (r = 0.53). Unexplained.
+
+Second pass: **it compares the axles over each 60 m.** The low field is
+byte 4 as a signed byte (byte 5's low two bits only extend its sign), and
+the other is byte 5 shifted right by two. Taken over the 60 m before each
+change, not at one moment, byte 4 follows how much further the front
+wheels ran than the rear: r = −0.76 against the front-to-rear speed ratio
+in 512 windows, about −2.3 counts for each 0.1% the fronts ran ahead, plus
+about 0.25 counts for each m/s of speed (r² 0.68 together). The fronts run
+ahead in turns, which is where it goes negative. The second field is tied
+to the first: about 2 when byte 4 is negative, and a count or two above
+byte 4 when it is positive (r² 0.91 for a fit to byte 4 and its size). Inference: the brake controller is watching for
+tyres of different sizes front and rear, which matters with all-wheel
+drive. The exact sum isn't pinned down, so neither field is decoded.
 
 **`0D2` b5.5** was set once in the seven recordings, in
 `2026-11-09-144943` from 438.5 s to 439.5 s: it set as the brake was
@@ -603,6 +707,13 @@ stretches don't pin it down more closely than a few degrees. The later
 drives don't either: above 80 km/h, `002`'s most common reading was −4.0°,
 −3.0°, and −2.0° in three drives, and in the fourth (`2026-11-09-150052`,
 with little time at that speed) it had no clear peak.
+
+Second pass: **straight ahead is about −2° on `002`.** Fitting the angle
+to the path's curvature (yaw rate ÷ speed) and the lateral acceleration,
+at 18-90 km/h with the brake off, puts zero curvature at −2.3°, −1.8°,
+−2.4°, −1.8°, and −1.9° in the five drives (r² 0.993-0.996). The median
+reading with the yaw rate under 0.003 rad/s above 54 km/h agrees: −2.4°,
+−2.0°, −2.8°, −1.9°, and −1.3°. `:steering-angle` doesn't take it off.
 
 **Steering torque (`370`, `371`):** read with the Outback 2015 layout,
 `371`'s Steer_Torque_Sensor (bits 29-39, signed) and Steer_Torque_Output
@@ -646,6 +757,14 @@ The units of all of these are unknown, so none is decoded.
   three, at 15-42 km/h, and it doesn't set again. It was already clear
   throughout `2026-11-09-150052`, which began two minutes after the drive
   before it ended, and stayed set in both parked recordings. Unexplained.
+  Second pass: it clears on time spent moving, not on speed or distance.
+  The wheels had been turning for 22.2 s, 18.9 s, 20.0 s, and 20.5 s when
+  it cleared, over 133 m, 100 m, 59 m, and 118 m. `2026-11-09-150052`
+  began 28 s after its ignition came on with the bit already clear, too
+  soon for the car to have been driven for 20 s. Inference: tyre-pressure sensors sleep when
+  parked, wake after some seconds of rolling, and stay awake for minutes
+  after a stop, which fits all of it. Two lists for other cars guess the
+  passenger's seatbelt instead; neither tested it.
 - **Outside temperature:** `282` byte 4 minus 40 looks like outside
   temperature in °F. It read 108 at the start (68 °F, 20 °C) when PID `46`
   read 21 °C, and 90 (50 °F, 10 °C) when PID `46` read 10 °C. `282` byte 3
@@ -803,6 +922,57 @@ These change with the doors too:
 changes: each change came 210-960 ms after the frame before, off the 1 s
 beat.
 
+## Worked out from the decoded signals
+
+Second pass. None of these is a new signal: each is arithmetic on the ones
+above, and several double as checks of their scales against the car's
+published figures (Subaru's
+[2015 Impreza specifications](https://s3.amazonaws.com/subarumedia.iconicweb.com/mediasite/specs/2015_Impreza_spec_sheet_9_24_Final.pdf)).
+None is computed by the library yet.
+
+| Quantity | From | In the five drives | Check |
+|---|---|---|---|
+| Engine power | `141`'s engine torque × `140`'s RPM | Peak 109.8 kW at 6,300 rpm in `2026-10-28-drive`, the only pull to the red line | Rated 148 hp (110 kW) at 6,200 rpm |
+| Gear ratios | RPM ÷ mean wheel speed, in gear with the clutch out | 123.2, 67.2, 46.1, 34.55, and 26.22 rpm per km/h, the same to 0.2% in every drive | Each step is within 0.3% of the gearbox's 3.454, 1.888, 1.296, 0.972, and 0.738 |
+| Tyre rolling circumference | 5th gear's figure, the 0.738 ratio, and the 4.11 final drive | 1.93 m | A 205/55R16 is 1.985 m unloaded; which tyres are fitted wasn't noted |
+| Clutch slip | RPM against wheel speed × the gear's figure | Not tabulated | |
+| Fuel used per unit of work | `360`'s fuel flow ÷ power, in steady 2 s windows with a warm engine | 250-300 g/kWh at the median, 212-228 at best, over 400 below 40 Nm | Usual for a port-injected engine, so the torque and fuel-flow scales agree with each other |
+| Idle fuel use | Fuel flow, stopped | 0.6-1.1 l/h, and 1.7 just after the cold start | |
+| Time in fuel cut | `141` b7.3 | 17-22% of the time moving | |
+| Road grade | Longitudinal acceleration less the rate of change of speed, ÷ g | Within −4.6% and +3.9% for nine-tenths of the time moving | Summed over distance, the height agrees with [`361`'s barometer](#unexplained-engine-bytes) |
+| Steering ratio | Steering angle against curvature × the 2.645 m wheelbase, with a term for lateral acceleration | 14.3-14.6 to 1, and 1.9-2.8° more at the front wheels for each g | Rests on the yaw scale, which is [in doubt](#speed-brakes-and-chassis) |
+| Tyre differences | Each wheel's speed ÷ the four's mean, on straights at light load | Front left 0.07-0.08% fast, rear left 0.06-0.08% slow, the right pair within 0.02% | The same in every drive, two weeks apart |
+| Mass over drivetrain efficiency | Torque × gearing ÷ 0.307 m against the longitudinal sensor, which leaves the grade out, in 1 s windows | 1,400-1,540 kg in 2nd to 5th (r² 0.97-0.98) | The car is about 1,350 kg empty; the [fit against speed](#torque-in-141) gave 1,560-1,710 |
+
+The drag left over in that last fit is about 0.2 m/s² plus 0.0003-0.0005 ×
+speed² (in m/s) in 4th and 5th, the right size for the car but too loosely fixed
+to quote as a drag coefficient. The clutch is only down for a second or
+two at a time, 155 s in all, so there is no real coast-down in the
+recordings.
+
+The gear figures also give `141`'s 1st gear properly: 123.2, not the 124
+that the launch data [suggested](#gear).
+
+### Leads from other cars
+
+Second pass. Published for related cars, and untested here because the
+bits never changed in any recording:
+
+| Where | Said to be | Source |
+|---|---|---|
+| `374` b3.4 | Hatch open | Old opendbc Outback file; Forester SJ adapter |
+| `282` b5.4, b5.5 | Turn signals; the 2015 and 2016 Outback files disagree on which is left | Old opendbc Outback files |
+| `152` b7.4 | High beam | Old opendbc Outback file |
+| `144` b6.0, b6.1 | Cruise on, cruise active | Old opendbc Outback files |
+| `360` b5.4, b5.5, byte 7 | Cruise on, cruise set, and the set speed | timurrrr's BRZ notes, "not tested much" |
+| `376` byte 0 | Dashboard dimmer level, 0-255; this car's constant `FA` fits | Forester SJ adapter |
+| `372` | Airbag status | open-can-db |
+
+They agree with what was found here on `375` b3.3 (lights on), `152`
+byte 7 (the light switch), `141` byte 7 (16, then 8, then 0 on lifting
+off), and `282`'s fuel sender. Nothing published explains `0D0` bytes 4-5
+or `361` bytes 3 and 5-7, so those readings rest on the recordings alone.
+
 ## Still unexplained or untested
 
 - **`374` b3.7 and b4.7, and `375` b3.7,** were set until 92.5 s in
@@ -833,11 +1003,15 @@ beat.
   [`141` engine speed](#141-engine-speed)): it needs the car stopped, the
   pedal released, and a warm engine, and then something more, probably
   time.
-- **`361` byte 7** and the 12 bits before it (see
-  [Unexplained engine bytes](#unexplained-engine-bytes)), and what
-  **`144` byte 2**'s curve of RPM is for.
-- **`0D0` bytes 4-5,** updated every 60 m, and **`0D2` b5.5,** seen once
-  (see [Speed, brakes, and chassis](#speed-brakes-and-chassis)).
+- **The battery current's scale,** and whether **`361` byte 7** is the
+  battery's temperature (see
+  [Battery current and temperature](#battery-current-and-temperature-in-361)).
+- What **`144` byte 2**'s curve of RPM is for.
+- **The yaw rate's scale,** which the wheels put 7% lower, the exact sum
+  behind **`0D0` bytes 4-5,** and **`0D2` b5.5,** seen once (see
+  [Speed, brakes, and chassis](#speed-brakes-and-chassis)).
+- **`141` b6.3 and b6.4, `002` byte 2, and `370` b1.1** change only as the
+  engine starts or, the last, once for 50 ms.
 - **`370` b7.7** is clear after the ignition comes on and sets once: 31 s
   after it (as the engine started), 83 s, and 226 s in the three
   recordings that caught it, flickering as it does in the last two.
@@ -867,6 +1041,14 @@ most of what's left:
    `144` byte 4 without driving.
 3. The ignition switched on and off without starting the engine, to see
    `660`'s counter step alone, and a start on a hill, for `0D2` b5.5.
+4. Parked at idle, a load of known size switched on and off (the rear
+   window heater, the headlights, the blower), for the battery current's
+   scale, with DIDs `1135`-`1137` polled if the ECU has them.
+5. A full circle in a car park, slowly, for the yaw rate's scale, and a
+   coast in neutral from highway speed on a level road, for the drag.
+
+Add to the first: the cruise control's buttons, and note which side each
+turn signal was on.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear

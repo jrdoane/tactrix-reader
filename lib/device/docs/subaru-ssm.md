@@ -345,6 +345,11 @@ and the dashboard shows each beside the value it was matched against:
 | `10A1` | Mass airflow (PID `10`) | g/s = (0.0177 × x + 0.186)⁴, from the second drive | 0.995 against MAF^¼ |
 | `10B2` | ECU voltage (PID `42`) | V = 0.05 × x + 10.73 once the voltage settles, from the second drive | 0.92 |
 
+2026-11-10: two of these are named differently in lists other people have
+published, and the published names fit better. `10A3` is the injector
+pulse width and `10B2` the alternator's duty; see
+[Published names](#published-names-2026-11-10).
+
 Two of these also appear in the car's own traffic (found 2026-11-10; see
 [broadcast CAN traffic](can-broadcast.md)): `10A6` is the same byte as
 `140` byte 0, the pedal, and `10A3` follows `141`'s engine torque
@@ -363,6 +368,9 @@ inferences:
 | `10AE`, `10B1`, `10B4`, `10B5` | Vary under load; weak matches |
 | `1088`, `1089` | Opposite flags, `00` and `FF`. They swapped once, at 122 s, during a full-load pull at about 4,400 rpm. The second drive suggests they mark the first full throttle since the engine started. |
 | `10BC`, `10C1` | Drift by a count or two |
+
+2026-11-10: most of these now have names, from published lists; see
+[Published names](#published-names-2026-11-10).
 
 The rest held one value for the whole drive: the bitmaps, `1001`-`100A`,
 `101D`, `1022`, `1024`, `103C`, `103D`, `10E3`, and `10E5`. `103D` was `2A`
@@ -432,6 +440,102 @@ drive. `103C` changed once, from 8 to 9, 11 minutes in.
 **Knock correction is still not identified.** `101D`, `1022`, and `10E3`
 held at `00` again, now with timing advance up to 49° and full-load pulls
 past 5,000 rpm. `10A5` again rose under load (126-152).
+
+### Published names (2026-11-10)
+
+Two lists other people have published name most of the DIDs above. Neither
+is for this ECU, so each name was taken as a guess and tested against the
+two DID drives, with the car's own [CAN traffic](can-broadcast.md) for
+torque, fuel flow, and fuel cut, which arrives fast enough to line up with
+each reply.
+
+- **Diesel Crew:** the Subaru Diesel Crew's mode 22 table, mirrored in
+  [ParsePID](https://github.com/giotec/ParsePID)
+  (`data/Subaru_mode22_def.csv`). It gives each DID's name, formula, and
+  the SSM address it mirrors. Its README has the supported-DID bitmaps of a
+  2014 Forester FB25 (`EA1M220F`), which supports almost the same DIDs as
+  this car.
+- **OBDb:** the community signal sets for the
+  [Impreza](https://github.com/OBDb/Subaru-Impreza) and its relatives.
+  A few entries have replies captured from a 2015 Impreza (`10A3`, `10EC`,
+  `10ED`); most are one list copied across models.
+
+| DID | Published as | Scale | On this car |
+|---|---|---|---|
+| `10A3` | Injector #1 pulse width | x × 0.256 ms | 1.5-14.8 ms, and 0 in fuel cut. The fuel in each injection, from `360`'s fuel flow, is 3.16 mg/ms × this − 1.73 in the first drive and 3.12 × this − 1.80 in the second (r = 0.999 and 0.998), against r = 0.975 and 0.985 for air per revolution |
+| `10A5` | Learned ignition timing: "advance or retard amount when knocking has occurred" | (x − 128) ÷ 2 ° | 0° at idle and light load, −3° to +12° under load |
+| `10AE` | Canister purge valve duty | x ÷ 2.55 % | 0-100%; 0 at idle |
+| `10B1` | EGR steps | x | 0-50. 0 below about 36 kPa of manifold pressure and near full throttle, 13-42 between. Its value in one drive is given by the other's at the same RPM and torque (r² 0.93) |
+| `10B2` | Alternator duty | x % | See below |
+| `10B4`, `10B5` | Intake cam advance, right and left | x − 50 ° | −28° to +37°. 0° at idle and in fuel cut, −9° to −18° at 20-80 Nm, +26° to +30° above 140 Nm |
+| `10B6`, `10B7` | Oil control valve duty, right and left | x ÷ 2.55 % | 57% at idle, 5% in fuel cut, up to 62% |
+| `10DE` | Throttle motor duty | (x − 128) ÷ 1.28 % | −33% to +33%; −12% to −16% at idle, positive on the move |
+| `10EC`, `10ED` | Exhaust cam retard, right and left | x − 50 ° | −1° to +32°. 0° at idle and in fuel cut, about 20° at 20-140 Nm, 25° above |
+| `10EE`, `10EF` | Exhaust oil control valve duty, right and left | x ÷ 2.55 % | 45% at idle and in fuel cut, up to 61% |
+
+The cam angles reading exactly 0° at idle and in fuel cut, and the valve
+duties holding still there, is the best evidence for the offsets. The
+scales themselves are the lists'. `uds/did-signals` decodes all of these,
+marked `:published? true`, and the dashboard shows them tagged published.
+Which bank is "right" isn't known.
+
+**`10A3` is not air per revolution.** It was fitted above as 0.019 g/rev
+per count, because at a steady mixture the injector's opening time follows
+the air. The fuel fits it more closely, and the line misses zero by the
+injector's dead time: 0.55-0.58 ms. Its slope is the injector's flow,
+3.1-3.2 g/s, about 250 cc/min. Both are inferences from `360`'s fuel-flow
+scale, which is itself fitted.
+
+**`10B2` is the alternator's duty, not a voltage.** The three levels found
+in the second drive are duties of about 30%, 51%, and 68%. The
+[battery current](can-broadcast.md#battery-current-and-temperature-in-361)
+in the car's own traffic shows what they do: with the duty under 40% the
+battery is discharging, at 40-59% it is charging, and at 68% it is near
+balance. The fit of ECU voltage to it (0.05 × x + 10.73) still describes
+where the voltage settles.
+
+**Knock.** `10A5` is the nearest thing yet to the knock value this page set
+out to find, and its formula is the one SSM uses for knock correction at
+`000022`. It moves the wrong way for a correction that only removes
+timing, which is what the earlier notes held against it. As learned
+timing that is expected: on an engine that isn't knocking the ECU adds
+advance. FBKC, FLKC, and IAM are in neither list.
+
+Inferred from the lists' order, which follows SSM's, and not stated by
+either. `uds/did-notes` holds these:
+
+| DID | Probably | On this car |
+|---|---|---|
+| `10B8`, `10B9` | Intake oil control valve current, x × 32 mA | 704 mA at idle, 0 in fuel cut; it follows `10B6`'s duty (r = 0.99 and 0.64 in the two drives). The factory manual for the XV of this generation gives 550-850 mA |
+| `10F0`, `10F1` | Exhaust oil control valve current, x × 32 mA | 544 mA at idle, up to 800; it follows `10EE`'s duty (r = 0.97) |
+| `10BC` | Wideband sensor resistance, x ohms | Holds at 49-51; the manual says about 32, so this is doubtful |
+
+Neither list names `103C`, `103D`, `1088`, `1089`, or `10C1`. OBDb has
+`10E3` as the cruise control's memorised speed, which fits it holding at
+`00` with the cruise control unused, and `10E5` as an odometer in 2 km
+steps, which doesn't fit: it reads `FF FF` here.
+
+### DIDs past `10FF`
+
+The lists also name DIDs this car hasn't been asked for. Its bitmaps say
+more exist past `10FF`. All are service `22` reads; none has been tried
+here, and the names are the lists', untested:
+
+| DID | Published as |
+|---|---|
+| `110B`-`110E` | Roughness monitor, cylinders 1-4 |
+| `1121` | Target engine speed, 16 bits ÷ 4 |
+| `1135` | Battery current, x − 128 A |
+| `1136` | Battery temperature, x − 40 °C |
+| `1137` | Alternator control mode (0 high, 1 extra high, 2 low, 3 mid) |
+| `11D0` | "Knocking signal", in degrees |
+| `122F`-`124C` | Switches as `00` or `FF`: clutch, stop light, the cruise control's buttons, oil level |
+| `1275`-`1279` | Throttle motor voltage; throttle and pedal sensor voltages |
+| `128F`-`1292` | Intake and exhaust cam target angles, x − 50 ° |
+
+`1135`-`1137` would settle the scale of the battery current found in
+`361`. Run `uds-supported 1100` or `uds-scan 1100 12FF` with the engine
+running to see which the ECU has.
 
 ## Safety
 

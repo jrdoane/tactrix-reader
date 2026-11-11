@@ -73,7 +73,10 @@
     (is (= {:did 0x10BE :name :lambda :label "Measured λ" :unit :lambda :matches 0x34
             :compare {:pid :wideband-oxygen-sensor-1-current :part :lambda}}
            (some #(when (= 0x10BE (:did %)) %) dids)))
-    (is (= "Possibly cam timing; pairs with 10ED" (get did-notes 0x10EC)))
+    (is (= {:did 0x10EC :name :exhaust-cam-retard-right :label "Exhaust cam retard, right"
+            :unit :degrees :published? true}
+           (some #(when (= 0x10EC (:did %)) %) dids)))
+    (is (= "Probably intake OCV current, 32 mA per count; pairs with 10B9" (get did-notes 0x10B8)))
     (is (= "Supported-DID bitmap" (get did-notes 0x1020)))))
 
 (deftest holds-only-data

@@ -166,7 +166,7 @@ Namespaces under `tactrix-reader.device`, roughly from the lowest layer up:
   with no functions: sections, groups, the primary values, and an entry for
   each PID, inferred signal, and DID. PIDs get their label and group in
   `pid-display`; inferred signals and DIDs carry theirs (`:label`, `:group`,
-  `:format`, `:raw?`, `:parts`, `:override`, `:compare`) in `broadcast/inferred-signals`
+  `:format`, `:raw?`, `:parts`, `:override`, `:compare`, `:published?`) in `broadcast/inferred-signals`
   and `uds/did-signals`, and `uds/did-notes` holds what is known about the
   other DIDs. Give a new signal a `:label` and `:group` there; without them
   it is labelled from its name and shown under Other. An entry decoded from

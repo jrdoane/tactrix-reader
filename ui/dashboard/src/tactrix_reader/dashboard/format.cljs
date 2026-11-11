@@ -20,7 +20,8 @@
    :degrees-per-second "°/s"
    :milliamps "mA"
    :grams-per-revolution "g/rev"
-   :newton-metres "Nm"})
+   :newton-metres "Nm"
+   :milliseconds "ms"})
 
 (def unit-decimals
   "Decimal places for each unit, so a value keeps its width as it updates."
@@ -37,7 +38,8 @@
    :g 2
    :milliamps 3
    :grams-per-revolution 3
-   :newton-metres 1})
+   :newton-metres 1
+   :milliseconds 2})
 
 (defn did-hex [did]
   (.padStart (.toUpperCase (.toString did 16)) 4 "0"))

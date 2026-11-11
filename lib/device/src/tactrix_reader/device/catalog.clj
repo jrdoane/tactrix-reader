@@ -34,7 +34,7 @@
    {:id :motion :section :can :title "Motion"}
    {:id :wheels :section :can :title "Wheel speeds"}
    {:id :doors :section :can :title "Doors"}
-   {:id :engine :section :can :title "Engine and outside"}
+   {:id :engine :section :can :title "Engine, battery, and outside"}
    {:id :counters :section :can :title "Fuel gauge and counters"}
    {:id :other :section :can :title "Other signals"}])
 
@@ -127,7 +127,7 @@
 (defn- did-entries []
   (for [[did {:keys [name] :as entry}] (sort-by key uds/did-signals)]
     (merge {:did did :label (name-label name)}
-           (select-keys entry [:name :label :unit :matches :compare]))))
+           (select-keys entry [:name :label :unit :matches :compare :published?]))))
 
 (defn catalog
   "Everything a display needs, with no functions in it, so it can be sent as
@@ -142,8 +142,9 @@
     bus, `:can-id` and `:bits`, the bits of that ID's frames it is decoded
     from, as `broadcast/decode-bits` gives them. Each of a signal's `:parts`
     has its own `:bits`.
-  - `:dids`, one entry per DID in `uds/did-signals`, and `:did-notes`, what
-    is known about the others."
+  - `:dids`, one entry per DID in `uds/did-signals`, with `:matches` and
+    `:compare` for one fitted to a PID and `:published? true` for one named
+    in a published list, and `:did-notes`, what is known about the others."
   []
   {:sections sections
    :groups groups

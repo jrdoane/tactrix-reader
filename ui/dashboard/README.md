@@ -43,8 +43,9 @@ its tiles, and each section folds away (remembered in the browser).
 
 Badges say how a value is known, the same on tiles and in tables: **polled**
 (a mode 01 PID), **CAN** (also decoded from the bus and confirmed against
-the PID), **inferred** (from the bus, not confirmed), and **fitted** (a DID
-with a fitted scale). A count with no known scale has the unit "raw". A
+the PID), **inferred** (from the bus, not confirmed), **fitted** (a DID
+with a scale fitted to a PID), and **published** (a DID named and scaled in a
+list published for related Subaru ECUs, checked against drives). A count with no known scale has the unit "raw". A
 tile whose catalog entry has an `:override` shows its text while the signal
 it names is true: the gear shows R while reverse is on.
 

@@ -65,11 +65,19 @@
            (decode 0x140 [0x23 0x83 0xD3 0x06 0x00 0x23 0x15 0x00])))
     (is (= {:parking-brake false :reverse true}
            (decode 0x152 [0xF9 0x04 0x00 0x00 0x00 0x00 0x04 0x02])))
-    (is (= {:yaw-rate -38.4 :lateral-acceleration -0.33 :longitudinal-acceleration 0.07}
+    (is (= {:yaw-rate -38.4 :lateral-acceleration -0.33 :longitudinal-acceleration 0.08}
            (decode 0x0D0 [0xAD 0x0A 0x7A 0xFF 0xD7 0x0B 0xF0 0xF8])))
     (is (= {:gear 2 :requested-torque -26.0 :engine-torque -26.0 :fuel-cut true}
            (decode 0x141 [0x0C 0x26 0x0C 0x26 0x13 0x8C 0x42 0x08])))
     (is (= {:fuel-flow 0.0} (decode 0x360 [0x00 0x00 0x76 0x81 0x0D 0x00 0x01 0x00])))
+    ;; The battery current in 2026-10-28-drive: with the ignition on and the
+    ;; engine off, pinned while the starter cranks, and charging after the
+    ;; start. In 2026-10-30-did-drive at 275 s, with the alternator backed
+    ;; off under power.
+    (is (= {:battery-current -329} (decode 0x361 [0x00 0x09 0x00 0xDD 0x27 0x70 0x6B 0x73])))
+    (is (= {:battery-current -1798} (decode 0x361 [0x00 0x39 0x00 0xDD 0x06 0xA0 0x0F 0x73])))
+    (is (= {:battery-current 312} (decode 0x361 [0x00 0x29 0x00 0xDD 0x0F 0x80 0x93 0x73])))
+    (is (= {:battery-current -183} (decode 0x361 [0x05 0x39 0x00 0xDA 0x0D 0x90 0x74 0x85])))
     ;; Parked at 63 F in 2026-11-09-194644, with half a tank.
     (is (= {:outside-temp 17.3} (decode 0x3D1 [0x14 0x10 0x00 0x00 0x00 0x00 0x00 0x00])))
     (is (= {:fuel-sender 488 :driver-seatbelt :unbuckled}
@@ -120,6 +128,7 @@
     (is (= [0 0 0 0 0 0 0 0x08] (bits broadcast/inferred-signals 0x141 :signal :fuel-cut)))
     (is (= [0 0 0xFF 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :yaw-rate)))
     (is (= [0 0 0 0 0 0 0 0xFF] (bits broadcast/inferred-signals 0x0D0 :signal :longitudinal-acceleration)))
+    (is (= [0 0 0 0 0 0xF0 0xFF] (bits broadcast/inferred-signals 0x361 :signal :battery-current)))
     (is (= [0xFF 0x0F] (bits broadcast/inferred-signals 0x282 :signal :fuel-sender)))
     (is (= [0 0 0 0 0 0x01] (bits broadcast/inferred-signals 0x282 :signal :driver-seatbelt))))
   ;; One part of a value that is a map.

@@ -344,7 +344,7 @@ button.fold {
   color: var(--muted);
 }
 
-.tag.inferred, .tag.fitted { color: var(--warn); border-color: var(--warn); }
+.tag.inferred, .tag.fitted, .tag.published { color: var(--warn); border-color: var(--warn); }
 .tag.can { color: var(--accent); border-color: var(--accent); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 20px; font-size: 13px; color: var(--muted); }

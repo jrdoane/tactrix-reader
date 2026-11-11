@@ -209,7 +209,8 @@
       (is (wait-for #(some (comp #{:stopped} :state) @events) 2000))
       ((:stop! source)))
     (is (= [{:type :sample :pid 0x0C :name :engine-rpm :value 800.0 :unit :rpm :timestamp-us 1000000}
-            {:type :did :did 0x10A5 :did-hex "10A5" :data [0x80] :timestamp-us 1015000}]
+            {:type :did :did 0x10A5 :did-hex "10A5" :data [0x80] :timestamp-us 1015000
+             :name :learned-ignition-timing :value 0.0 :unit :degrees}]
            (remove (comp #{:status} :type) @events)))))
 
 (deftest replay-source-emits-every-frame-when-asked

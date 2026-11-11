@@ -207,11 +207,32 @@
     0x10BE [0x80] 1.0
     0x10BA [0x70] -2.0
     0x10A6 [0x00] 0.0
-    0x10A3 [0x09] 0.171
-    0x10A1 [0x34] 1.5
-    0x10B2 [0x44] 14.13)
+    0x10A1 [0x34] 1.5)
+  ;; Named and scaled in the published lists. Values from the idle at the
+  ;; start of 2026-10-30-did-drive, and its extremes.
+  (is (= {:did 0x10A3 :data [0x09] :name :injector-pulse-width :value 2.3 :unit :milliseconds}
+         (uds/did-sample {:did 0x10A3 :data [0x09]})))
+  (is (= {:did 0x10B1 :data [0x32] :name :egr-steps :value 50 :unit nil}
+         (uds/did-sample {:did 0x10B1 :data [0x32]})))
+  (are [did data value] (= value (:value (uds/did-sample {:did did :data data})))
+    0x10A3 [0x3A] 14.85
+    0x10A5 [0x80] 0.0
+    0x10A5 [0x98] 12.0
+    0x10AE [0xFF] 100.0
+    0x10B2 [0x44] 68.0
+    0x10B4 [0x32] 0.0
+    0x10B5 [0x16] -28.0
+    0x10B6 [0x8B] 54.5
+    0x10B7 [0x0D] 5.1
+    0x10DE [0x73] -10.2
+    0x10EC [0x32] 0.0
+    0x10ED [0x51] 31.0
+    0x10EE [0x73] 45.1
+    0x10EF [0x9C] 61.2)
+  (is (every? :published? (vals (apply dissoc uds/did-signals [0x10A1 0x10A6 0x10BA 0x10BE 0x10DF]))))
+  (is (not-any? uds/did-signals (keys uds/did-notes)) "a DID is decoded or noted, not both")
   (is (= {:did 0x10DF :data [0x43 0x00] :name :throttle-position :matches 0x11}
          (uds/did-sample {:did 0x10DF :data [0x43 0x00]}))
       "a reply of another length is named but not decoded")
-  (is (= {:did 0x10A5 :data [0x80]}
-         (uds/did-sample {:did 0x10A5 :data [0x80]}))))
+  (is (= {:did 0x10B8 :data [0x16]}
+         (uds/did-sample {:did 0x10B8 :data [0x16]}))))

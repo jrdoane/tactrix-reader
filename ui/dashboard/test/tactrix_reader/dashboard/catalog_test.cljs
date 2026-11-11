@@ -110,6 +110,4 @@
                  :wideband {:value {:lambda 0.98 :milliamps 0.1}}}]
     (is (= 3000 (catalog/compare-value {:pid :engine-rpm} samples)))
     (is (= 0.98 (catalog/compare-value {:pid :wideband :part :lambda} samples)))
-    (is (= 0.5 (catalog/compare-value {:derived :air-per-revolution} samples)))
-    (is (nil? (catalog/compare-value {:derived :air-per-revolution} {})))
     (is (nil? (catalog/compare-value nil samples)))))
