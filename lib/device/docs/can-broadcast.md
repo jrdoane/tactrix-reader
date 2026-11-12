@@ -1430,6 +1430,72 @@ Two things it adds about the engine's messages:
   only with the air conditioning on.
 - **`376`**: constant.
 
+## Raw-capture review (2026-11-12)
+
+Rechecked all eight local recordings directly from `raw.bin`, 3,025,198
+frames including diagnostic requests and replies. The reproducible,
+read-only check is [`analysis/review_remaining.py`](../analysis/review_remaining.py):
+
+```sh
+# From lib/device; Python 3.10 or later, no extra packages
+python3 analysis/review_remaining.py ~/.tactrix-reader/recordings
+```
+
+### An additional parity invariant in `374`
+
+**All 2,985 `374` frames have odd parity across their eight bytes**, as
+the six messages listed under Message structure do. This was missing from
+the earlier parity list. Only seven distinct payloads were observed, so
+the frame count is not 2,985 independent tests of the encoding.
+
+This offers a protocol explanation for the previously observed
+`b4.7 = b3.7 XOR any door open` rule. Every captured frame has either zero
+or one of the four door bits set: XOR of the individual door bits and OR
+of them are therefore indistinguishable. The parity hypothesis predicts
+that opening a second door flips the parity bit again, while the
+"any door" rule predicts no change (with other data held constant).
+Record two doors open together to distinguish them. The invariant alone
+does not establish whether b4.7 or b3.7 is the generated parity bit, or
+the meaning of the other bit. Neither should acquire a new body-control
+label from these recordings alone.
+
+### A narrower candidate layout for `370` steering torque
+
+The earlier interpretation of `370` bits 29-39 as a copy of `371`'s
+11-bit torque field is not established by their high correlation.
+**Signed byte 4 alone** explains that correlation:
+
+| Drive | Matched frames | `371` raw torque per signed `370` byte 4 | r |
+|---|---:|---:|---:|
+| `2026-10-28-drive` | 11,118 | 6.1032 | 0.99839 |
+| `2026-10-29-did-drive` | 5,835 | 6.1119 | 0.99749 |
+| `2026-10-30-did-drive` | 17,275 | 6.1049 | 0.99838 |
+| `2026-11-09-144943` | 10,475 | 6.0879 | 0.99851 |
+| `2026-11-09-150052` | 11,763 | 6.1043 | 0.99855 |
+
+These are least-squares fits against the latest preceding `371` frame,
+at most 25 ms old; intercepts are -0.71 to -0.36 raw counts. The parked
+recordings lack enough torque variation to estimate a useful scale.
+The slope is a conversion between raw fields, not a calibration in Nm.
+
+`370` byte 3 is only `00` or `40` during normal running, with `05` and
+`02` also present during the one captured start. Thus bits 29-31 do not
+behave like three ordinary low-order torque bits: b3.5 and b3.7 never
+set, and b3.6 is the only one changing. Treat signed byte 4 as the
+simpler candidate torque encoding and b3.6 as a separate candidate
+status bit, rather than treating the shared 11-bit layout as confirmed.
+
+There is a useful constraint on b3.6: with it clear, the magnitude of
+signed byte 4 never exceeds 24 in any recording. With it set, the
+magnitude ranges from 0 to 67, so it is not simply a threshold on the
+instantaneous torque byte. Its physical meaning remains unidentified.
+No new production signal is added from this candidate layout.
+
+These findings add a structural invariant and refine a field boundary;
+they do **not** establish a new calibrated physical signal. Battery
+temperature/current units, the axle-comparison fields, and the remaining
+switch identities still need independent evidence.
+
 ## Next recording
 
 A recording with these done one at a time, and a note of when, would settle
