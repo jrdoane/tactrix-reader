@@ -1,6 +1,7 @@
 (ns tactrix-reader.dashboard.subs
   (:require [re-frame.core :as rf]
             [tactrix-reader.dashboard.catalog :as catalog]
+            [tactrix-reader.dashboard.cluster :as cluster]
             [tactrix-reader.dashboard.series :as series]))
 
 (rf/reg-sub
@@ -125,6 +126,22 @@
    (catalog/sections catalog entries seen)))
 
 (rf/reg-sub
+ ::tile
+ ;; The tile of one PID or signal by name, for a view that shows a fixed
+ ;; value: the first of its catalog entry's, or one labelled from the name
+ ;; until the catalog has it.
+ :<- [::entries]
+ (fn [entries [_ kind value-name]]
+   (or (some->> entries
+                (some #(when (and (= kind (:kind %)) (= value-name (:name %))) %))
+                catalog/tiles
+                first)
+       {:kind kind
+        :name value-name
+        :id (catalog/series-key kind value-name nil)
+        :label (catalog/name-label value-name)})))
+
+(rf/reg-sub
  ::tile-value
  ;; The latest {:value :unit} for a tile, with `:value` the tile's part of a
  ;; value that is a map.
@@ -141,6 +158,19 @@
  :<- [::signals]
  (fn [signals [_ tile]]
    (catalog/override-text tile signals)))
+
+(rf/reg-sub
+ ::lamps
+ ;; The virtual cluster's warning lamps and whether each is lit.
+ :<- [::samples]
+ :<- [::signals]
+ (fn [[samples signals] _]
+   (cluster/lamps samples signals)))
+
+(rf/reg-sub
+ ::speed-unit
+ (fn [db _]
+   (:speed-unit db)))
 
 (rf/reg-sub
  ::position

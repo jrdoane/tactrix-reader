@@ -29,7 +29,7 @@
 
 (def views
   "The tabs, in order."
-  [:dashboard :signals :bus :map :recordings])
+  [:dashboard :cluster :signals :bus :map :recordings])
 
 (def initial-db
   {:connection :connecting
@@ -80,6 +80,8 @@
    :details? false
    ;; The ids of the dashboard sections that are folded away.
    :collapsed #{}
+   ;; The virtual cluster's speedometer: :km-per-hour or :miles-per-hour.
+   :speed-unit :km-per-hour
    ;; Everything the stream has sent since the source last changed, as a
    ;; `series` log.
    :stream-log nil
@@ -151,6 +153,23 @@
      (js/localStorage.setItem collapsed-storage-key (js/JSON.stringify (clj->js (map name collapsed))))
      (catch :default _ nil))))
 
+(def ^:private speed-unit-storage-key "tactrix-reader.speed-unit")
+
+(defn- stored-speed-unit
+  "The speedometer's units saved in this browser, or km/h."
+  []
+  (or (try
+        (#{:km-per-hour :miles-per-hour} (keyword (js/localStorage.getItem speed-unit-storage-key)))
+        (catch :default _ nil))
+      :km-per-hour))
+
+(rf/reg-fx
+ ::store-speed-unit
+ (fn [unit]
+   (try
+     (js/localStorage.setItem speed-unit-storage-key (name unit))
+     (catch :default _ nil))))
+
 (defn- hash-view
   "The view the page's URL names, as in `#map`, or the dashboard."
   []
@@ -167,7 +186,10 @@
 (rf/reg-event-fx
  ::initialize
  (fn [_ _]
-   {:db (assoc initial-db :view (hash-view) :collapsed (stored-collapsed))
+   {:db (assoc initial-db
+               :view (hash-view)
+               :collapsed (stored-collapsed)
+               :speed-unit (stored-speed-unit))
     :stream/connect "/stream"
     ::refresh-sparklines-every 1000
     :fx [[:dispatch [::load-catalog]]
@@ -212,6 +234,12 @@
    (let [collapsed ((if (contains? (:collapsed db) id) disj conj) (:collapsed db) id)]
      {:db (assoc db :collapsed collapsed)
       ::store-collapsed collapsed})))
+
+(rf/reg-event-fx
+ ::set-speed-unit
+ (fn [{:keys [db]} [_ unit]]
+   {:db (assoc db :speed-unit unit)
+    ::store-speed-unit unit}))
 
 (rf/reg-event-db
  ::toggle-details

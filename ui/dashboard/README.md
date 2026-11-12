@@ -6,7 +6,7 @@ connects to the [engine server's](../../services/engine-server/README.md)
 
 The page has:
 
-It has five tabs, kept in the URL (`#signals`, `#bus`, `#map`,
+It has six tabs, kept in the URL (`#cluster`, `#signals`, `#bus`, `#map`,
 `#recordings`), under one source bar.
 
 The **source bar** is on every tab:
@@ -53,6 +53,26 @@ with a scale fitted to a PID), and **published** (a DID named and scaled in a
 list published for related Subaru ECUs, checked against drives). A count with no known scale has the unit "raw". A
 tile whose catalog entry has an `:override` shows its text while the signal
 it names is true: the gear shows R while reverse is on.
+
+**Virtual Cluster** draws the latest values as the car's instrument cluster
+does, dark in both themes:
+
+- A tachometer and a speedometer, each with its value in figures. The
+  speedometer reads in km/h or mph, chosen under it and remembered in the
+  browser.
+- Between them, the gear (N in neutral, R in reverse), small coolant and
+  fuel gauges, and the outside and oil temperatures and the fuel economy.
+- Warning lamps: check engine (which flashes when the car's does), parking
+  brake, driver's seatbelt, door open, parking lights, and headlights. A
+  lamp is dim while it is off or nothing has said, and its tooltip says
+  which.
+
+A needle with no value rests, dimmed, at the bottom of its scale. The scales
+are drawn to suit the car, not copied from its cluster: the tachometer's red
+zone starts at 6500 rpm, and the coolant gauge runs from 50 to 130 °C with
+its red zone from 115. Unlike the Dashboard's tiles, the cluster's values
+are fixed, in `cluster/gauges` and `cluster/lamps`; their labels and formats
+still come from the catalog.
 
 **Signals** lists every PID, CAN signal, and DID in tables, with the badges'
 legend.
@@ -123,6 +143,8 @@ Namespaces are under `tactrix-reader.dashboard`:
 | `format` | Units, number formats, a tile's value as text, and labels from the catalog |
 | `catalog` | Pure: turns the server's catalog into sections, groups, and tiles, and into the fields of each CAN ID |
 | `bus` | Pure: the latest frame per CAN ID, which bits have changed, the baseline, and which field a bit belongs to |
+| `cluster-view` | The Virtual Cluster tab: the dials, the small gauges, the gear, and the warning lamps |
+| `cluster` | Pure: each gauge's scale, where its needle points, the marks on its face, and which warning lamps are lit |
 | `series` | Pure: time-series logs from recordings or the stream, holding values on a grid, axes, binning, and sparklines |
 
-`catalog`, `bus`, and `series` are tested by `npm test`.
+`catalog`, `bus`, `cluster`, and `series` are tested by `npm test`.

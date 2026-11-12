@@ -30,7 +30,7 @@ PEDESTAL_DEV_MODE=true clojure -M:run   # needed with `shadow-cljs watch` (CSP a
 # ui/dashboard
 npm install
 npx shadow-cljs release app     # or `watch app`
-npm test                        # node tests of the pure namespaces (`series`, `catalog`, `bus`)
+npm test                        # node tests of the pure namespaces (`series`, `catalog`, `bus`, `cluster`)
 npm run lint                    # clj-kondo
 ```
 
@@ -117,8 +117,8 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    events and `http.cljs` calls the API. `events.cljs` stores samples keyed by
    `:name`, not by PID number, signals keyed by `:signal`, DID replies
    keyed by `:did`, with the range each has read, and CAN frames keyed by
-   ID. It has five tabs (Dashboard, Signals, Bus, Map, Recordings) under one
-   source bar. The tiles, their labels, units, and groups come from
+   ID. It has six tabs (Dashboard, Virtual Cluster, Signals, Bus, Map,
+   Recordings) under one source bar. The tiles, their labels, units, and groups come from
    `/api/catalog` through `catalog.cljs`, not from lists in the views; a
    name the catalog lacks goes in an Other group. `views.cljs`
    tags inferred signals as inferred, PIDs also decoded from CAN as CAN,
@@ -132,8 +132,14 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    `series.cljs` holds the pure parts (that log, holding values on a 100 ms
    grid, axes, binning, and the tiles' sparklines); its
    `event-points` repeats the device library's `series/event-points`, so
-   change both together. `series.cljs`, `catalog.cljs`, and `bus.cljs` are
-   pure and are the namespaces with tests.
+   change both together.
+   The Virtual Cluster tab (`cluster_view.cljs`, `cluster.cljs`) draws the
+   latest values as the car's instrument cluster does: a tachometer, a
+   speedometer in km/h or mph, fuel and coolant gauges, the gear, and the
+   warning lamps. It is the one view that names its values itself, in
+   `cluster/gauges` and `cluster/lamps`, though their labels and formats
+   still come from the catalog. `series.cljs`, `catalog.cljs`, `bus.cljs`,
+   and `cluster.cljs` are pure and are the namespaces with tests.
 
 The dashboard build writes into
 `services/engine-server/resources/public/assets/js`, which is gitignored. The

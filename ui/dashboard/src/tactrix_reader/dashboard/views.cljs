@@ -4,6 +4,7 @@
             [reagent.core :as r]
             [tactrix-reader.dashboard.bus-view :as bus-view]
             [tactrix-reader.dashboard.catalog :as catalog]
+            [tactrix-reader.dashboard.cluster-view :as cluster-view]
             [tactrix-reader.dashboard.events :as events]
             [tactrix-reader.dashboard.format :refer [did-hex format-value label tile-text tile-unit
                                                      unit-labels]]
@@ -662,6 +663,7 @@
 
 (def ^:private view-names
   {:dashboard "Dashboard"
+   :cluster "Virtual Cluster"
    :signals "Signals"
    :bus "Bus"
    :map "Map"
@@ -687,6 +689,7 @@
       [connection-badge]]
      [source-bar]
      (case view
+       :cluster [cluster-view/cluster-view]
        :map [map-view/map-view]
        :recordings [recordings-block]
        :signals [signals-view]
