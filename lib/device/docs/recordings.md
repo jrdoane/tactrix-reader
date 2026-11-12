@@ -250,3 +250,14 @@ and closed in turn, and finally the driver's door again. It is the first
 recording paced by replies: 12,095 polling requests in 60.7 s, all but one
 answered, with each fast PID sampled about every 70 ms. What it showed is in
 [Doors](can-broadcast.md#doors).
+
+### `2026-11-11-200210`
+
+32 seconds parked with the parking brake on and the engine on a cold fast
+idle (1,690-1,900 rpm, coolant 45-50 °C), recorded from the dashboard with
+the note "Lights then AC": 39,862 frames and 5,922 PID samples. In order,
+the light switch was turned to its first position and then its second, the
+blower to speeds 1 to 4, the recirculation switched on, and the air
+conditioning switched on. The polling stopped for 2.3 s from 17.36 s, while
+the car's own frames kept arriving. What it showed is in
+[Lights, blower, and air conditioning](can-broadcast.md#lights-blower-and-air-conditioning).

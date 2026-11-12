@@ -52,6 +52,13 @@ doors, and more were worked on purpose. They are another car's, so they
 confirm where to look and test nothing here; see
 [A 2017 BRZ's logs](#a-2017-brzs-logs).
 
+Findings marked "2026-11-11-200210" come from a 32 s recording of that
+name, made parked that evening: the light switch, the blower, and the air
+conditioning were switched on one at a time, in a noted order. It is the
+first test here of the light bits and of the WRX's names for the air
+conditioning and the radiator fan; see
+[Lights, blower, and air conditioning](#lights-blower-and-air-conditioning).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -103,20 +110,20 @@ second. The drive has the same 24 IDs at the same rates.
 | `0D2` | 20 ms | 8 | Brake_2 | The stability control's torque request and limit to the engine, never used: constant `00 00 FF FF`, but for one pulse of b5.5 |
 | `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; distance counter; counter |
 | `0D4` | 20 ms | 8 | Wheel_Speeds | **Four wheel speeds** |
-| `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; clutch; off-throttle flags; counter, parity |
+| `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; clutch; A/C compressor; accessory-load and off-throttle flags; counter, parity |
 | `141` | 10 ms | 8 | Engine | Engine speed; requested and actual torque; gear and flags; fuel cut; parity |
 | `144` | 20 ms | 8 | CruiseControl | Brake pedal; available torque; engine-start and warm-up counters; drive-cycle flag; parity |
-| `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; lighting bits in byte 7; counter, parity |
+| `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; the light switch in byte 7; counter, parity |
 | `154` | 1 s | 7 | | Brake light, parking brake, and reverse again; any door open |
 | `156` | 20 ms | 8 | | Nearly constant; byte 7 follows fuel level |
 | `282` | 50 ms | 8 | Dashlights | Fuel sender; driver's seatbelt; outside temperature; counter |
-| `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow; drive-cycle and steering-load flags |
+| `360` | 50 ms | 8 | Engine_Temp | **Oil and coolant temperature, manifold pressure**; fuel flow; A/C request and radiator fan; drive-cycle and steering-load flags |
 | `361` | 50 ms | 8 | | Gear; check engine lamp; barometric pressure; engine stopped; battery current and probably temperature; counter, parity |
 | `370` | 50 ms | 8 | Steering_Torque_2 | Steering torque, as in `371`; the assist's load on the engine; counter |
 | `371` | 20 ms | 8 | Steering_Torque | **Steering angle**; steering torque and assist |
 | `372` | 100 ms | 8 | | Counter and parity bit in byte 1 |
 | `374` | 1 s, and on change | 8 | BodyInfo | Each door open; b4.7 is b3.7 XOR any door open |
-| `375` | 1 s, and on change | 8 | | Vehicle-stopped flag; each door open again; door-close pulse and timer |
+| `375` | 1 s, and on change | 8 | | Vehicle-stopped flag; each door open again; parking lights again; door-close pulse and timer |
 | `376` | 50 ms | 1 | | Constant `FA` |
 | `3D1` | 100 ms | 8 | Dash_State2 | Outside temperature, finer than `282`'s |
 | `660` | 500 ms | 8 | | Ignition cycle counter in bytes 2-3; 0.1 s timer in bytes 4-7 |
@@ -247,6 +254,8 @@ The dashboard's Bus tab colours those bits.
 | `:wheel-speeds` | `0D4`, four 16-bit LE values, 0.05625 km/h per bit | Map of `:front-left`, `:front-right`, `:rear-left`, `:rear-right` in km/h, in opendbc's order |
 | `:pedal-travel` | `140` byte 0 ÷ 2.55 | Percent of the byte's range; full pedal is about 45% on PID `5A` |
 | `:clutch` | `140` b1.7 | Boolean, true while the clutch pedal is pressed |
+| `:ac-compressor` | `140` b1.6 | Boolean, true while the air conditioning's compressor is engaged |
+| `:accessory-load` | `140` b7.5 | Boolean; it set when the blower was switched on; see [Lights, blower, and air conditioning](#lights-blower-and-air-conditioning) |
 | `:gear` | `141` b6 bits 0-2 | 1-5, or `:neutral` for 7; reverse reads 1, and a display shows R from `:reverse` |
 | `:requested-torque` | `141` bits 0-14 LE, minus 10000, 0.1 Nm per bit | Newton metres, what the pedal asks for |
 | `:engine-torque` | `141` bytes 2-3 LE, minus 10000, 0.1 Nm per bit | Newton metres, negative on the overrun |
@@ -256,10 +265,14 @@ The dashboard's Bus tab colours those bits.
 | `:warm-up-cycles` | `144` byte 4 | Raw count, 0-255 |
 | `:parking-brake` | `152` b6.3 | Boolean |
 | `:reverse` | `152` b6.2 | Boolean |
+| `:parking-lights` | `152` b7.2 | Boolean, true with the light switch in either position |
+| `:headlights` | `152` b7.3 | Boolean, true with the light switch in its second position |
 | `:fuel-gauge` | `156` byte 7 | Raw count, about 2.4% of the tank each: 35 at 97% and 15 at 51% |
 | `:fuel-sender` | `282` bits 0-11 LE | Raw count that rises as the tank empties, about 8 for each 1%: 97 at 98% and 483 at 51% |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` bytes 0-1 LE, about 0.00072 g/s per bit | Grams per second |
+| `:radiator-fan` | `360` b6.4 | Boolean; seen only with the air conditioning on |
+| `:ac-request` | `360` b6.7 | Boolean, true while the air conditioning is switched on |
 | `:check-engine-lamp` | `361` b1 bits 5-7 | `:on` for 0, `:off` for 1, and `:flashing` for 4, which is the WRX's reading and hasn't been seen here |
 | `:barometer` | `361` byte 3, 0.4 kPa per bit, plus 13.2 | kPa |
 | `:engine-stopped` | `361` b4.5 | Boolean, true while the engine isn't turning |
@@ -955,6 +968,14 @@ daytime running lights would be; see
 [A 2017 BRZ's logs](#a-2017-brzs-logs). That is the reading above, bit for
 bit, seen on a car where someone noted what they did.
 
+2026-11-11-200210: tested here. With the parking brake on, the byte read
+`00` until the light switch was turned to its first position, `04` from
+then (3.48 s), and `0C` from its second position (7.18 s). `375` b3.3 set
+with b7.2, in a frame sent at once, off its 1 s beat. So b7.2 is the
+parking lights and b7.3 the headlights, decoded as `:parking-lights` and
+`:headlights`. `04` alone hadn't been seen before. The daytime running
+lights (b7.1), the high beams, and the wipers are still untested.
+
 ### Doors
 
 `2026-11-09-194644` was recorded parked with the engine running. The
@@ -999,6 +1020,68 @@ These change with the doors too:
 `374`, `375`, and `154` are sent once a second and also as soon as a door
 changes: each change came 210-960 ms after the frame before, off the 1 s
 beat.
+
+### Lights, blower, and air conditioning
+
+`2026-11-11-200210` was recorded parked, with the parking brake on and the
+engine on a cold fast idle (1,690-1,900 rpm, coolant 45-50 °C). In order,
+the light switch was turned to its first position and then its second, the
+blower was turned to speeds 1, 2, 3, and 4, the recirculation was switched
+on, and the air conditioning was switched on. The times weren't noted, only
+the order. Six bits changed with them, each once:
+
+| Time | Bit | Reading |
+|---|---|---|
+| 3.47 s | `152` b7.2 and `375` b3.3 set | Light switch to its first position: the parking lights |
+| 7.18 s | `152` b7.3 sets | Light switch to its second position: the headlights |
+| 10.14 s | `140` b7.5 sets | The blower switched on, at speed 1 |
+| 24.56 s | `360` b6.7 sets | The air conditioning switched on |
+| 24.86 s | `360` b6.4 sets | The radiator fan, which runs with the air conditioning |
+| 25.12 s | `140` b1.6 sets | The compressor engages |
+
+The lights are in [Lighting bits](#lighting-bits-in-152-byte-7).
+
+**Air conditioning.** The three bits are where the
+[WRX's ECU](#a-2015-wrxs-ecu) has the request, the radiator fan's first
+stage, and the compressor's output, and none had been set in any earlier
+recording. The engine shows the compressor's load: `141`'s engine torque
+went from 13.5 Nm (22-24.4 s) to 25.7 Nm (27-32 s) at about 1,780 rpm,
+which is 2.5 kW to 4.8 kW, with the manifold pressure up from 28 to
+34 kPa and the fuel flow from 0.43 to 0.53 g/s. The torque began to rise
+at 24.5 s, with the request and before the compressor's bit. `360` b6.6,
+the WRX's air conditioning switch pin, stayed clear. They are decoded as
+`:ac-request`, `:radiator-fan`, and `:ac-compressor`. The fan has not been
+seen to come on for a hot engine, or to stop.
+
+**Blower.** `140` b7.5 is, on the WRX, the flag that lets the idle air be
+raised for an accessory, from a pin of the ECU or from another message.
+Inference: here it is the blower's switch. It set 3 s after the headlights
+and 14 s before the air conditioning, where the blower's first speed falls
+in the order, and it is the only flag to change in that gap. It fits the rest: in
+the seven earlier recordings it was set once, for 1.9 s, and on the
+[BRZ](#a-2017-brzs-logs) it was set throughout but for 2 s at the restart,
+when a blower left on loses its supply. Whether the rear window heater or
+anything else sets it hasn't been tried. Decoded as `:accessory-load`.
+
+**Not on the bus:** the blower's speeds 2, 3, and 4 and the recirculation.
+No bit changed between 10.14 s and 24.56 s but counters, parity bits,
+sensor noise, [`660`'s timer](#message-structure), and the outside
+temperature falling 1 °F at 16.68 s. The car's climate controls are
+manual, so this is what one would expect. The engine's torque, which
+falls steadily as the engine warms, has bumps of about 0.5 Nm near 13.8,
+16.7, 20.6, and 22.7 s, spaced as the four steps would be; the parking
+lights and the headlights made bumps of 1 and 1.8 Nm at 3.5 and 7.2 s.
+But the idle wanders by as much, so they can't be told from it. The
+[battery current](#battery-current-and-temperature-in-361) shows no step
+at any of the nine: the alternator covers each load within its ripple.
+
+`361` byte 7 began to flicker from 132 to 131 at 24.06 s, half a second
+before the air conditioning's bit, and settled at 131 by 29 s. It drifts
+by more than that in every recording, so this is probably chance.
+
+The polling stopped for 2.3 s in this recording, from 17.36 s to 19.66 s:
+no request was sent and none answered, while the car's own frames kept
+arriving. Why isn't known.
 
 ## Worked out from the decoded signals
 
@@ -1136,7 +1219,14 @@ values of the byte, 1.6 kPa apart, can't tell 0.4 kPa per count from the
 drive over a few hundred metres of height would settle it, and then it
 belongs in `broadcast-signals`.
 
-Named, in bits that never changed in a recording, so untested:
+2026-11-11-200210: three more, from the table below as it stood, were
+borne out when the air conditioning was switched on: `360` b6.7 (the
+request), `360` b6.4 (the radiator fan's first stage), and `140` b1.6 (the
+compressor), in that order within 0.6 s; see
+[Lights, blower, and air conditioning](#lights-blower-and-air-conditioning).
+
+Named, in bits that never changed in the first seven recordings, so
+untested except where it says:
 
 | Where | The WRX's ECU |
 |---|---|
@@ -1145,8 +1235,8 @@ Named, in bits that never changed in a recording, so untested:
 | `144` b6.5 | Cruise unavailable. Set throughout here, and on a BRZ while its cruise control was working, so the name doesn't hold. |
 | `360` b5.4, b5.5, byte 7 | The cruise lamp, the SET lamp, and the set speed, 0 with the main switch off |
 | `140` byte 4 | The pedal position the cruise control is asking for, 0 when it isn't |
-| `360` b6.4, b6.5 | Radiator fan, first and second stage |
-| `360` b6.6, b6.7; `140` b1.6 | The air conditioning's switch and request; its compressor engaged |
+| `360` b6.4, b6.5 | Radiator fan, first and second stage. 2026-11-11-200210: b6.4 set with the air conditioning. |
+| `360` b6.6, b6.7; `140` b1.6 | The air conditioning's switch and request; its compressor engaged. 2026-11-11-200210: b6.7 and then b1.6 set when it was switched on, and b6.6 didn't. |
 | `140` b1.4, b1.5 | Check engine lamp requested; electronic throttle fault |
 | `140` b3.7 | A tester has switched off the setting of trouble codes |
 | `361` byte 2 | Brake booster pressure. 0 throughout here, so probably no sensor. |
@@ -1168,6 +1258,7 @@ Other things it says that fit:
   108 °F if it is the [outside temperature](#body) as byte 4 is.
 - **`140` b7.5,** seen once here for 1.9 s, is a flag that lets the idle
   air be raised for an accessory. Nothing here shows which.
+  2026-11-11-200210: it set when the blower was switched on.
 
 Where it doesn't carry over to this car:
 
@@ -1250,7 +1341,8 @@ Where the BRZ's body differs, so nothing carries over:
 - **`152` byte 7** has `80` set throughout, as the WRX list has it, and
   this car's never has.
 - **`140` b7.5** is set throughout, but for 2 s at the restart. Here it
-  was set once, for 1.9 s.
+  was set once, for 1.9 s. 2026-11-11-200210: here it sets with the
+  blower, so the BRZ's was probably on, which does carry over.
 
 Two things it adds about the engine's messages:
 
@@ -1283,9 +1375,9 @@ Two things it adds about the engine's messages:
   no bit flashes at that rate in seven minutes of a BRZ's drive to work
   either, and `152` b7.4 goes with its high beams. The turn signals
   probably aren't on this bus.
-- **Headlights and wipers** (`152` byte 7): see
-  [Lighting bits](#lighting-bits-in-152-byte-7); the readings there are
-  untested.
+- **Daytime running lights, high beams, and wipers** (`152` byte 7): see
+  [Lighting bits](#lighting-bits-in-152-byte-7); those readings are
+  untested. The light switch's two positions have been tested.
 - **Cruise control** (`144`): no change that looks like it has been seen.
   Whether it was used while recording wasn't noted. The bits the WRX's ECU
   uses for it never changed, so it probably wasn't. They are the bits that
@@ -1311,14 +1403,18 @@ Two things it adds about the engine's messages:
   **`370` b3.6** flickers through every drive.
 - **`140` b7.5** was set once, for 1.9 s, cruising at 110 km/h in
   `2026-11-09-144943`. Nothing else changed with it. On the WRX it lets
-  the idle air be raised for an accessory.
+  the idle air be raised for an accessory. 2026-11-11-200210: it sets with
+  the blower. What else sets it, and what set it for those 1.9 s, is
+  unknown.
 - **`141` b6.5** after a shift (see [Gear](#gear)): the clutch bit doesn't
   explain it.
 - **The drive-cycle flag and the ignition counter** are readings that fit,
   not tested ones, and **the barometer's scale** has been seen over only
   1.6 kPa.
-- **The radiator fans, the air conditioning, and a flashing check engine
-  lamp** have names from the WRX and have never been seen.
+- **The radiator fan's second stage, the air conditioning's switch pin
+  (`360` b6.5, b6.6), and a flashing check engine lamp** have names from
+  the WRX and have never been seen. The fan's first stage has been seen
+  only with the air conditioning on.
 - **`376`**: constant.
 
 ## Next recording
@@ -1359,6 +1455,14 @@ turn signal was on.
    for `0D3` b0.3, b0.5, and b1.3; the fog lights, if fitted, for `374`
    b1.6 and b1.7; and the cruise control switched on, set at a steady
    speed, and cancelled, for the bits the BRZ moved.
+
+2026-11-11-200210 did part of the first, fourth, and sixth: the light
+switch's two positions, the blower, and the air conditioning switched on.
+Still to do from those: each switched off again; the rear window heater,
+for `140` b7.5; the lights with the parking brake off; and the idle until
+the radiator fan runs with the air conditioning off. The loads moved the
+battery current too little to give its scale with the engine running, so
+the fourth is better done with the ignition on and the engine off.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear

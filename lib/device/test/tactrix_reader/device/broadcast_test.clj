@@ -44,32 +44,59 @@
            (decode 0x0D4 [0x05 0x07 0x06 0x07 0x03 0x07 0x03 0x07])))
     (is (= {:gear 5 :requested-torque 30.2 :engine-torque 26.5 :fuel-cut false}
            (decode 0x141 [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00])))
-    (is (= {:parking-brake false :reverse false}
+    (is (= {:parking-brake false :reverse false :parking-lights true :headlights true}
            (decode 0x152 [0xF9 0xA4 0x00 0x00 0x00 0x00 0x00 0x0C])))
     (is (= {:fuel-sender 100 :driver-seatbelt :buckled}
            (decode 0x282 [0x64 0xC0 0x00 0x5E 0x5E 0x00 0x22 0x00])))
-    (is (= {:fuel-flow 0.783} (decode 0x360 [0x40 0x04 0x62 0x70 0x13 0x00 0x01 0x00])))
+    (is (= {:fuel-flow 0.783 :radiator-fan false :ac-request false}
+           (decode 0x360 [0x40 0x04 0x62 0x70 0x13 0x00 0x01 0x00])))
     ;; Braking at 20 s.
     (is (= {:brake-pressure 5} (decode 0x0D1 [0xA9 0x00 0x05 0x00])))
     (is (= {:brake true} (decode 0x0D3 [0x00 0x06 0xE0 0x0F 0x00 0x00 0xDA])))
     ;; Idling in neutral with the parking brake on at the end.
-    (is (= {:parking-brake true :reverse false}
+    (is (= {:parking-brake true :reverse false :parking-lights true :headlights true}
            (decode 0x152 [0xF9 0xD4 0x00 0x00 0x00 0x00 0x08 0x0C])))
     (is (= {:gear :neutral :requested-torque -17.1 :engine-torque 3.1 :fuel-cut false}
            (decode 0x141 [0x65 0x26 0x2F 0x27 0xFE 0x82 0x27 0x00])))
-    (is (= {:pedal-travel 0.0 :clutch false}
+    (is (= {:pedal-travel 0.0 :clutch false :ac-compressor false :accessory-load false}
            (decode 0x140 [0x00 0x0A 0x92 0x42 0x00 0x00 0x09 0x81])))
     ;; 2026-10-30-did-drive: backing out with the clutch slipping at 18 s, a
     ;; tight right turn at 20 km/h at 48 s, and fuel cut in 2nd at 58 s.
-    (is (= {:pedal-travel 13.7 :clutch true}
+    (is (= {:pedal-travel 13.7 :clutch true :ac-compressor false :accessory-load false}
            (decode 0x140 [0x23 0x83 0xD3 0x06 0x00 0x23 0x15 0x00])))
-    (is (= {:parking-brake false :reverse true}
+    (is (= {:parking-brake false :reverse true :parking-lights false :headlights false}
            (decode 0x152 [0xF9 0x04 0x00 0x00 0x00 0x00 0x04 0x02])))
     (is (= {:yaw-rate -38.4 :lateral-acceleration -0.33 :longitudinal-acceleration 0.08}
            (decode 0x0D0 [0xAD 0x0A 0x7A 0xFF 0xD7 0x0B 0xF0 0xF8])))
     (is (= {:gear 2 :requested-torque -26.0 :engine-torque -26.0 :fuel-cut true}
            (decode 0x141 [0x0C 0x26 0x0C 0x26 0x13 0x8C 0x42 0x08])))
-    (is (= {:fuel-flow 0.0} (decode 0x360 [0x00 0x00 0x76 0x81 0x0D 0x00 0x01 0x00])))
+    (is (= {:fuel-flow 0.0 :radiator-fan false :ac-request false}
+           (decode 0x360 [0x00 0x00 0x76 0x81 0x0D 0x00 0x01 0x00])))
+    ;; 2026-11-11-200210, parked at a fast idle: the light switch turned to
+    ;; its first position and then its second, the blower switched on, and
+    ;; then the air conditioning. Its request comes first, then the
+    ;; radiator fan, then the compressor.
+    (let [lights (fn [data] (select-keys (decode 0x152 data) [:parking-lights :headlights]))
+          engine (fn [data] (select-keys (decode 0x140 data) [:ac-compressor :accessory-load]))
+          cooling (fn [data] (select-keys (decode 0x360 data) [:radiator-fan :ac-request]))]
+      (is (= {:parking-lights false :headlights false}
+             (lights [0xF9 0xB4 0x00 0x00 0x00 0x00 0x08 0x00])) "2 s")
+      (is (= {:parking-lights true :headlights false}
+             (lights [0xF1 0x14 0x00 0x00 0x00 0x00 0x08 0x04])) "5 s")
+      (is (= {:parking-lights true :headlights true}
+             (lights [0xF1 0x94 0x00 0x00 0x00 0x00 0x08 0x0C])) "9 s")
+      (is (= {:ac-compressor false :accessory-load false}
+             (engine [0x00 0x0D 0xF3 0x46 0x00 0x00 0x17 0x01])) "9 s")
+      (is (= {:ac-compressor false :accessory-load true}
+             (engine [0x00 0x09 0x0E 0x47 0x00 0x00 0x17 0x21])) "12 s")
+      (is (= {:ac-compressor true :accessory-load true}
+             (engine [0x00 0x49 0x08 0x47 0x00 0x00 0x19 0x21])) "28 s")
+      (is (= {:radiator-fan false :ac-request false}
+             (cooling [0x4C 0x02 0x4A 0x59 0x0E 0x00 0x01 0x00])) "20 s")
+      (is (= {:radiator-fan false :ac-request true}
+             (cooling [0xF4 0x02 0x4B 0x59 0x10 0x00 0x81 0x00])) "24.7 s")
+      (is (= {:radiator-fan true :ac-request true}
+             (cooling [0xF0 0x02 0x4B 0x5A 0x11 0x00 0x91 0x00])) "28 s"))
     ;; The battery current in 2026-10-28-drive: with the ignition on and the
     ;; engine off, pinned while the starter cranks, and charging after the
     ;; start. In 2026-10-30-did-drive at 275 s, with the alternator backed
@@ -137,6 +164,12 @@
     (is (= [0 0 0 0 0 0 0xFF] (bits broadcast/broadcast-signals 0x140 :pid 0x11)))
     (is (= [0 0 0 0 0xFF] (bits broadcast/broadcast-signals 0x360 :pid 0x0B)))
     (is (= [0 0x80] (bits broadcast/inferred-signals 0x140 :signal :clutch)))
+    (is (= [0 0x40] (bits broadcast/inferred-signals 0x140 :signal :ac-compressor)))
+    (is (= [0 0 0 0 0 0 0 0x20] (bits broadcast/inferred-signals 0x140 :signal :accessory-load)))
+    (is (= [0 0 0 0 0 0 0 0x08] (bits broadcast/inferred-signals 0x152 :signal :headlights)))
+    (is (= [0 0 0 0 0 0 0x90] (mapv bit-or
+                                    (bits broadcast/inferred-signals 0x360 :signal :radiator-fan)
+                                    (bits broadcast/inferred-signals 0x360 :signal :ac-request))))
     (is (= [0 0 0 0 0 0 0x07] (bits broadcast/inferred-signals 0x141 :signal :gear)))
     (is (= [0xFF 0x7F] (bits broadcast/inferred-signals 0x141 :signal :requested-torque)))
     (is (= [0 0 0 0 0 0 0 0x08] (bits broadcast/inferred-signals 0x141 :signal :fuel-cut)))

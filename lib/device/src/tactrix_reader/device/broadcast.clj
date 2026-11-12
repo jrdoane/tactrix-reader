@@ -62,7 +62,9 @@
   cut signals were identified by comparing all seven reference recordings.
   The available torque, check engine lamp, barometer, and engine stopped
   signals are read as a 2015 WRX's ECU sends them and checked against the
-  recordings. Scales marked
+  recordings. The lights, the accessory load, and the air conditioning's
+  three come from 2026-11-11-200210, in which each was switched on in a
+  noted order. Scales marked
   approximate come from fits against quantities derived from other signals;
   see docs/can-broadcast.md. Unlike `broadcast-signals`, these are not
   confirmed against the PID that reports the same thing.
@@ -112,7 +114,16 @@
            :label "Pedal travel" :group :driver
            :decode #(round-to 1 (/ (nth % 0) 2.55))}
           {:signal :clutch :byte-count 2 :decode #(bit-test (nth % 1) 7)
-           :label "Clutch" :group :driver :format :pressed-released}]
+           :label "Clutch" :group :driver :format :pressed-released}
+          ;; Where a 2015 WRX's ECU has the compressor's clutch. It set half
+          ;; a second after `360`'s request, as the engine took up the load.
+          {:signal :ac-compressor :byte-count 2 :decode #(bit-test (nth % 1) 6)
+           :label "A/C compressor" :group :engine :format :on-off}
+          ;; On the WRX, the flag that lets the idle air be raised for an
+          ;; accessory. It set when the blower was switched on. What else
+          ;; sets it has not been tried.
+          {:signal :accessory-load :byte-count 8 :decode #(bit-test (nth % 7) 5)
+           :label "Accessory load" :group :engine :format :on-off}]
    0x141 [{:signal :gear :byte-count 7
            :label "Gear" :group :driver :format :gear
            ;; The gear comes from the ratio, so reverse reads 1; the
@@ -147,7 +158,13 @@
    0x152 [{:signal :parking-brake :byte-count 7 :decode #(bit-test (nth % 6) 3)
            :label "Parking brake" :group :driver :format :on-off}
           {:signal :reverse :byte-count 7 :decode #(bit-test (nth % 6) 2)
-           :label "Reverse" :group :driver :format :on-off}]
+           :label "Reverse" :group :driver :format :on-off}
+          ;; The light switch: its first position sets the one, and its
+          ;; second both.
+          {:signal :parking-lights :byte-count 8 :decode #(bit-test (nth % 7) 2)
+           :label "Parking lights" :group :driver :format :on-off}
+          {:signal :headlights :byte-count 8 :decode #(bit-test (nth % 7) 3)
+           :label "Headlights" :group :driver :format :on-off}]
    ;; A raw count that follows fuel level (PID 2F), at about 2.4% of the tank
    ;; per count: 35 at 97% and 15 at 51%.
    0x156 [{:signal :fuel-gauge :byte-count 8 :decode #(nth % 7)
@@ -164,7 +181,14 @@
    0x360 [;; Approximate scale: a count is about a cubic millimetre a second.
           {:signal :fuel-flow :unit :grams-per-second :byte-count 2
            :label "Fuel flow" :group :engine
-           :decode (fn [[low high]] (round-to 3 (* 0.00072 (+ low (* 256 high)))))}]
+           :decode (fn [[low high]] (round-to 3 (* 0.00072 (+ low (* 256 high)))))}
+          ;; Where a 2015 WRX's ECU has them. The fan came on 0.3 s after
+          ;; the air conditioning was switched on; it has not been seen to
+          ;; come on for a hot engine.
+          {:signal :radiator-fan :byte-count 7 :decode #(bit-test (nth % 6) 4)
+           :label "Radiator fan" :group :engine :format :on-off}
+          {:signal :ac-request :byte-count 7 :decode #(bit-test (nth % 6) 7)
+           :label "A/C" :group :engine :format :on-off}]
    ;; Byte 5's high nibble and byte 6 are the battery current sensor, 12
    ;; bits around 2048: above it the battery is charging, below it
    ;; discharging, and it pins at 250 while the starter cranks. The scale is
