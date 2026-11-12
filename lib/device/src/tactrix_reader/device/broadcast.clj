@@ -8,18 +8,29 @@
 (def broadcast-signals
   "Signals the project's 2015 Impreza broadcasts on its CAN bus, by CAN ID.
   Each was confirmed against the mode 01 PID it reports as; see
-  docs/can-broadcast.md. `:byte-count` is the data length a frame needs."
-  {0x0D1 [{:pid 0x0D :byte-count 2
+  docs/can-broadcast.md. `:byte-count` is the data length a frame needs.
+  `:replaces-poll? true` marks a signal as good as its PID's reply or
+  better, so the PID need not be polled as well (see `replaced-pids`).
+  Manifold pressure isn't one: it comes in 2 kPa steps, and the PID in 1."
+  {0x0D1 [{:pid 0x0D :byte-count 2 :replaces-poll? true
            :decode (fn [[low high]] (round-to 1 (* 0.05625 (+ low (* 256 high)))))}]
-   0x140 [{:pid 0x0C :byte-count 4
+   0x140 [{:pid 0x0C :byte-count 4 :replaces-poll? true
            :decode (fn [[_ _ low high]] (double (+ low (* 256 (bit-and high 0x3F)))))}
           ;; Byte 6 is the throttle opening, 0-255. PID 11's raw byte is
           ;; 29 when it is closed and 205 when it is wide open.
-          {:pid 0x11 :byte-count 7
+          {:pid 0x11 :byte-count 7 :replaces-poll? true
            :decode #(percent [(Math/round (+ 29.0 (/ (* 176.0 (nth % 6)) 255)))])}]
-   0x360 [{:pid 0x5C :byte-count 4 :decode #(temperature [(nth % 2)])}
-          {:pid 0x05 :byte-count 4 :decode #(temperature [(nth % 3)])}
+   0x360 [{:pid 0x5C :byte-count 4 :replaces-poll? true :decode #(temperature [(nth % 2)])}
+          {:pid 0x05 :byte-count 4 :replaces-poll? true :decode #(temperature [(nth % 3)])}
           {:pid 0x0B :byte-count 5 :decode #(* 2 (nth % 4))}]})
+
+(defn replaced-pids
+  "The PIDs that need no polling while `signals` (a map like
+  `broadcast-signals`) is decoded: those of its `:replaces-poll?` entries."
+  [signals]
+  (into #{}
+        (comp cat (filter :replaces-poll?) (map :pid))
+        (vals signals)))
 
 (defn broadcast-samples
   "Decodes a received message carrying signals in `signals` (by default

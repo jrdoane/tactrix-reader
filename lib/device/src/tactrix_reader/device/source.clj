@@ -94,6 +94,11 @@
   them off. `:frames? true` also emits a `{:type :frame ...}` for every
   CAN frame received.
 
+  It polls on `:schedule`, by default `can/poll-schedule` for `:broadcast`:
+  every PID in `can/default-poll-schedule` but those the broadcast signals
+  replace, which with `broadcast-signals` are RPM, speed, throttle, and the
+  coolant and oil temperatures. With `:broadcast {}` it polls them all.
+
   Returns a map of functions:
 
   - `:stop!` stops polling and waits for the channel to close.
@@ -111,7 +116,6 @@
   [device-or-path {:keys [emit schedule dids interval-ms reply-timeout-ms tx-id rx-id baud
                           broadcast signals frames? derived?]
                    :or {derived? true
-                        schedule can/default-poll-schedule
                         dids []
                         interval-ms can/default-poll-interval-ms
                         reply-timeout-ms can/default-reply-timeout-ms
@@ -121,6 +125,7 @@
                         broadcast broadcast/broadcast-signals
                         signals broadcast/inferred-signals}}]
   (let [path (if (map? device-or-path) (:path device-or-path) device-or-path)
+        schedule (or schedule (can/poll-schedule broadcast))
         running? (atom true)
         firmware (atom nil)
         writer (recording-writer emit)

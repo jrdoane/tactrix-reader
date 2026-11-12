@@ -212,6 +212,16 @@ km/h. Manifold pressure comes in 2 kPa steps, coarser than PID `0B`'s 1 kPa.
 Over the drive recording, the broadcast value just before each polled one
 differs from it by a median of 0.2 km/h, 0 throttle points, and 1 kPa.
 
+2026-11-12: five of the six are marked `:replaces-poll? true` in
+`broadcast-signals`, and the live source no longer polls their PIDs (`0C`,
+`0D`, `11`, `05`, `5C`) while it decodes them: `can/poll-schedule` leaves
+out what `broadcast/replaced-pids` gives. That takes the fast PIDs from 13
+to 10 and the slow from 14 to 12, so the rest come round sooner. Manifold
+pressure isn't marked, being coarser than PID `0B`. Mark a signal only if
+it is as fine as its PID and the check above shows it equal. `record` still
+polls every PID, so a recording made with it can repeat these checks; one
+made from the dashboard can't.
+
 Only add a signal to `broadcast-signals` once it matches a polled PID. Not
 decoded:
 

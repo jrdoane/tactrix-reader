@@ -227,9 +227,16 @@ polls with the default schedule:
   catalyst, voltage, fuel level, trims, commanded lambda, fuel system status,
   the rear oxygen sensor, barometric pressure, check-engine status), and
   repeats.
-- With the ECU answering in time, each fast PID is sampled about every 70 ms
-  and each slow PID about every second. Recordings made before reply pacing
-  sent one request every 15 ms, sampling them every 210 ms and 2.9 seconds.
+- It leaves out the five PIDs whose values the car broadcasts anyway, as
+  good or better and more often: RPM, speed, throttle, and the coolant and
+  oil temperatures (the `:replaces-poll?` entries of `broadcast-signals`;
+  `can/poll-schedule` builds the schedule without them). Manifold pressure
+  is still polled, because the broadcast value is coarser. With
+  `:broadcast {}` nothing is left out.
+- With the ECU answering in time, each fast PID is then sampled about every
+  55 ms and each slow PID about every 0.7 seconds (70 ms and a second with
+  nothing left out). Recordings made before reply pacing sent one request
+  every 15 ms, sampling them every 210 ms and 2.9 seconds.
 
 It also decodes the signals in `broadcast-signals` from the car's own traffic,
 as samples, and those in `inferred-signals` as
@@ -247,7 +254,9 @@ or reverse. Pass
 mean nothing on another vehicle, where turning the signals off stops them
 too.
 
-`record` uses the same session code and schedule. Pass `:schedule`,
+`record` uses the same session code, but polls every PID in
+`default-poll-schedule`, so its recordings can still check a broadcast
+signal against the PID it matches. Pass `:schedule`,
 `:interval-ms`, `:reply-timeout-ms`, `:tx-id`, `:rx-id`, or `:baud` to
 change them, and `:dids`
 to alternate PID requests with service 22 requests for those DIDs.

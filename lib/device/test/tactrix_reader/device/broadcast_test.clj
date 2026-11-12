@@ -155,6 +155,13 @@
                                             :data [0x3E 0x28 0x19 0x28 0x5D 0x0A 0x05 0x00]})))
   (is (empty? (broadcast/signal-samples {:type :line :text "aro"}))))
 
+(deftest replaced-pids-are-the-marked-signals
+  ;; RPM, speed, throttle, and the coolant and oil temperatures, but not
+  ;; manifold pressure.
+  (is (= #{0x0C 0x0D 0x11 0x05 0x5C} (broadcast/replaced-pids broadcast/broadcast-signals)))
+  (is (= #{} (broadcast/replaced-pids {})))
+  (is (= #{} (broadcast/replaced-pids broadcast/inferred-signals))))
+
 (deftest decode-bits-finds-the-bits-a-decoding-reads
   (let [bits (fn [signals id key value]
                (broadcast/decode-bits (:decode (first (filter #(= value (key %)) (get signals id))))))]

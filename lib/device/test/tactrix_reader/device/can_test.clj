@@ -1,6 +1,8 @@
 (ns tactrix-reader.device.can-test
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [are deftest is testing]]
+            [tactrix-reader.device.broadcast :as broadcast]
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.serial :as serial]
             [tactrix-reader.device.test-support :refer [ascii fake-adapter fake-vehicle-responder
@@ -40,6 +42,21 @@
                                      :data [2 1 0x0C 0 0 0 0 0]})))
   (is (nil? (can/reply-sample 0x7E8 {:type :line :text "aro"}))))
 
+
+(deftest poll-schedule-leaves-out-the-pids-broadcast-replaces
+  (let [full can/default-poll-schedule
+        reduced (can/poll-schedule broadcast/broadcast-signals)]
+    (is (= full (can/poll-schedule {})))
+    (is (= #{0x0C 0x0D 0x11 0x05 0x5C} (set/difference (set full) (set reduced))))
+    ;; Manifold pressure is broadcast too, but more coarsely than its PID.
+    (is (some #{0x0B} reduced))
+    ;; Still every fast PID, then one slow one: ten and one, twelve times.
+    (let [cycles (partition 11 reduced)]
+      (is (= (* 11 12) (count reduced)))
+      (is (apply = (map butlast cycles)))
+      (is (= 12 (count (distinct (map last cycles))))))
+    ;; A map with nothing marked replaces nothing.
+    (is (= full (can/poll-schedule {0x140 [{:pid 0x0C :byte-count 4 :decode identity}]})))))
 
 (defn- poll-for
   "Runs a CAN session against `respond`, polling for `ms` once the channel

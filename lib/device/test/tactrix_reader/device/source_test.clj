@@ -42,6 +42,33 @@
             :can-id 0x140 :timestamp-us 2000000}
            (first (filter :can-id @events))))))
 
+(defn- polled-pids
+  "The PIDs a live source started with `opts` requests in its first 30
+  requests, which is more than twice round the fast PIDs."
+  [opts]
+  (let [requested (atom [])
+        respond (fake-vehicle-responder)
+        noting (fn [line payload]
+                 (when (str/starts-with? line "att")
+                   (swap! requested conj (nth payload 6)))
+                 (respond line payload))]
+    (with-redefs [openport/open-session (fn [_] (fake-adapter noting))]
+      (let [source (source/start-live-source! "/dev/fake" (merge {:emit (fn [_]) :interval-ms 1} opts))]
+        (is (wait-for #(<= 30 (count @requested)) 3000))
+        ((:stop! source))))
+    (set @requested)))
+
+(deftest live-source-does-not-poll-what-broadcast-replaces
+  (let [replaced #{0x0C 0x0D 0x11 0x05 0x5C}]
+    (let [polled (polled-pids {})]
+      (is (empty? (filter replaced polled)))
+      ;; Load, MAF, and manifold pressure, which is broadcast but not replaced.
+      (is (every? polled [0x04 0x10 0x0B])))
+    ;; With no broadcast decoding, nothing else gives them.
+    (is (every? (polled-pids {:broadcast {}}) [0x0C 0x0D 0x11]))
+    ;; An explicit schedule is polled as given.
+    (is (= #{0x0C 0x05} (polled-pids {:schedule [0x0C 0x05]})))))
+
 (deftest live-source-emits-inferred-signals
   (let [events (atom [])
         respond (fake-vehicle-responder)

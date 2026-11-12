@@ -70,14 +70,18 @@ and `meta.edn` has the error message. If the process is killed outright,
 `raw.bin` is still on disk up to that point; run `export-recording` on it to
 get the CSVs. A recording that never opens the CAN channel writes no files.
 
-It opens CAN at 500 kbps with a pass-all filter and polls with the same
-schedule as the [live source](../README.md#live-and-replay-sources): one
+It opens CAN at 500 kbps with a pass-all filter and polls as the
+[live source](../README.md#live-and-replay-sources) does: one
 read-only request to `7E0` at a time, each sent once the last is answered
 (or after 50 ms) and at least 5 ms after it, covering RPM, speed, load,
 temperatures, trims, commanded and measured lambda, fuel system status, the
 rear oxygen sensor, throttle and pedal, the neutral input, voltage,
 barometric pressure, and fuel level. Fast PIDs are sampled about every 70 ms
-and slow ones about every second. `meta.edn` records the pacing under
+and slow ones about every second. The live source leaves out the five PIDs
+the car's broadcast replaces (RPM, speed, throttle, and the coolant and oil
+temperatures), and so do the recordings made from the dashboard, which
+have those values only as broadcast frames; `record` polls them all.
+`meta.edn` lists the PIDs polled and records the pacing under
 `:polling`; recordings without `:reply-timeout-ms` there sent one request
 every `:interval-ms` (15) instead, sampling fast PIDs every 210 ms and slow
 ones every 2.9 seconds.

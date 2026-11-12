@@ -41,12 +41,24 @@
   status."
   [0x05 0x5C 0x0F 0x3C 0x42 0x2F 0x06 0x07 0x44 0x03 0x15 0x46 0x33 0x01])
 
+(defn poll-schedule
+  "The request order: all fast PIDs, then one slow PID, and repeat. It
+  leaves out the PIDs that `broadcast`, a map like `broadcast-signals`,
+  replaces (`broadcast/replaced-pids`), since decoding it already gives
+  their values, and more often. The live source polls on this."
+  [broadcast]
+  (let [replaced (broadcast/replaced-pids broadcast)
+        fast (vec (remove replaced fast-pids))]
+    (vec (mapcat #(conj fast %) (remove replaced slow-pids)))))
+
 (def default-poll-schedule
-  "Request order for recording and the live source: all fast PIDs, then one
-  slow PID, and repeat. At the default interval, with replies in time, each
-  fast PID is sampled about every 70 ms and each slow PID about every
-  second; polling DIDs as well doubles both."
-  (vec (mapcat #(conj fast-pids %) slow-pids)))
+  "The schedule with every PID in it, which `record` uses, and the live
+  source when it decodes no broadcast signals. At the default interval,
+  with replies in time, each fast PID is sampled about every 70 ms and each
+  slow PID about every second; polling DIDs as well doubles both. Without
+  the five PIDs `broadcast-signals` replaces, that is about every 55 ms and
+  every 0.7 seconds."
+  (poll-schedule {}))
 
 (defn- collect! [input ^java.io.ByteArrayOutputStream sink ms]
   (let [deadline (+ (serial/monotonic-ms) ms)]
