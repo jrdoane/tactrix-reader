@@ -125,7 +125,7 @@
   "Removes and returns the first queued event matching `pred`, reading from the
   adapter until one arrives. Returns nil after `timeout-ms`."
   [session pred timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+  (let [deadline (+ (serial/monotonic-ms) timeout-ms)]
     (loop []
       (let [queued @(:events session)
             index (first (keep-indexed (fn [i event] (when (pred event) i)) queued))]
@@ -136,7 +136,7 @@
                                             (subvec queued (inc index))))
             (queued index))
 
-          (>= (System/currentTimeMillis) deadline)
+          (>= (serial/monotonic-ms) deadline)
           nil
 
           :else

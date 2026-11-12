@@ -258,6 +258,15 @@ idle (1,690-1,900 rpm, coolant 45-50 °C), recorded from the dashboard with
 the note "Lights then AC": 39,862 frames and 5,922 PID samples. In order,
 the light switch was turned to its first position and then its second, the
 blower to speeds 1 to 4, the recirculation switched on, and the air
-conditioning switched on. The polling stopped for 2.3 s from 17.36 s, while
-the car's own frames kept arriving. What it showed is in
+conditioning switched on. What it showed is in
 [Lights, blower, and air conditioning](can-broadcast.md#lights-blower-and-air-conditioning).
+
+No polling request was sent for 2.3 s from 17.36 s, while the car's own
+frames kept arriving, none lost (`0D3`'s counter runs on through it). The
+cause was the computer's clock: macOS's time daemon set it back 2.298 s at
+that moment, by its own log, and the polling was then paced on that clock,
+so it waited for the clock to catch up. For the same reason `meta.edn`
+gives a duration of 29.8 s for 32.0 s of frames. Since then the polling,
+the recorded duration, and every timeout in the device library are
+measured on a clock that only runs forward (`serial/monotonic-ms`), which
+setting the system's clock doesn't move.

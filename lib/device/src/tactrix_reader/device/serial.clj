@@ -36,11 +36,19 @@
         (when (pos? read-count)
           (java.util.Arrays/copyOf buffer read-count))))))
 
+(defn monotonic-ms
+  "Milliseconds on a clock that only runs forward, for timeouts and pacing.
+  The system's clock does not do: macOS sets it back or forward by a second
+  or two at a time, and a wait measured on it stretches or ends early. Only
+  differences between two readings mean anything."
+  []
+  (quot (System/nanoTime) 1000000))
+
 (defn- read-response [input {:keys [timeout-ms read-idle-ms max-response-bytes]}]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+  (let [deadline (+ (monotonic-ms) timeout-ms)]
     (loop [bytes []
            last-byte-at nil]
-      (let [now (System/currentTimeMillis)
+      (let [now (monotonic-ms)
             idle? (and last-byte-at
                        (>= (- now last-byte-at) read-idle-ms))
             timed-out? (>= now deadline)
@@ -52,7 +60,7 @@
            :truncated? full?}
           (let [chunk (read-available-bytes input (- max-response-bytes (count bytes)))]
             (if (seq chunk)
-              (recur (into bytes chunk) (System/currentTimeMillis))
+              (recur (into bytes chunk) (monotonic-ms))
               (do
                 (Thread/sleep 10)
                 (recur bytes last-byte-at)))))))))
@@ -92,13 +100,13 @@
            (let [drained (if drain?
                            (read-available-bytes input max-response-bytes)
                            [])
-                 started-at (System/currentTimeMillis)]
+                 started-at (monotonic-ms)]
              (.write output (codec/byte-values->byte-array (:bytes request)))
              (.flush output)
              (let [response (read-response input {:timeout-ms timeout-ms
                                                   :read-idle-ms read-idle-ms
                                                   :max-response-bytes max-response-bytes})
-                   elapsed-ms (- (System/currentTimeMillis) started-at)]
+                   elapsed-ms (- (monotonic-ms) started-at)]
                {:ok? true
                 :backend :mac-serial
                 :path path
@@ -141,12 +149,12 @@
      (if-not (seq path)
        {:ok? false
         :error :missing-path}
-       (let [deadline (+ (System/currentTimeMillis) duration-ms)]
+       (let [deadline (+ (monotonic-ms) duration-ms)]
          (try
            (with-open [input (java.io.BufferedInputStream.
                               (java.io.FileInputStream. path))]
              (loop [bytes []]
-               (if (>= (System/currentTimeMillis) deadline)
+               (if (>= (monotonic-ms) deadline)
                  {:ok? true
                   :path path
                   :duration-ms duration-ms

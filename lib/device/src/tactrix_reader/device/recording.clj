@@ -11,6 +11,7 @@
             [tactrix-reader.device.can :as can]
             [tactrix-reader.device.codec :as codec]
             [tactrix-reader.device.openport :as openport]
+            [tactrix-reader.device.serial :as serial]
             [tactrix-reader.device.uds :as uds]))
 
 (def default-record-duration-ms 60000)
@@ -148,7 +149,7 @@
         _ (.mkdirs dir)
         raw-file (io/file dir "raw.bin")
         out (java.io.FileOutputStream. raw-file)
-        started-ms (System/currentTimeMillis)
+        started-ms (serial/monotonic-ms)
         meta (assoc meta :recorded-at (str (java.time.Instant/now)))
         finished (atom nil)
         lock (Object.)]
@@ -163,7 +164,7 @@
                   (or @finished
                       (do
                         (.close out)
-                        (let [duration-ms (- (System/currentTimeMillis) started-ms)
+                        (let [duration-ms (- (serial/monotonic-ms) started-ms)
                               counts (assoc (export-recording dir (get-in meta [:polling :rx-id] 0x7E8))
                                             :raw-bytes (.length raw-file))]
                           (write-meta! dir (cond-> (assoc meta
@@ -250,7 +251,7 @@
                                                                 (do (reset! stop-reason :stop) false)
 
                                                                 (and duration-ms
-                                                                     (>= (System/currentTimeMillis)
+                                                                     (>= (serial/monotonic-ms)
                                                                          (+ @connected-at duration-ms)))
                                                                 (do (reset! stop-reason :duration) false)
 
@@ -274,7 +275,7 @@
                                                                              note (assoc :note note)))]
                                                                     ((:write! r) (.toByteArray pending))
                                                                     (reset! recorder r))
-                                                                  (reset! connected-at (System/currentTimeMillis)))})
+                                                                  (reset! connected-at (serial/monotonic-ms)))})
                            (finally
                              (openport/close-session session)))
                          (catch Throwable e

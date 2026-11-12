@@ -190,6 +190,9 @@ map should stay in sync with the command table in `lib/device/README.md`.
   that shape for new functions.
 - Functions that take a device accept either a path string or a device map from
   `scan-devices`.
+- Measure timeouts, pacing, and durations with `serial/monotonic-ms`, not
+  `System/currentTimeMillis`: macOS sets the system clock back or forward
+  while the server runs, which once stopped the polling for 2.3 s.
 
 ## Vehicle safety
 

@@ -49,8 +49,8 @@
   (vec (mapcat #(conj fast-pids %) slow-pids)))
 
 (defn- collect! [input ^java.io.ByteArrayOutputStream sink ms]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (while (< (System/currentTimeMillis) deadline)
+  (let [deadline (+ (serial/monotonic-ms) ms)]
+    (while (< (serial/monotonic-ms) deadline)
       (if-let [chunk (serial/read-chunk input)]
         (.write sink ^bytes chunk)
         (Thread/sleep 2)))))
@@ -174,14 +174,16 @@
             (openport/write-command! output (str "atf" channel " 1 0 4") (repeat 8 0))
             (on-connected firmware)
             ;; `awaiting` is the request still waiting for its reply, and
-            ;; `reply-due` when the next may be sent without one.
+            ;; `reply-due` when the next may be sent without one. The times
+            ;; are on the monotonic clock: paced on the system's, polling
+            ;; once stopped for the 2.3 s that clock was set back by.
             (loop [i 0
-                   next-request (System/currentTimeMillis)
+                   next-request (serial/monotonic-ms)
                    awaiting nil
                    reply-due 0
                    remainder []]
               (when (continue?)
-                (let [now (System/currentTimeMillis)]
+                (let [now (serial/monotonic-ms)]
                   (if (and (or (seq pids) (seq dids))
                            (>= now next-request)
                            (or (nil? awaiting) (>= now reply-due)))

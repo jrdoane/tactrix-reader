@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [are deftest is testing]]
             [tactrix-reader.device.can :as can]
+            [tactrix-reader.device.serial :as serial]
             [tactrix-reader.device.test-support :refer [ascii fake-adapter fake-vehicle-responder
                                                         message-bytes]]))
 
@@ -83,6 +84,36 @@
 (deftest polling-keeps-the-minimum-interval
   (let [{:keys [request-count]} (poll-for (fake-vehicle-responder) 200 {:interval-ms 50})]
     (is (<= 3 request-count 5))))
+
+(deftest polling-is-paced-by-the-monotonic-clock-alone
+  ;; The system's clock can be set while polling, so no wait may be measured
+  ;; on it. Here the monotonic clock stands still once the channel is open,
+  ;; then moves on by one interval, while real time passes throughout.
+  (let [real-ms serial/monotonic-ms
+        stopped (atom nil)
+        phase-ends (atom nil)
+        counts (atom [])
+        requests (atom 0)
+        vehicle (fake-vehicle-responder)
+        respond (fn [line payload]
+                  (when (str/starts-with? line "att")
+                    (swap! requests inc))
+                  (vehicle line payload))]
+    (with-redefs [serial/monotonic-ms #(or @stopped (real-ms))]
+      (poll-for respond 0
+                {:interval-ms 50
+                 :on-connected (fn [_]
+                                 (reset! stopped (real-ms))
+                                 (reset! phase-ends (+ (real-ms) 150)))
+                 :continue? (fn []
+                              (when (>= (real-ms) @phase-ends)
+                                (swap! counts conj @requests)
+                                (swap! stopped + 50)
+                                (reset! phase-ends (+ (real-ms) 150)))
+                              (or (< (count @counts) 3)
+                                  ;; Let the clock run again for the close.
+                                  (reset! stopped nil)))}))
+    (is (= [1 2 3] @counts))))
 
 (deftest polling-waits-out-the-reply-timeout-without-an-answer
   (are [reply-data] (let [{:keys [request-count unanswered-count]}

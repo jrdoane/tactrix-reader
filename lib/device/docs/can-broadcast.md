@@ -1080,8 +1080,11 @@ before the air conditioning's bit, and settled at 131 by 29 s. It drifts
 by more than that in every recording, so this is probably chance.
 
 The polling stopped for 2.3 s in this recording, from 17.36 s to 19.66 s:
-no request was sent and none answered, while the car's own frames kept
-arriving. Why isn't known.
+no request was sent, while the car's own frames kept arriving, none lost.
+The computer's clock was set back 2.3 s at that moment, and the polling
+was paced on it; see
+[the recording's entry](recordings.md#2026-11-11-200210). The PIDs have no
+samples for those 2.3 s, and nothing else is affected.
 
 ## Worked out from the decoded signals
 
