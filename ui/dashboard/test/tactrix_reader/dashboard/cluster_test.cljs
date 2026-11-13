@@ -26,6 +26,33 @@
       (is (= ["0" "20" "40" "60" "80" "100" "120" "140"] (keep :label (cluster/ticks mph))))
       (is (= 150 (:value (last (cluster/ticks mph))))))))
 
+(deftest values-are-shown-in-the-chosen-units
+  (let [metric {:speed-unit :km-per-hour :temperature-unit :celsius}
+        imperial {:speed-unit :miles-per-hour :temperature-unit :fahrenheit}]
+    (testing "as they come, by default"
+      (is (= [90 :celsius] (cluster/convert metric 90 :celsius)))
+      (is (= [6.7 :litres-per-100-km] (cluster/convert metric 6.7 :litres-per-100-km))))
+    (testing "temperatures in Fahrenheit"
+      (is (= [194 :fahrenheit] (cluster/convert imperial 90 :celsius)))
+      (is (= [-40 :fahrenheit] (cluster/convert imperial -40 :celsius))))
+    (testing "the fuel economy in miles per US gallon, with the speed in mph"
+      (let [[value unit] (cluster/convert imperial 6.7 :litres-per-100-km)]
+        (is (= :miles-per-gallon unit))
+        (is (< 35.1 value 35.2)))
+      (is (= [99.9 :miles-per-gallon] (cluster/convert imperial 0 :litres-per-100-km))
+          "fuel cut")
+      (is (= [99.9 :miles-per-gallon] (cluster/convert imperial 1.2 :litres-per-100-km))))
+    (testing "each setting stands alone"
+      (is (= [90 :celsius] (cluster/convert (assoc metric :speed-unit :miles-per-hour) 90 :celsius)))
+      (is (= [6.7 :litres-per-100-km]
+             (cluster/convert (assoc metric :temperature-unit :fahrenheit) 6.7 :litres-per-100-km))))
+    (testing "no value yet still has the chosen unit"
+      (is (= [nil :fahrenheit] (cluster/convert imperial nil :celsius)))
+      (is (= [nil :miles-per-gallon] (cluster/convert imperial nil :litres-per-100-km))))
+    (testing "what is not a temperature or an economy"
+      (is (= [97 :percent] (cluster/convert imperial 97 :percent)))
+      (is (= [:neutral nil] (cluster/convert imperial :neutral nil))))))
+
 (deftest ticks-number-the-major-marks
   (let [ticks (cluster/ticks tach)
         major (filter :major? ticks)]

@@ -689,8 +689,9 @@ table.fields { margin-top: 12px; border-collapse: collapse; font-size: 13px; }
 .lamp.on svg, .lamp.flashing svg { filter: drop-shadow(0 0 4px currentColor); }
 .lamp.flashing { animation: lamp-flash 1s steps(1) infinite; }
 @keyframes lamp-flash { 50% { opacity: 0.15; } }
-.cluster-units { grid-column: 3; justify-self: end; display: flex; }
-.cluster-units button {
+.cluster-units { grid-column: 3; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cluster-toggle { display: flex; }
+.cluster-toggle button {
   padding: 2px 10px;
   font-size: 12px;
   color: var(--ink-dim);
@@ -698,9 +699,9 @@ table.fields { margin-top: 12px; border-collapse: collapse; font-size: 13px; }
   border-color: var(--ring);
   border-radius: 0;
 }
-.cluster-units button:first-child { border-radius: 8px 0 0 8px; }
-.cluster-units button:last-child { border-left: none; border-radius: 0 8px 8px 0; }
-.cluster-units button.active { color: var(--face); background: var(--ink); border-color: var(--ink); }
+.cluster-toggle button:first-child { border-radius: 8px 0 0 8px; }
+.cluster-toggle button:last-child { border-left: none; border-radius: 0 8px 8px 0; }
+.cluster-toggle button.active { color: var(--face); background: var(--ink); border-color: var(--ink); }
 @media (max-width: 560px) {
   .cluster-foot { grid-template-columns: 1fr; justify-items: center; }
   .cluster-lamps, .cluster-units { grid-column: 1; justify-self: center; }

@@ -87,6 +87,16 @@
      [dial-face gauge]
      [dial-hand gauge unit-label]]))
 
+(defn- shown
+  "A tile and its latest value as the cluster shows them, in the chosen
+  units: [tile value unit]."
+  [tile]
+  (let [{:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])
+        [value unit] (cluster/convert @(rf/subscribe [::subs/cluster-units])
+                                      value
+                                      (or (:unit tile) unit))]
+    [(cond-> tile unit (assoc :unit unit)) value unit]))
+
 (def ^:private small-centre [60 60])
 
 (defn- small-face [gauge]
@@ -112,11 +122,11 @@
      [:circle.hub {:cx 60 :cy 60 :r 5.5}]]))
 
 (defn- small-gauge
-  "A small gauge with letters for a scale, over its value in figures."
+  "A small gauge with letters for a scale, over its value in figures. The
+  needle follows the PID's own value, and the figures the chosen units."
   [id]
   (let [gauge (get cluster/gauges id)
-        tile @(rf/subscribe [::subs/tile :pid (:name gauge)])
-        {:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])]
+        [tile value unit] (shown @(rf/subscribe [::subs/tile :pid (:name gauge)]))]
     [:div.cluster-small
      [:svg.small-dial {:viewBox "0 0 120 70" :role "img" :aria-label (:label tile)}
       [small-face gauge]
@@ -140,8 +150,7 @@
 (defn- info
   "One line of the display between the dials."
   [kind value-name]
-  (let [tile @(rf/subscribe [::subs/tile kind value-name])
-        {:keys [value unit]} @(rf/subscribe [::subs/tile-value tile])]
+  (let [[tile value unit] (shown @(rf/subscribe [::subs/tile kind value-name]))]
     [:div.cluster-info
      [:span.cluster-label (:label tile)]
      [:span.cluster-info-value
@@ -192,16 +201,16 @@
            [:svg {:viewBox "0 0 24 24" :aria-hidden true}
             (get lamp-icons id)]])))
 
-(def ^:private speed-unit-names
-  [[:km-per-hour "km/h"] [:miles-per-hour "mph"]])
-
-(defn- speed-unit-toggle [speed-unit]
-  [:div.cluster-units {:role "group" :aria-label "Speedometer units"}
-   (for [[unit text] speed-unit-names]
+(defn- unit-toggle
+  "A pair of buttons that picks one of a setting's `options`, each [unit
+  text]."
+  [setting label options chosen]
+  [:div.cluster-toggle {:role "group" :aria-label label}
+   (for [[unit text] options]
      ^{:key unit}
-     [:button {:class (when (= unit speed-unit) "active")
-               :aria-pressed (= unit speed-unit)
-               :on-click #(rf/dispatch [::events/set-speed-unit unit])}
+     [:button {:class (when (= unit chosen) "active")
+               :aria-pressed (= unit chosen)
+               :on-click #(rf/dispatch [::events/set-unit setting unit])}
       text])])
 
 (defn cluster-view []
@@ -226,4 +235,9 @@
        [dial speed "Speedometer" (:unit-label (get cluster/gauges speed))]]]
      [:div.cluster-foot
       [lamps]
-      [speed-unit-toggle speed-unit]]]))
+      [:div.cluster-units
+       ;; Speed in mph also puts the fuel economy in miles per gallon.
+       [unit-toggle :speed-unit "Speed and fuel economy units"
+        [[:km-per-hour "km/h"] [:miles-per-hour "mph"]] speed-unit]
+       [unit-toggle :temperature-unit "Temperature units"
+        [[:celsius "°C"] [:fahrenheit "°F"]] @(rf/subscribe [::subs/temperature-unit])]]]]))

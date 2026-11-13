@@ -57,9 +57,12 @@ it names is true: the gear shows R while reverse is on.
 **Virtual Cluster** draws the latest values as the car's instrument cluster
 does, dark in both themes:
 
-- A tachometer and a speedometer, each with its value in figures. The
-  speedometer reads in km/h or mph, chosen under it and remembered in the
-  browser.
+- A tachometer and a speedometer, each with its value in figures.
+- Two unit switches in the corner, remembered in the browser. km/h or mph
+  sets the speedometer, and mph also puts the fuel economy in miles per US
+  gallon, which stops at 99.9 as the fuel flow nears nothing. °C or °F sets
+  the coolant, outside, and oil temperatures. They change only this tab:
+  the other tabs and the data stay metric.
 - Between them, the gear (N in neutral, R in reverse), small coolant and
   fuel gauges, and the outside and oil temperatures and the fuel economy.
 - Warning lamps: check engine (which flashes when the car's does), parking

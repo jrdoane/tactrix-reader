@@ -35,6 +35,34 @@
   {:km-per-hour :speed
    :miles-per-hour :speed-mph})
 
+(def ^:private mpg-litres-per-100-km
+  "What divides by litres per 100 km to give miles per US gallon."
+  235.215)
+
+(def ^:private most-mpg
+  "The most the fuel economy reads in mpg, as a car's display stops at: it
+  has no end as the fuel flow nears 0, and none at all in fuel cut."
+  99.9)
+
+(defn convert
+  "A value and its unit as the cluster shows them, as [value unit], for the
+  chosen `:speed-unit` and `:temperature-unit`: a temperature in Fahrenheit
+  when that is chosen, and the fuel economy in miles per US gallon when the
+  speedometer reads in mph. Anything else is as it was. The unit is the
+  chosen one even when there is no value yet."
+  [{:keys [speed-unit temperature-unit]} value unit]
+  (cond
+    (and (= :celsius unit) (= :fahrenheit temperature-unit))
+    [(when (number? value) (+ 32 (* 1.8 value))) :fahrenheit]
+
+    (and (= :litres-per-100-km unit) (= :miles-per-hour speed-unit))
+    [(when (number? value)
+       (if (pos? value) (min most-mpg (/ mpg-litres-per-100-km value)) most-mpg))
+     :miles-per-gallon]
+
+    :else
+    [value unit]))
+
 (defn gauge-value
   "A PID's value in the gauge's unit, or nil when there is none."
   [{:keys [factor]} value]

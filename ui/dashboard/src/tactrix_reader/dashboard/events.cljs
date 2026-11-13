@@ -80,8 +80,11 @@
    :details? false
    ;; The ids of the dashboard sections that are folded away.
    :collapsed #{}
-   ;; The virtual cluster's speedometer: :km-per-hour or :miles-per-hour.
+   ;; The virtual cluster's speedometer: :km-per-hour or :miles-per-hour,
+   ;; which also puts the fuel economy in miles per gallon.
    :speed-unit :km-per-hour
+   ;; The virtual cluster's temperatures: :celsius or :fahrenheit.
+   :temperature-unit :celsius
    ;; Everything the stream has sent since the source last changed, as a
    ;; `series` log.
    :stream-log nil
@@ -153,21 +156,30 @@
      (js/localStorage.setItem collapsed-storage-key (js/JSON.stringify (clj->js (map name collapsed))))
      (catch :default _ nil))))
 
-(def ^:private speed-unit-storage-key "tactrix-reader.speed-unit")
+(def ^:private unit-settings
+  "The virtual cluster's unit settings, by their key in the db: where each
+  is saved in the browser, and its options, the default first."
+  {:speed-unit {:storage-key "tactrix-reader.speed-unit"
+                :options [:km-per-hour :miles-per-hour]}
+   :temperature-unit {:storage-key "tactrix-reader.temperature-unit"
+                      :options [:celsius :fahrenheit]}})
 
-(defn- stored-speed-unit
-  "The speedometer's units saved in this browser, or km/h."
+(defn- stored-units
+  "Each unit setting as saved in this browser, or its default."
   []
-  (or (try
-        (#{:km-per-hour :miles-per-hour} (keyword (js/localStorage.getItem speed-unit-storage-key)))
-        (catch :default _ nil))
-      :km-per-hour))
+  (into {}
+        (map (fn [[setting {:keys [storage-key options]}]]
+               [setting (or (try
+                              ((set options) (keyword (js/localStorage.getItem storage-key)))
+                              (catch :default _ nil))
+                            (first options))]))
+        unit-settings))
 
 (rf/reg-fx
- ::store-speed-unit
- (fn [unit]
+ ::store-unit
+ (fn [[setting unit]]
    (try
-     (js/localStorage.setItem speed-unit-storage-key (name unit))
+     (js/localStorage.setItem (get-in unit-settings [setting :storage-key]) (name unit))
      (catch :default _ nil))))
 
 (defn- hash-view
@@ -186,10 +198,8 @@
 (rf/reg-event-fx
  ::initialize
  (fn [_ _]
-   {:db (assoc initial-db
-               :view (hash-view)
-               :collapsed (stored-collapsed)
-               :speed-unit (stored-speed-unit))
+   {:db (merge (assoc initial-db :view (hash-view) :collapsed (stored-collapsed))
+               (stored-units))
     :stream/connect "/stream"
     ::refresh-sparklines-every 1000
     :fx [[:dispatch [::load-catalog]]
@@ -236,10 +246,11 @@
       ::store-collapsed collapsed})))
 
 (rf/reg-event-fx
- ::set-speed-unit
- (fn [{:keys [db]} [_ unit]]
-   {:db (assoc db :speed-unit unit)
-    ::store-speed-unit unit}))
+ ::set-unit
+ ;; `setting` is :speed-unit or :temperature-unit.
+ (fn [{:keys [db]} [_ setting unit]]
+   {:db (assoc db setting unit)
+    ::store-unit [setting unit]}))
 
 (rf/reg-event-db
  ::toggle-details

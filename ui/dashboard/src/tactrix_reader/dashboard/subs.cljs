@@ -173,6 +173,19 @@
    (:speed-unit db)))
 
 (rf/reg-sub
+ ::temperature-unit
+ (fn [db _]
+   (:temperature-unit db)))
+
+(rf/reg-sub
+ ::cluster-units
+ ;; The units the virtual cluster shows values in, for `cluster/convert`.
+ :<- [::speed-unit]
+ :<- [::temperature-unit]
+ (fn [[speed-unit temperature-unit] _]
+   {:speed-unit speed-unit :temperature-unit temperature-unit}))
+
+(rf/reg-sub
  ::position
  ;; Where a replay is, or nil.
  (fn [db _]

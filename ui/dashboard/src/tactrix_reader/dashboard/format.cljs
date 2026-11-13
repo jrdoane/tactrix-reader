@@ -6,6 +6,7 @@
 (def unit-labels
   {:rpm "rpm"
    :celsius "°C"
+   :fahrenheit "°F"
    :percent "%"
    :kpa "bar"
    :km-per-hour "km/h"
@@ -23,7 +24,8 @@
    :newton-metres "Nm"
    :milliseconds "ms"
    :kilowatts "kW"
-   :litres-per-100-km "l/100 km"})
+   :litres-per-100-km "l/100 km"
+   :miles-per-gallon "mpg"})
 
 (def unit-decimals
   "Decimal places for each unit, so a value keeps its width as it updates."
@@ -32,6 +34,7 @@
    :km-per-hour 0
    :percent 1
    :celsius 0
+   :fahrenheit 0
    :degrees 1
    :degrees-per-second 1
    :volts 2
@@ -43,7 +46,8 @@
    :newton-metres 1
    :milliseconds 2
    :kilowatts 1
-   :litres-per-100-km 1})
+   :litres-per-100-km 1
+   :miles-per-gallon 1})
 
 (defn did-hex [did]
   (.padStart (.toUpperCase (.toString did 16)) 4 "0"))

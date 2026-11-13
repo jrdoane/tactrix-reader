@@ -136,7 +136,10 @@ adapter --serial--> device.source --emit--> hub (core.async) --SSE/Transit--> re
    The Virtual Cluster tab (`cluster_view.cljs`, `cluster.cljs`) draws the
    latest values as the car's instrument cluster does: a tachometer, a
    speedometer in km/h or mph, fuel and coolant gauges, the gear, and the
-   warning lamps. It is the one view that names its values itself, in
+   warning lamps. Its two unit settings, kept in the browser, change only
+   what it shows, through `cluster/convert`: mph also puts the fuel economy
+   in miles per US gallon, and temperatures can be in Fahrenheit. The data
+   and the other tabs stay metric. It is the one view that names its values itself, in
    `cluster/gauges` and `cluster/lamps`, though their labels and formats
    still come from the catalog. `series.cljs`, `catalog.cljs`, `bus.cljs`,
    and `cluster.cljs` are pure and are the namespaces with tests.
