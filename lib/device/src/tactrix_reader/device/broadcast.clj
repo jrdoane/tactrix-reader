@@ -175,7 +175,13 @@
           {:signal :parking-lights :byte-count 8 :decode #(bit-test (nth % 7) 2)
            :label "Parking lights" :group :driver :format :on-off}
           {:signal :headlights :byte-count 8 :decode #(bit-test (nth % 7) 3)
-           :label "Headlights" :group :driver :format :on-off}]
+           :label "Headlights" :group :driver :format :on-off}
+          ;; Set for the 1.2-1.4 s of each sweep of the wipers, and clear
+          ;; between sweeps: for 0.1 s while they run, and longer on an
+          ;; intermittent setting. `derived` holds it through the gaps, as
+          ;; `:wipers`.
+          {:signal :wiper-sweep :byte-count 8 :decode #(bit-test (nth % 7) 6)
+           :label "Wiper sweep" :group :driver :format :on-off}]
    ;; A raw count that follows fuel level (PID 2F), at about 2.4% of the tank
    ;; per count: 35 at 97% and 15 at 51%.
    0x156 [{:signal :fuel-gauge :byte-count 8 :decode #(nth % 7)

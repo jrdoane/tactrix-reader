@@ -1,7 +1,7 @@
 (ns tactrix-reader.device.derived
   "Values worked out from the ones the sources decode: engine power, fuel
-  economy, road grade, clutch slip, and injector duty. None is read from the
-  car. They are emitted as `:signal` events with no `:can-id`, so a consumer
+  economy, road grade, clutch slip, injector duty, and whether the wipers
+  are running. None is read from the car. They are emitted as `:signal` events with no `:can-id`, so a consumer
   handles them like any inferred signal.
 
   The constants are the project's 2015 Impreza's, measured in its
@@ -22,7 +22,10 @@
    {:signal :road-grade :unit :percent :label "Road grade" :group :road
     :from [:longitudinal-acceleration :vehicle-speed :yaw-rate]}
    {:signal :clutch-slip :unit :rpm :label "Clutch slip" :group :road
-    :from [:engine-rpm :vehicle-speed :gear]}])
+    :from [:engine-rpm :vehicle-speed :gear]}
+   ;; `:off`, `:intermittent`, or `:on`, so it has a format and no unit.
+   {:signal :wipers :format :keyword :label "Wipers" :group :driver
+    :from [:wiper-sweep]}])
 
 (def ^:private units
   (into {} (map (juxt :signal :unit)) derived-signals))
@@ -58,6 +61,19 @@
   than a display or a 100 ms series can use."
   50000)
 
+(def ^:private wiper-run-gap-us
+  "Sweeps no further apart than this follow straight on from each other:
+  the wipers are running. The gap between them was 0.10-0.12 s in the one
+  drive that has them running."
+  500000)
+
+(def ^:private wiper-pause-us
+  "Sweeps no further apart than this, and more than `wiper-run-gap-us`, are
+  an intermittent setting's, and the wipers are off once this long has
+  passed with no sweep. The pause seen was 1.5-1.7 s; a longer one, if the
+  car has such a setting, reads as single sweeps."
+  2500000)
+
 (def ^:private min-economy-speed
   "Fuel for a distance means little near a standstill, in km/h."
   5.0)
@@ -74,10 +90,11 @@
 
 (def initial-state
   "What `step` starts from: the latest of each value it uses, when each
-  trigger is next due, and the last second of speed and acceleration for
-  the grade."
+  trigger is next due, the last second of speed and acceleration for the
+  grade, and what the wipers were last doing."
   {:latest {}
    :due {}
+   :wipers {:mode :off}
    :speeds clojure.lang.PersistentQueue/EMPTY
    :accelerations clojure.lang.PersistentQueue/EMPTY})
 
@@ -142,6 +159,30 @@
             shown (/ (/ (- v1 v0) 3.6) (/ (- t1 t0) 1e6) standard-gravity)]
         (round-to 1 (* 100.0 (- felt shown)))))))
 
+(defn- wipers
+  "What the wipers are doing after a reading of `:wiper-sweep` at `t`, from
+  what they were doing before: `{:mode :sweeping? :ended}`, with `:ended`
+  when the last sweep did. The car marks each sweep, not the switch, so the
+  mode is read from the gaps. A sweep straight after the last means `:on`,
+  one after a pause `:intermittent`, and one after longer than that, or the
+  first seen, `:on` again: a single sweep can't be told from the first of
+  many. The mode holds through the gap after a sweep, and is `:off` once
+  the gap is longer than an intermittent setting's pause."
+  [{:keys [mode sweeping? ended] :as before} sweep? t]
+  (let [gap (when ended (- t ended))]
+    (cond
+      (and sweep? (not sweeping?))
+      {:mode (if (and gap (< wiper-run-gap-us gap) (<= gap wiper-pause-us)) :intermittent :on)
+       :sweeping? true}
+
+      (and sweeping? (not sweep?))
+      {:mode mode :sweeping? false :ended t}
+
+      (and gap (not sweep?) (> gap wiper-pause-us))
+      {:mode :off}
+
+      :else before)))
+
 (defn- remember [state key value t]
   (assoc-in state [:latest key] [value t]))
 
@@ -164,7 +205,7 @@
   "The names of the samples and signals, and the DID, that `derive-event`
   reads."
   #{:engine-rpm :vehicle-speed :gear :reverse :yaw-rate :engine-torque :fuel-flow
-    :longitudinal-acceleration 0x10A3})
+    :longitudinal-acceleration :wiper-sweep 0x10A3})
 
 (defn- derive-event
   "The state after `event`, and the `[signal value]` pairs it gives rise
@@ -199,6 +240,12 @@
                                  (if (due? state key t)
                                    [(gave state key t) [[:road-grade (grade state t)]]]
                                    [state nil]))
+    ;; `152` comes 50 times a second, so every sweep and gap is seen, but
+    ;; the mode is given only as often as the other values.
+    :wiper-sweep (let [state (update state :wipers wipers value t)]
+                   (if (due? state key t)
+                     [(gave state key t) [[:wipers (get-in state [:wipers :mode])]]]
+                     [state nil]))
     ;; DID 10A3, the injector pulse width in ms.
     0x10A3 [state (when-let [rpm (and (number? value) (fresh state :rpm t))]
                     [[:injector-duty (injector-duty value rpm)]])]))

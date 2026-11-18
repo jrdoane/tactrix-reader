@@ -54,6 +54,10 @@
     (is (= {:kind :signal :name :engine-power :section :derived :label "Power" :group :engine
             :unit :kilowatts :from [:engine-torque :engine-rpm]}
            (:engine-power entries)))
+    ;; One that is not a number has a format in place of a unit.
+    (is (= {:kind :signal :name :wipers :section :derived :label "Wipers" :group :driver
+            :format :keyword :from [:wiper-sweep]}
+           (:wipers entries)))
     (doseq [{:keys [signal from]} derived/derived-signals]
       (is (= :derived (:section (get entries signal))) (str signal))
       ;; Each is worked out from values the catalog also has.

@@ -285,6 +285,7 @@ The dashboard's Bus tab colours those bits.
 | `:reverse` | `152` b6.2 | Boolean |
 | `:parking-lights` | `152` b7.2 | Boolean, true with the light switch in either position |
 | `:headlights` | `152` b7.3 | Boolean, true with the light switch in its second position |
+| `:wiper-sweep` | `152` b7.6 | Boolean, true for the 1.2-1.4 s of each sweep of the wipers; `:wipers`, a [derived signal](#derived-signals), holds it through the gaps |
 | `:fuel-gauge` | `156` byte 7 | Raw count, about 2.4% of the tank each: 35 at 97% and 15 at 51% |
 | `:fuel-sender` | `282` bits 0-11 LE | Raw count that rises as the tank empties, about 8 for each 1%: 97 at 98% and 483 at 51% |
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
@@ -1079,9 +1080,11 @@ pass it. Nothing else changes with it: no other bit of byte 7 or of any
 other message, and no step in the
 [battery current](#battery-current-and-temperature-in-361). The eight
 pulses on 2026-11-09 were six single sweeps in one drive and two in the
-other. It isn't decoded. A signal for it would have to hold through the
-gaps, 0.1 s to say the wipers are on and 1.7 s to cover the intermittent
-setting.
+other.
+
+`inferred-signals` decodes the bit as `:wiper-sweep`, which goes off
+between sweeps, and `derived` works out `:wipers` from it, which doesn't;
+see [Derived signals](#derived-signals).
 
 ### Doors
 
@@ -1257,8 +1260,10 @@ dashboard shows them in their own section, tagged derived.
 | `:fuel-economy` | Fuel flow ÷ 745 g/l ÷ speed, in l/100 km | `360`'s fuel flow | Below 5 km/h |
 | `:road-grade` | The mean longitudinal acceleration over the last second, less the change in `0D1`'s speed over it, ÷ g, in % | `0D0`'s acceleration | Below 10 km/h, in reverse, for a second after the yaw rate reaches 8°/s, and until most of a second has been seen |
 | `:injector-duty` | Pulse width (DID `10A3`) × RPM ÷ 1,200, in %: each injector opens once in two revolutions | The DID's reply | Not sent at all without DID polling |
+| `:wipers` | `:off`, `:intermittent`, or `:on`, from the gap before each sweep in `:wiper-sweep`: `:on` after 0.5 s or less, `:intermittent` after up to 2.5 s, and `:off` once 2.5 s pass with no sweep | `152`'s sweep bit | Never: it is `:off` until a sweep is seen |
 
-Run over the recordings, they give what the second pass found by hand:
+Run over the recordings, the first five give what the second pass found
+by hand:
 power peaks at 109.8 kW in `2026-10-28-drive` and 102.4 kW in
 `2026-10-30-did-drive`, clutch slip sits at a median of 0 rpm with 90% of
 it within −37 and +71 rpm in the first of those, and the injectors reach
@@ -1283,6 +1288,18 @@ What to keep in mind when reading them:
 - **Fuel economy** is 0 in fuel cut and passes 100 l/100 km pulling away.
 - **Power** rests on the torque scale, which is inferred, though the peak
   matching the engine's rating supports it.
+- **Wipers** is read from the pattern of sweeps, since the car sends each
+  sweep and not the switch. A single sweep reads `:on` for 3.8 s, as it
+  can't be told from the first of many. An intermittent setting reads
+  `:on` for its first sweep and `:intermittent` from its second, and
+  changing setting shows a sweep late. The two limits are set around the
+  gaps seen in one drive, 0.10-0.12 s and 1.5-1.7 s, so a setting with a
+  pause longer than 2.5 s, if the car has one, would read as single
+  sweeps. Over `2026-11-12-153032` it gives `:on` from 49.3 s to 53.2 s,
+  `:on` at 164.5 s, `:intermittent` from 167.3 s, `:on` from 240.2 s, and
+  `:off` at 829.2 s; over the two 2026-11-09 drives, six and two single
+  sweeps; and `:off` throughout `2026-10-28-drive`. It is not a number, so
+  it is left out of a recording's series, where `:wiper-sweep` is 1 or 0.
 
 They add about a tenth to the time `recording-series` takes.
 
@@ -1511,9 +1528,9 @@ Two things it adds about the engine's messages:
 - **Daytime running lights, high beams, and wipers** (`152` byte 7): see
   [Lighting bits](#lighting-bits-in-152-byte-7); those readings are
   untested. The light switch's two positions have been tested.
-  2026-11-18: the wipers were found in a drive in the rain. Which stalk
-  setting gives which pattern, the fast speed, and the washer are
-  untested.
+  2026-11-18: the wipers were found in a drive in the rain, and are
+  decoded. Which stalk setting gives which pattern, the fast speed, and
+  the washer are untested.
 - **Cruise control** (`144`): no change that looks like it has been seen.
   Whether it was used while recording wasn't noted. The bits the WRX's ECU
   uses for it never changed, so it probably wasn't. They are the bits that

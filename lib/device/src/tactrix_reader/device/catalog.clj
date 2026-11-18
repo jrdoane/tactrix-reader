@@ -44,6 +44,7 @@
    {:id :other :section :can :title "Other signals"}
    {:id :engine :section :derived :title "Engine"}
    {:id :road :section :derived :title "Road and clutch"}
+   {:id :driver :section :derived :title "Driver"}
    {:id :other :section :derived :title "Other"}])
 
 (def primary
@@ -138,7 +139,7 @@
   []
   (for [{:keys [signal] :as entry} derived/derived-signals]
     (merge {:kind :signal :name signal :section :derived}
-           (select-keys entry [:label :group :unit :from]))))
+           (select-keys entry [:label :group :unit :format :from]))))
 
 (defn- did-entries []
   (for [[did {:keys [name] :as entry}] (sort-by key uds/did-signals)]
@@ -160,7 +161,8 @@
     them. Each of a signal's `:parts` has its own `:bits`. A PID is shown
     in the `:obd` section and a signal in `:can`, unless the entry names
     its `:section`: a derived value has `:section :derived`, no `:can-id`,
-    and `:from`, the names of the values it is worked out from.
+    `:from`, the names of the values it is worked out from, and a `:unit`
+    or, for one that is not a number, a `:format`.
   - `:dids`, one entry per DID in `uds/did-signals`, with `:matches` and
     `:compare` for one fitted to a PID and `:published? true` for one named
     in a published list, and `:did-notes`, what is known about the others."

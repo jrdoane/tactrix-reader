@@ -76,6 +76,52 @@
     (is (= [] (run [(sample :engine-rpm 3000.0 1000)
                     {:type :did :did 0x10A5 :data [128] :value 0.0 :timestamp-us 2000}])))))
 
+(defn- sweeps
+  "Readings of `:wiper-sweep` 20 ms apart, as `152` gives them, for
+  `seconds`: true from each of `starts`, in ms, for the 1.24 s a sweep
+  takes."
+  [starts seconds]
+  (for [i (range (long (* 50 seconds)))
+        :let [ms (* i 20)]]
+    (signal :wiper-sweep (boolean (some #(<= % ms (+ % 1239)) starts)) (* ms 1000))))
+
+(defn- wipers-go?
+  "Whether the wipers go through `expected`, `[mode ms]` pairs, with each
+  mode first given within 80 ms of its time: a frame of `152`, and the
+  wait before the next value is due."
+  [expected events]
+  (let [actual (->> (run events)
+                    (partition-by second)
+                    (map (fn [[[_ mode t]]] [mode (quot t 1000)])))]
+    (and (= (map first expected) (map first actual))
+         (every? (fn [[[_ at] [_ ms]]] (<= at ms (+ at 80)))
+                 (map vector expected actual)))))
+
+(deftest the-wipers-are-read-from-the-gaps-between-sweeps
+  (testing "off until a sweep is seen"
+    (is (wipers-go? [[:off 0]] (sweeps [] 5))))
+  (testing "one sweep, held for the 2.5 s an intermittent pause could last"
+    (is (wipers-go? [[:off 0] [:on 1000] [:off 4740]] (sweeps [1000] 8))))
+  (testing "sweeps 0.1 s apart are the wipers running, through the gaps"
+    (is (wipers-go? [[:off 0] [:on 1000] [:off 7420]] (sweeps [1000 2340 3680] 9))))
+  (testing "sweeps 1.7 s apart are an intermittent setting, from the second"
+    (is (wipers-go? [[:off 0] [:on 1000] [:intermittent 3940] [:off 10620]]
+                    (sweeps [1000 3940 6880] 12))))
+  (testing "from intermittent to running, and a single sweep much later"
+    (is (wipers-go? [[:off 0] [:on 1000] [:intermittent 3940] [:on 5280] [:off 9020]
+                     [:on 20000] [:off 23740]]
+                    (sweeps [1000 3940 5280 20000] 25))))
+  (testing "a mode that never came is told from one that did"
+    (is (not (wipers-go? [[:off 0] [:on 1000] [:off 4740]] (sweeps [1000 3940] 8)))))
+  (testing "the value has no unit, and comes at most 20 times a second"
+    (let [events (second (reduce (fn [[state out] event]
+                                   (let [[state derived] (derived/step state event)]
+                                     [state (into out derived)]))
+                                 [derived/initial-state []]
+                                 (sweeps [] 1)))]
+      (is (= {:type :signal :signal :wipers :value :off :unit nil :timestamp-us 0} (first events)))
+      (is (= 17 (count events))))))
+
 (defn- drive
   "A second and a half of frames 20 ms apart, or `seconds`: the broadcast
   speed, from `speed` (a function of seconds, in km/h), and the
@@ -152,6 +198,7 @@
     (is (= [] (derive [])))))
 
 (deftest every-derived-signal-is-described
-  (is (= #{:engine-power :fuel-economy :injector-duty :road-grade :clutch-slip}
+  (is (= #{:engine-power :fuel-economy :injector-duty :road-grade :clutch-slip :wipers}
          (set (map :signal derived/derived-signals))))
-  (is (every? (every-pred :unit :label :group (comp seq :from)) derived/derived-signals)))
+  (is (every? (every-pred (some-fn :unit :format) :label :group (comp seq :from))
+              derived/derived-signals)))
