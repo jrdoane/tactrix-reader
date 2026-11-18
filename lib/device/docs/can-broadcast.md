@@ -59,6 +59,14 @@ first test here of the light bits and of the WRX's names for the air
 conditioning and the radiator fan; see
 [Lights, blower, and air conditioning](#lights-blower-and-air-conditioning).
 
+Findings marked "2026-11-18" come from two things done that day: a check
+of the [2026-11-17 review](#drivetrain-and-exhaust-review-2026-11-17), and
+a pass over `2026-11-12-153032`, a 13.9-minute drive in the rain from a
+15 °C cold start, which that review had used only for its own four checks.
+They explained `141` b6.5 and b6.6, found the wipers, and timed the
+drive-cycle flag from the engine's start; see
+[Fuel cut and the wet drive](#fuel-cut-and-the-wet-drive-2026-11-18).
+
 Findings that rest on one recording say which. The drive overturned some idle
 findings: at idle almost every varying engine byte moved with RPM, and most
 of those turned out not to be RPM.
@@ -111,9 +119,9 @@ second. The drive has the same 24 IDs at the same rates.
 | `0D3` | 20 ms | 7 | Brake_Type | Brake light; starter; distance counter; counter |
 | `0D4` | 20 ms | 8 | Wheel_Speeds | **Four wheel speeds** |
 | `140` | 10 ms | 8 | Throttle | **Engine RPM, throttle**; pedal; clutch; A/C compressor; accessory-load and off-throttle flags; counter, parity |
-| `141` | 10 ms | 8 | Engine | Engine speed; requested and actual torque; gear and flags; fuel cut; parity |
+| `141` | 10 ms | 8 | Engine | Engine speed; requested and actual torque; gear and flags; fuel cut, and whether it is allowed; parity |
 | `144` | 20 ms | 8 | CruiseControl | Brake pedal; available torque; engine-start and warm-up counters; drive-cycle flag; parity |
-| `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; the light switch in byte 7; counter, parity |
+| `152` | 20 ms | 8 | Stalk | Brake light, parking brake, reverse; the light switch and the wipers in byte 7; counter, parity |
 | `154` | 1 s | 7 | | Brake light, parking brake, and reverse again; any door open |
 | `156` | 20 ms | 8 | | Nearly constant; byte 7 follows fuel level |
 | `282` | 50 ms | 8 | Dashlights | Fuel sender; driver's seatbelt; outside temperature; counter |
@@ -282,7 +290,7 @@ The dashboard's Bus tab colours those bits.
 | `:driver-seatbelt` | `282` b5.0 | `:buckled` or `:unbuckled` |
 | `:fuel-flow` | `360` bytes 0-1 LE, about 0.00072 g/s per bit | Grams per second |
 | `:radiator-fan` | `360` b6.4 | Boolean; seen only with the air conditioning on |
-| `:ac-request` | `360` b6.7 | Boolean, true while the air conditioning is switched on |
+| `:ac-request` | `360` b6.7 | Boolean, true while the air conditioning asks for its compressor. It comes and goes with the air conditioning left on; see [Lights, blower, and air conditioning](#lights-blower-and-air-conditioning) |
 | `:check-engine-lamp` | `361` b1 bits 5-7 | `:on` for 0, `:off` for 1, and `:flashing` for 4, which is the WRX's reading and hasn't been seen here |
 | `:barometer` | `361` byte 3, 0.4 kPa per bit, plus 13.2 | kPa |
 | `:engine-stopped` | `361` b4.5 | Boolean, true while the engine isn't turning |
@@ -403,7 +411,15 @@ names `:requested-torque` and `:engine-torque` in `inferred-signals`.
   in 31 of 40 and 40 of 54. That fits fuel cut but doesn't prove it: load
   also read 0 in 170 and 183 samples with the bit clear. `360` byte 1 is a
   poor check, because it also reads 0 at idle, where the fuel flow is below
-  one count.
+  one count. 2026-11-18: it is "the pedal is released and `141` b6.5 is
+  clear", which is a fuel cut wanted and allowed. The two agree in 99.57%
+  of the 364,901 frames with the engine running in the six drives, and it
+  set 0.03-0.04 s after the pedal reached 0 in 153 of 154 lifts. The cut
+  itself (b7.3) comes 0.6 s to a couple of seconds later, which is why
+  this bit is wider. The clutch is not part of it: adding the clutch switch to the
+  rule drops the agreement to 96.4%. Inference: it clears when the clutch
+  goes in because the revs then fall under b6.5's threshold; see
+  [When the fuel is cut](#when-the-fuel-is-cut).
 - **`141` byte 7** takes `00`, `08`, or `10` during deceleration.
   2026-11-10: **b7.3 is fuel cut.** With byte 7 at `08`, the 16-bit fuel
   flow in `360` (below) read exactly 0 in 42,720 of 42,861 frames (99.7%).
@@ -412,7 +428,10 @@ names `:requested-torque` and `:engine-torque` in `inferred-signals`.
   frames), and then `08` until fuel comes back. So b7.4 marks the cut
   starting. b6.6 above is wider than either: it was set in 21,335 frames
   with byte 7 at `00` and fuel flowing. `inferred-signals` decodes b7.3 as
-  `:fuel-cut`.
+  `:fuel-cut`. 2026-11-18: over the six drives b7.4 leads b7.3 by
+  0.28-0.61 s, a little longer than the 0.2-0.45 s above, and the wait
+  from lifting off to the cut is one of a few fixed lengths; see
+  [When the fuel is cut](#when-the-fuel-is-cut).
 
 ### `360` bytes 0-1: fuel flow
 
@@ -437,6 +456,12 @@ while driving because it wraps.
   computed flow with r = 0.985.
 - **Over a drive:** summed, it gives 0.25-0.83 litres for the five drives,
   or 8.4-11.3 l/100 km, the most for the cold start on 2026-11-09.
+- **Against measured lambda:** 2026-11-18. `2026-11-12-153032` polled the
+  front sensor's lambda (PID `34`) about every 55 ms. Against MAF ÷
+  (14.7 × that), in place of the commanded lambda, the scale comes out at
+  0.00074-0.00075 g/s per bit (r = 0.998, 5,691 samples), 3-4% above the
+  0.00072 decoded. That is one drive, and the 14.7 is an assumption about
+  the fuel, so `:fuel-flow` is unchanged.
 
 ### Gear
 
@@ -463,7 +488,11 @@ km/h in each gear, from polled RPM and speed above 15 km/h:
   idle recording, idling in neutral with the clutch out. 2026-11-09: it is
   mostly a low-speed flag. In the two drives it was set in all but 49 of
   37,203 frames below 15 km/h and clear in 96% of the 74,001 frames at or
-  above it. What sets it after a shift is unexplained.
+  above it. What sets it after a shift is unexplained. 2026-11-18: it
+  marks where fuel cut isn't allowed, which is below 15 km/h or below an
+  engine speed that depends on how warm and how loaded the engine is.
+  After a shift it is the revs, fallen under that speed, that set it; see
+  [When the fuel is cut](#when-the-fuel-is-cut).
 
 **7 is neutral.** PID `65` (auxiliary inputs, supported by this car)
 reports whether the manual gearbox is in gear. In the four drives that
@@ -566,6 +595,8 @@ does:
 |---|---|---|
 | Ignition on, engine off | 1,719-1,743, steady | `2026-10-28-drive`, to 4.5 s |
 | Starter cranking, ECU voltage 8.2 V | Pinned at 250 | `2026-10-28-drive`, 4.5-5.3 s |
+| Ignition on, engine off, at 15 °C | 1,690-1,696, steady | `2026-11-12-153032`, to 1.9 s |
+| Starter cranking, ECU voltage 8.4 V | Pinned at 249-250 | `2026-11-12-153032`, from 1.96 s |
 | The 15 s after the start | 2,100-2,700, falling | `2026-10-28-drive` |
 | Driving with the alternator at full duty | About 2,040 | All five drives |
 | Alternator duty (DID `10B2`) cut to about 30 | 1,760-1,900 within a second or two, then creeping up | `2026-10-30-did-drive`, each time |
@@ -616,6 +647,8 @@ lagged by 40 s, at about −2.1 counts per °C (81 at 50 °C, 158 at
 bonnet that moves more slowly than the intake air: it falls at idle, as
 the engine bay warms, and rises on the move. That it is the battery's is
 an inference from where it sits, next to the current. It isn't decoded.
+2026-11-18: in `2026-11-12-153032` it read 154-160, a little under the
+161-163 that line gives for the drive's intake air temperatures.
 
 ### Drive-cycle flag
 
@@ -632,6 +665,7 @@ it has idled for 30 s on end.
 | `2026-10-28-drive` | Never | 581 s at the end | 383 s | None |
 | `2026-11-09-144943` | Never | 587 s at the end | 250 s | 407 s |
 | `2026-10-29-did-drive` | Never | 953 s at the end | 146 s in the recording | None |
+| `2026-11-12-153032` | Set at 602.4 s | 624.2 s, and 600.1 s since the engine first turned | 300 s reached at 480.3 s | 39 s |
 
 "Since ignition on" is from [`660`'s timer](#message-structure), and the
 time at speed is counted from `0D1`. In the first drive the flag set while
@@ -649,6 +683,21 @@ one met, so that part is untested.
 2026-11-11: the WRX's ECU sets `144` b1.1 once three of its counters reach
 600, 300, and 30, the same three figures. That ROM has `360` b5.7 as an
 unidentified flag from another module.
+
+2026-11-18: **the 600 s run from the engine's start, not from the
+ignition.** `2026-11-12-153032` is the third time the flag has set and
+the first in a recording that includes the start. `144` b1.1 set at
+602.36 s, and `360` b5.7 in its next frame: 600.12 s after `140` first
+showed the engine turning, at 2.24 s, and 624.2 s after the ignition came
+on by `660`'s timer. The other two conditions had long been met, the 30 s
+stopped with the pedal released at 39 s, before the car first moved, and
+the 300 s at speed at 480.3 s. Counted from the ignition, the flag would
+have set 24 s sooner. That is how OBD-II words the condition, as time
+since the engine started, and it fits the 600.6 s in `2026-11-09-150052`,
+a warm restart, if the engine caught within half a second of the ignition
+coming on there. So the table's third column is the wrong clock, though
+the recordings before this one couldn't show it. The idle condition still
+hasn't been the last one met.
 
 ## Speed, brakes, and chassis
 
@@ -846,7 +895,9 @@ The units of all of these are unknown, so none is decoded.
   parked, wake after some seconds of rolling, and stay awake for minutes
   after a stop, which fits all of it. Two lists for other cars guess the
   passenger's seatbelt instead; neither tested it. BRZ logs: the bit was
-  clear throughout the BRZ's drive, from its first frame.
+  clear throughout the BRZ's drive, from its first frame. 2026-11-18: a
+  fifth drive fits, a little late: in `2026-11-12-153032` it cleared at
+  79.0 s, when the wheels had been turning for 24.7 s, over 180 m.
 - **Outside temperature:** `282` byte 4 minus 40 looks like outside
   temperature in °F. It read 108 at the start (68 °F, 20 °C) when PID `46`
   read 21 °C, and 90 (50 °F, 10 °C) when PID `46` read 10 °C. `282` byte 3
@@ -863,7 +914,15 @@ The units of all of these are unknown, so none is decoded.
   would be cranking. `0D3` byte 3, `152` b0.5, `361` b1.5 and b4.5, and `370`
   b2.5 and b7.7 also change once during the start. 2026-11-11: `361` b1.5
   is the check engine lamp going out and b4.5 the engine beginning to turn;
-  see [A 2015 WRX's ECU](#a-2015-wrxs-ecu).
+  see [A 2015 WRX's ECU](#a-2015-wrxs-ecu). 2026-11-18:
+  `2026-11-12-153032` has the second recorded start, at 15 °C, and it goes
+  the same way. `0D3` b1.6 is set from 1.96 s to 3.12 s. `361` b4.5 clears
+  at 1.98 s and the check engine code goes from 0 to 1 at 2.03 s. `140`
+  shows the engine turning from 2.24 s. `141` b6.3 and b6.4 clear together
+  at 2.86 s, 0.62 s after that, and `370` b2.5 at 3.07 s. `152` b0.5 is
+  clear from 1.93 s to 2.83 s, `0D3` byte 3 changes four times between
+  1.96 s and 3.10 s, and `002` byte 2 reads `73` in place of `70` for
+  20 ms at 1.94 s. `372` byte 2 stays 0, as it did the first time.
 
 ### Counters and fuel level
 
@@ -881,18 +940,25 @@ except fuel level.
 | `2026-11-09-144943` | `65` | `23`, then `24` | 17, then 16 | 57%, falling to 55% | `6ED4` | 444 |
 | `2026-11-09-150052` | `66` | `24` | 16 | 55%, falling to 53% | `6ED5` | 452 |
 | `2026-11-09-194644` | `6A` | `24` | 15 | 51% | `6ED9` | 483 |
+| `2026-11-11-200210` | `7A` | `2B` | 32 | 92.5% | `6EE9` | 135 |
+| `2026-11-12-153032` | `7C`, then `7D` | `2D`, then `2E` | 30, then 29 and 28 | About 85%, swinging 72-98% as the fuel moved | `6EEC` | 183 |
+
+The last two rows were added on 2026-11-18.
 
 - **`144` byte 3 is probably a count of engine starts.** It rises from each
   recording to the next, by 1 between the two drives made back to back on
   2026-11-09, and its one change within a recording came 1.4 s after the
   engine started in `2026-10-28-drive`, the only recording that includes a
-  start.
+  start. 2026-11-18: `2026-11-12-153032` includes a second start, and the
+  byte stepped at 3.83 s, 1.6 s after the engine first turned.
 - **`144` byte 4 is probably a count of warm-up cycles.** It stepped once in
   each of the two drives that began cold (coolant 48 °C and 36 °C), 1.7 s
   and 2.7 s after `360`'s coolant temperature first read 71 °C. It didn't
   move in the three drives that began warm (84-98 °C) or in the cold idle,
   which only reached 55 °C. OBD-II counts a warm-up cycle when coolant rises
-  by at least 22 °C and reaches 70 °C.
+  by at least 22 °C and reaches 70 °C. 2026-11-18: a third cold start, from
+  15 °C in `2026-11-12-153032`, stepped it at 248.04 s, 1.8 s after the
+  coolant first read 71 °C.
 - **`156` byte 7 follows fuel level,** at about 2.4% of the tank per count
   (PID `2F` = 2.37 × count + 15.3 over all 1,168 replies, r = 0.987). The
   line doesn't pass through zero, so it is decoded as the raw count, not as
@@ -901,7 +967,9 @@ except fuel level.
   `2026-10-28-drive` (70% to 97%, so the tank was filled). PID `2F` wanders by a few
   percent as the fuel moves, and `2026-10-29-did-drive` sits about 5% above
   the line. Both drops within a recording came 475 s in, which looks like
-  coincidence.
+  coincidence. 2026-11-18: it was, since the two in `2026-11-12-153032`
+  came at 192 s and 704 s. That drive's 30 and 28 put the line at 86% and
+  82%, around the 85% PID `2F` averaged.
 
 `inferred-signals` decodes the three as `:engine-starts`, `:warm-up-cycles`,
 and `:fuel-gauge`, each as its raw byte.
@@ -914,6 +982,9 @@ and `:fuel-gauge`, each as its raw byte.
   first drive), 9, 2, 54, 1, and 4, so the two keep step and `660` gained
   two more: switching the ignition on without starting the engine would do
   that. It read 28,272 in the first recording. Bytes 0-1 are always `FF FF`.
+  2026-11-18: over the next two steps, to `2026-11-11-200210` and to
+  `2026-11-12-153032`, both rose by 16 and by 3, counting the start in
+  the last.
   2026-11-11: the WRX's ECU stamps each stored trouble code with bytes 2-3
   and with bytes 5-7, which fits a count of ignition cycles and a time
   within one. Its author guessed bytes 5-7 are a distance; here they count
@@ -985,6 +1056,32 @@ with b7.2, in a frame sent at once, off its 1 s beat. So b7.2 is the
 parking lights and b7.3 the headlights, decoded as `:parking-lights` and
 `:headlights`. `04` alone hadn't been seen before. The daytime running
 lights (b7.1), the high beams, and the wipers are still untested.
+
+2026-11-18: **b7.6 is the wipers, one pulse for each sweep.**
+`2026-11-12-153032` was driven in the rain, as its driver said afterwards,
+and the bit pulsed 464 times in it, for 1.20-1.38 s each time (median
+1.24 s), as it had in the eight above:
+
+- **One sweep** at 49.3 s, 2.5 s after the car pulled away.
+- **26 sweeps 3.0 s apart** from 164.5 s, with the bit clear for 1.7 s
+  between them (1.5 s once), as an intermittent setting gives.
+- **437 sweeps on end** from 238.8 s to 826.6 s, with the bit clear for
+  0.10-0.12 s between them: one every 1.34 s, 45 a minute, a wiper's low
+  speed. They ran on to the end of the drive and stopped 5 s after the
+  parking brake went on.
+
+When the stalk was moved wasn't noted, so the three settings are read
+from the pattern and are an inference. That the bit is the wipers is no
+longer a guess: it pulses for ten minutes in the one drive made in rain,
+at a wiper's pace, where two other cars have theirs. Inference: it is
+set while the blades are away from their rest position and clear as they
+pass it. Nothing else changes with it: no other bit of byte 7 or of any
+other message, and no step in the
+[battery current](#battery-current-and-temperature-in-361). The eight
+pulses on 2026-11-09 were six single sweeps in one drive and two in the
+other. It isn't decoded. A signal for it would have to hold through the
+gaps, 0.1 s to say the wipers are on and 1.7 s to cover the intermittent
+setting.
 
 ### Doors
 
@@ -1062,6 +1159,22 @@ at 24.5 s, with the request and before the compressor's bit. `360` b6.6,
 the WRX's air conditioning switch pin, stayed clear. They are decoded as
 `:ac-request`, `:radiator-fan`, and `:ac-compressor`. The fan has not been
 seen to come on for a hot engine, or to stop.
+
+2026-11-18: **the request comes and goes, and the three clear together.**
+In `2026-11-12-153032`, in the rain at 8-10 °C outside, `360` b6.7 first
+set at 587.8 s and then came and went ten times before the end: on for
+7.8 s the first time and 4.0-4.6 s after that, every 21-29 s. Each time
+the compressor's bit followed it by 0.53-0.62 s and the fan's by
+0.30-0.35 s (2.55 s once, after the compressor), and all three cleared
+within 50 ms of each other. That is the first time any of them has been
+seen to clear. Inference: the air conditioning, or the demister, which
+runs it, was switched on at 587.8 s and left on, and the compressor was
+cycled as it is in cold air, to keep the evaporator from icing. Nobody
+presses a switch ten times at that pace. So b6.7 is the request for the
+compressor after that control, not the switch on the dashboard, and
+`:ac-request` is the right name for it. The fan stopped each time with
+the coolant at 93-95 °C, so it still hasn't been seen to run for heat.
+`360` b6.5 and b6.6 stayed clear.
 
 **Blower.** `140` b7.5 is, on the WRX, the flag that lets the idle air be
 raised for an accessory, from a pin of the ECU or from another message.
@@ -1230,7 +1343,10 @@ The barometer stays in `inferred-signals`, though it follows a PID: five
 values of the byte, 1.6 kPa apart, can't tell 0.4 kPa per count from the
 0.5 found before, so the scale is the WRX's and not this car's own. A
 drive over a few hundred metres of height would settle it, and then it
-belongs in `broadcast-signals`.
+belongs in `broadcast-signals`. 2026-11-18: `2026-11-12-153032` adds
+bytes 211-216 against 98-100 kPa on PID `33`. The line is within 1 kPa
+of the PID in all 1,260 replies and rounds to it in 970, and 2 kPa is
+still too little to tell the two scales apart.
 
 2026-11-11-200210: three more, from the table below as it stood, were
 borne out when the air conditioning was switched on: `360` b6.7 (the
@@ -1249,7 +1365,7 @@ untested except where it says:
 | `360` b5.4, b5.5, byte 7 | The cruise lamp, the SET lamp, and the set speed, 0 with the main switch off |
 | `140` byte 4 | The pedal position the cruise control is asking for, 0 when it isn't |
 | `360` b6.4, b6.5 | Radiator fan, first and second stage. 2026-11-11-200210: b6.4 set with the air conditioning. |
-| `360` b6.6, b6.7; `140` b1.6 | The air conditioning's switch and request; its compressor engaged. 2026-11-11-200210: b6.7 and then b1.6 set when it was switched on, and b6.6 didn't. |
+| `360` b6.6, b6.7; `140` b1.6 | The air conditioning's switch and request; its compressor engaged. 2026-11-11-200210: b6.7 and then b1.6 set when it was switched on, and b6.6 didn't. 2026-11-18: b6.7 and b1.6 cycled ten times in a drive, with b6.6 clear throughout. |
 | `140` b1.4, b1.5 | Check engine lamp requested; electronic throttle fault |
 | `140` b3.7 | A tester has switched off the setting of trouble codes |
 | `361` byte 2 | Brake booster pressure. 0 throughout here, so probably no sensor. |
@@ -1279,6 +1395,10 @@ Where it doesn't carry over to this car:
   [fuel cut](#pedal-and-fuel-cut-flags), in 99.7% of frames.
 - **`141` b6.5** is "below the rev limit" there. Here it is set at idle
   and comes and goes at 2,000-2,500 rpm in `2026-10-28-drive`.
+  2026-11-18: here it is set below an engine speed too, but a different
+  one: the speed under which fuel isn't cut, which is 2,000-2,500 rpm on
+  an engine as cold as that drive's was. See
+  [When the fuel is cut](#when-the-fuel-is-cut).
 - **`360` b5.6** latches once the engine is warm there. It was never set
   here, at up to 96 °C.
 - **`361` bytes 5-7** are zeros there, and the current is in `362`; see
@@ -1391,6 +1511,9 @@ Two things it adds about the engine's messages:
 - **Daytime running lights, high beams, and wipers** (`152` byte 7): see
   [Lighting bits](#lighting-bits-in-152-byte-7); those readings are
   untested. The light switch's two positions have been tested.
+  2026-11-18: the wipers were found in a drive in the rain. Which stalk
+  setting gives which pattern, the fast speed, and the washer are
+  untested.
 - **Cruise control** (`144`): no change that looks like it has been seen.
   Whether it was used while recording wasn't noted. The bits the WRX's ECU
   uses for it never changed, so it probably wasn't. They are the bits that
@@ -1413,21 +1536,34 @@ Two things it adds about the engine's messages:
 - **`370` b7.7** is clear after the ignition comes on and sets once: 31 s
   after it (as the engine started), 83 s, and 226 s in the three
   recordings that caught it, flickering as it does in the last two.
+  2026-11-18: it isn't timed from the ignition. In `2026-11-12-153032`
+  it stayed clear until 814.2 s, 836 s after the ignition came on, and
+  then set, flickering, while the car was reversing to park.
   **`370` b3.6** flickers through every drive.
 - **`140` b7.5** was set once, for 1.9 s, cruising at 110 km/h in
   `2026-11-09-144943`. Nothing else changed with it. On the WRX it lets
   the idle air be raised for an accessory. 2026-11-11-200210: it sets with
   the blower. What else sets it, and what set it for those 1.9 s, is
-  unknown.
+  unknown. 2026-11-18: it was set throughout `2026-11-12-153032`, a drive
+  in the rain, in which the blower was probably on.
 - **`141` b6.5** after a shift (see [Gear](#gear)): the clutch bit doesn't
-  explain it.
+  explain it. 2026-11-18: explained; see
+  [When the fuel is cut](#when-the-fuel-is-cut). What is left is its
+  engine-speed threshold away from a warm engine with the headlights on:
+  the lights' and the air conditioning's parts each rest on one drive, and
+  the cold engine's hasn't been fitted to a curve.
 - **The drive-cycle flag and the ignition counter** are readings that fit,
   not tested ones, and **the barometer's scale** has been seen over only
-  1.6 kPa.
+  1.6 kPa. 2026-11-18: the flag has now set three times, the last
+  600.1 s after the engine's start; the barometer over 2.8 kPa, counting
+  all the recordings.
 - **The radiator fan's second stage, the air conditioning's switch pin
   (`360` b6.5, b6.6), and a flashing check engine lamp** have names from
   the WRX and have never been seen. The fan's first stage has been seen
   only with the air conditioning on.
+- **The fuel flow's scale** came out 3-4% higher against measured lambda
+  in one drive than against commanded lambda in five (see
+  [`360` bytes 0-1](#360-bytes-0-1-fuel-flow)).
 - **`376`**: constant.
 
 ## Raw-capture review (2026-11-12)
@@ -1531,6 +1667,9 @@ the same edge by 70–230 ms (median 145 ms). Five of those events are in
 the November 12 drive. A rising b6.5 during a cut thus predicts a return
 to fuelling in these captures. The other 128 cuts ended without this
 edge, and b6.5 also changes outside fuel cut. Its full ECU meaning is open.
+2026-11-18: it isn't any longer. b6.5 is set wherever fuel cut isn't
+allowed, and the edge is the engine speed falling to the threshold at
+which fuelling resumes; see [When the fuel is cut](#when-the-fuel-is-cut).
 
 **Oxygen-sensor response after injection stops.** The fast polling on
 November 12 resolves both sensors in six decelerations. Use the first
@@ -1546,6 +1685,144 @@ the rear still read above threshold after the front had already crossed.
 The sixth pair's sampling intervals overlap. These times include exhaust
 travel, sensor response, and polling cadence. The slower rear polling on
 the earlier drives leaves the order unresolved by this test.
+
+## Fuel cut and the wet drive (2026-11-18)
+
+Two things: a check of the review above, and a pass over
+`2026-11-12-153032`, which that review had used only for its own four
+checks. Both were done from `raw.bin` with a parser written apart from
+the review's, whose frame counts equal `frames.csv`'s in all nine
+recordings. The scripts for this section are not in the repository.
+
+### The review, checked
+
+Every figure in it was reproduced. What it leaves out:
+
+- **Speed from the front axle.** The same 190,531 pairs, 73 of them with
+  one front wheel at zero, and no mismatch. The zero rule is less sure
+  than it reads. A wheel's word never reads 1-23: the smallest moving
+  reading is 24, 1.35 km/h. In all 73 frames the moving wheel read 24-29,
+  so half the sum was under 24 as well, and "either front wheel at zero
+  reads zero" can't be told from "a speed under 24 counts reads zero".
+- **Reverse gearing.** The same five medians, from five of the nine times
+  reverse was selected in the six drives; the other four never reached
+  4 km/h with the clutch out. Against the mean of all four wheels, which
+  is how the [forward gears](#worked-out-from-the-decoded-signals) were
+  measured, the figure is 119.3-119.6, and 119.5 with the five pooled.
+  Subaru's specification gives reverse as 3.333 against 1st's 3.454,
+  which from 1st's 123.2 makes 118.9. The measurement is 0.3-0.5% above
+  that, at walking pace, where the speed is coarse and the clutch may
+  still be slipping with its switch released. So it is the gearbox's
+  published reverse ratio, and 118.9 would serve as well as 119.2.
+- **Fuel cut.** The same 160 cuts, 32 with b6.5 rising inside one, and
+  the cut clearing 20-150 ms after it (median 70 ms). What the edge means
+  is below.
+- **Oxygen sensors.** The review's script doesn't cover this one, so it
+  was redone from the description: 12 decelerations to consider and 6
+  that qualify, with the front sensor passing lambda 1.20 at 0.27-0.75 s
+  (median 0.42 s) and the rear passing 0.10 V at 0.94-1.51 s (median
+  1.20 s). The rear sensor was polled every 0.66 s, so each of its times
+  is when the first reply under the threshold arrived, and the crossing
+  itself came up to 0.66 s sooner. 1.20 s is an upper bound. The front's
+  times, from a reply every 55 ms, are good to that.
+
+### When the fuel is cut
+
+**`141` b6.5 says fuel cut isn't allowed.** It is set while the car is
+under 15 km/h or the engine is under a speed that depends on its state,
+and clear otherwise. Against speed it changes with `0D1`'s word at
+262-275, about 267, which is 15.0 km/h. Against engine speed, from
+`140`:
+
+| State | Set below, fuel flowing | Set below, in a cut | Seen in |
+|---|---|---|---|
+| Warm (coolant 80 °C or more), headlights on, no A/C request | 1,278 rpm | About 1,100 rpm (edges at 1,083-1,123) | Five drives |
+| Warm, headlights off | 1,205 rpm | About 1,020 rpm | `2026-10-30-did-drive`, the one drive with them off |
+| A/C request (`360` b6.7) on | About 1,645 rpm (sets at 1,612-1,647, clears at 1,649-1,659) | Not seen | `2026-11-12-153032` |
+| Cold | 1,830-2,500 rpm, falling as the coolant warms: about 2,400 at 35-41 °C, 2,130-2,190 at 47-49 °C, about 2,017 at 58 °C, and higher just after a start | Not measured | The three drives that began cold |
+
+So there are two engine speeds, as a deceleration fuel cut has: one a cut
+may begin above, and a lower one at which fuelling resumes. That the
+headlights are what moves them in the second row is an inference from
+one drive; the [WRX's ECU](#a-2015-wrxs-ecu) adds idle air for each
+light-switch bit, and a threshold that rides on the idle target would
+move with it.
+
+A rule with the warm figures, set when the speed word is under 267 or
+the engine speed is under the figure for its state, agrees with the bit
+in 296,959 of the 297,274 `141` frames with the coolant at 80 °C or
+more, no A/C request, and the engine running, in the six drives
+(99.89%). The misses are a frame or two at an edge; four last 100 ms or
+more.
+
+It gates the cut:
+
+- **No cut began with it set.** All 160 runs of `141` b7.3 in the six
+  drives began with b6.5 clear.
+- **A lift with it set gets no cut.** Of the 152 times the pedal was
+  released for 1.5 s or more in gear with the clutch out, 130 began with
+  b6.5 clear and got a cut, and 13 began with it set and got none. The
+  other 9 began with it clear and got none: they lasted 1.7-2.3 s,
+  shorter than the wait below, or b6.5 set before the cut was due.
+- **It ends the cut.** Of the 160 cuts, 126 ended when the pedal was
+  pressed. 32 ended when the revs fell to the resume speed: b6.5 set,
+  and the cut cleared 20-150 ms later, with the clutch pressed in 19 of
+  them. Those are the review's 32 edges. The last 2 ended as the car
+  slowed through 15 km/h in 1st at about 1,820 rpm, with b6.5 setting in
+  the frame that cleared the cut.
+
+That accounts for what was written about the bit before: a low-speed
+flag in most frames, set for a few seconds after some shifts (the revs
+had fallen under the threshold), coming and going at 2,000-2,500 rpm on
+a cold engine, and not the clutch.
+
+**`141` b6.6** is then "the pedal is released and b6.5 is clear"; see
+[Pedal and fuel cut flags](#pedal-and-fuel-cut-flags).
+
+**The wait from lifting off to the cut is one of a few lengths.** From
+the pedal reaching 0 to b7.3 setting took 0.63, 0.73, 0.83, 1.08, or
+1.63 s, or 2.0-2.25 s, with a median of 2.03 s, and twice 4.04 s. It is
+longer at lower engine speeds and differs from gear to gear. The rule
+behind it wasn't worked out. b7.4, the cut starting, leads b7.3 by
+0.28-0.61 s.
+
+Nothing is decoded from this yet. b6.5 would make an inferred signal as
+it stands; its thresholds away from a warm engine are in
+[Still unexplained](#still-unexplained-or-untested).
+
+### The drive in the rain
+
+`2026-11-12-153032` is 13.9 minutes from a 15 °C cold start, the first
+drive recorded since the live source stopped polling the five PIDs the
+broadcast replaces, so it has measured lambda (PID `34`) every 55 ms and
+the slow PIDs every 0.66 s. What it added is written where it belongs:
+
+- **The wipers** are `152` b7.6, one pulse a sweep; see
+  [Lighting bits](#lighting-bits-in-152-byte-7).
+- **The drive-cycle flag** set 600.1 s after the engine's start; see
+  [Drive-cycle flag](#drive-cycle-flag).
+- **The air conditioning's request** cycled ten times, and it, the fan,
+  and the compressor were seen to clear; see
+  [Lights, blower, and air conditioning](#lights-blower-and-air-conditioning).
+- **A second start, a third warm-up, and two more rows** for the
+  counters; see [Body](#body) and
+  [Counters and fuel level](#counters-and-fuel-level).
+- **Scales:** the fuel flow against measured lambda (see
+  [`360` bytes 0-1](#360-bytes-0-1-fuel-flow)), and the barometer over
+  another five values of its byte (see
+  [A 2015 WRX's ECU](#a-2015-wrxs-ecu)).
+- **`282` b5.1, `370` b7.7, and `140` b7.5** each have a line where they
+  are discussed.
+
+Two things that have no other place:
+
+- **A cold blip.** One `360` frame at 8.83 s reads 26,959, which is
+  19 g/s, as the pedal was blipped about 6.5 s after the start. Inference: the
+  extra fuel a cold engine is given as the throttle opens. It is one
+  50 ms frame, about a gram.
+- **What didn't move.** The cruise control's bits, the high beams
+  (`152` b7.4), `0D2`, the doors, and `360` b6.5 and b6.6 never changed,
+  and the lights read `0C` throughout.
 
 ## Next recording
 
@@ -1593,6 +1870,20 @@ for `140` b7.5; the lights with the parking brake off; and the idle until
 the radiator fan runs with the air conditioning off. The loads moved the
 battery current too little to give its scale with the engine running, so
 the fourth is better done with the ignition on and the engine off.
+
+2026-11-18: `2026-11-12-153032` did some of this without meaning to: the
+wipers ran for ten minutes, and the air conditioning's bits were seen to
+clear. Still to do, and new:
+
+10. Parked, the wipers through each setting with the times noted: one
+    sweep, each intermittent setting, low, high, and the washer, for
+    `152` b7.6 and whatever shows the speed.
+11. Warm, coasting down in 3rd with the pedal released from 3,000 rpm
+    until the fuel comes back, three times: with the lights off, with
+    the headlights on, and with the air conditioning on. That gives
+    `141` b6.5's resume speed in each state from a single drive.
+12. The same lift from 2,000, 3,000, and 4,000 rpm in each of 2nd to
+    5th, for the wait before the cut.
 
 The drive asked for here before has been made twice (2026-11-09), with PIDs
 `45`, `49`, `4C`, and `65`: it confirmed `140` byte 6's scale and the gear

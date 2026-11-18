@@ -274,3 +274,26 @@ gives a duration of 29.8 s for 32.0 s of frames. Since then the polling,
 the recorded duration, and every timeout in the device library are
 measured on a clock that only runs forward (`serial/monotonic-ms`), which
 setting the system's clock doesn't move.
+
+### `2026-11-12-153032`
+
+13.9 minutes of town and highway driving in the rain from a cold start,
+recorded from the dashboard with the note "cold start drive": 1,062,696
+frames and 166,338 PID samples, every request answered. It begins with
+the ignition on and the engine off at 15 °C. The engine starts at 2.2 s
+and the car pulls away at 47 s. Coolant warmed from 15 to 95 °C and oil
+from 14 to 92 °C. It covers 12.2 km in all five gears, 0-141 km/h, up to
+5,990 rpm and 100% load, and ends reversing into a parking place and
+idling. The wipers ran from 164 s and the air conditioning cycled from
+588 s; neither was noted at the time, and the rain was confirmed
+afterwards.
+
+It is the first drive recorded since the live source stopped polling the
+five PIDs the broadcast replaces, so it has RPM, speed, throttle, and the
+coolant and oil temperatures only as broadcast frames. The ten fast PIDs,
+measured lambda (PID `34`) among them, were each sampled about every
+55 ms, and the twelve slow ones every 0.66 s. What it showed is in
+[Fuel cut and the wet drive](can-broadcast.md#fuel-cut-and-the-wet-drive-2026-11-18)
+and marked "2026-11-18" through that page. The
+[2026-11-17 review](can-broadcast.md#drivetrain-and-exhaust-review-2026-11-17)
+used it for its oxygen-sensor timing.
