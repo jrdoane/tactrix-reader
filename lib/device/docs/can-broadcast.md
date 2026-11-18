@@ -150,7 +150,7 @@ frame and reply, so they grow when a value is changing fast.
 |---|---|---|
 | Engine RPM | `140`: bits 16-29 LE (byte 2, plus byte 3 & `3F`), 1 rpm per bit | 0-6,400 rpm, r = 0.9998; median error 2.75 rpm, 95th percentile 30. Idle: within 2.5 rpm in all 120 samples |
 | Vehicle speed | `0D1`: bytes 0-1 LE, 0.05625 km/h per bit | 0-139 km/h, slope 0.05625, r = 1.0000; median error 0.24 km/h, max 1.6. PID `0D` is whole km/h: rounded, the broadcast speed equals it in 96% of samples taken at a steady speed, and is 1 off in the rest |
-| Wheel speeds | `0D4`: four 16-bit LE values, 0.05625 km/h per bit | Each wheel against PID `0D`: r = 0.9999, slope 0.05618-0.05629. `0D1`'s speed is their mean, within half a km/h in 98% of frames |
+| Wheel speeds | `0D4`: four 16-bit LE values, 0.05625 km/h per bit | Each wheel against PID `0D`: r = 0.9999, slope 0.05618-0.05629. `0D1` uses the front pair. The [nine-recording check](#drivetrain-and-exhaust-review-2026-11-17) recovers its exact raw value |
 | Throttle | `140` byte 6, 0-255 | PID `11`'s raw byte is 29 + byte 6 × 176/255, rounded: 9 at idle (14%), 255 at wide-open throttle (80.4%). Exact in 89% of samples at a steady throttle, and 1 off (0.4%) in the rest. 2026-11-09: PID `45` (relative throttle) is the same without the 29: its raw byte is byte 6 × 176/255 (fitted slope 0.690 and 0.689, intercept 0), exact in 86% and 89% of steady samples in the two drives and 1 off in the rest |
 | Manifold pressure | `360` byte 4, 2 kPa per bit | Slope 2.00, intercept 0, r = 0.999; within 1 kPa of PID `0B` in 91% of samples, and in 96% at a steady pressure |
 | Oil temperature | `360` byte 2, minus 40, in °C | 43-91 °C during warm-up; equal to PID `5C` in at least 95% of samples, never more than 1 °C off. Idle: equal in all 120 |
@@ -1140,7 +1140,7 @@ dashboard shows them in their own section, tagged derived.
 | Signal | Worked out as | Sent with | No value (nil) |
 |---|---|---|---|
 | `:engine-power` | Engine torque × RPM × π ÷ 30,000, in kW; negative on the overrun | `141`'s torque | |
-| `:clutch-slip` | RPM less speed × the gear's rpm per km/h (123.2, 67.2, 46.07, 34.55, 26.22), in rpm | `141`'s torque | In neutral, and in reverse, whose ratio wasn't measured |
+| `:clutch-slip` | RPM less speed × the gear's rpm per km/h (123.2, 67.2, 46.07, 34.55, 26.22), in rpm | `141`'s torque | In neutral and in reverse. The reverse ratio was measured in the [later review](#drivetrain-and-exhaust-review-2026-11-17) |
 | `:fuel-economy` | Fuel flow ÷ 745 g/l ÷ speed, in l/100 km | `360`'s fuel flow | Below 5 km/h |
 | `:road-grade` | The mean longitudinal acceleration over the last second, less the change in `0D1`'s speed over it, ÷ g, in % | `0D0`'s acceleration | Below 10 km/h, in reverse, for a second after the yaw rate reaches 8°/s, and until most of a second has been seen |
 | `:injector-duty` | Pulse width (DID `10A3`) × RPM ÷ 1,200, in %: each injector opens once in two revolutions | The DID's reply | Not sent at all without DID polling |
@@ -1495,6 +1495,57 @@ These findings add a structural invariant and refine a field boundary;
 they do **not** establish a new calibrated physical signal. Battery
 temperature/current units, the axle-comparison fields, and the remaining
 switch identities still need independent evidence.
+
+## Drivetrain and exhaust review (2026-11-17)
+
+All nine local captures of the manual Impreza contain 4,087,894 frames.
+Run the speed, gearing, and fuel-cut checks from `lib/device` with
+`python3 -B analysis/review_drivetrain.py ~/.tactrix-reader/recordings`.
+
+**Vehicle speed comes from the front axle.** Pair each `0D1` speed word
+with the next `0D4` wheel frame. It followed 0.660–0.998 ms later in
+all 190,531 pairs. Read the first two little-endian wheel words as unsigned
+counts. When both are positive, the speed word equals their sum divided by
+two, rounded down. When either reads zero, speed reads zero. That last
+case matters in 73 frames where exactly one front wheel reported motion.
+There were zero mismatches, including all 41,670 pairs on November 12.
+The four-wheel mean misses by more than half a raw count in 61,086 pairs.
+The recordings establish the zero rule over the speeds encountered while
+starting and stopping. They do not exercise a wheel locking at road speed.
+
+**Reverse gearing gives about 119.2 engine rpm per km/h.** At each
+`0D1` frame above or equal to 4 km/h, take RPM from `140` with the reverse
+switch (`152` b6.2) on and the clutch switch (`140` b1.7) released.
+Five backing manoeuvres qualified. In date order their median ratios were
+119.21, 119.03, 119.03, 119.24, and 119.39 rpm per km/h. The November 12
+manoeuvre contributed 16.5 seconds. This gives a reference for estimating
+slip in reverse: engine RPM minus 119.2 times unsigned speed in km/h.
+First gear uses 123.2 and the gear field reports 1 in both directions.
+
+**An early indication that deceleration fuel cut is ending.** All 160
+fuel-cut episodes (`141` b7.3) began with `141` b6.5 clear. In 32 episodes
+b6.5 rose during the cut. Each time the accelerator was released and the
+latest fuel-flow word (`360` bytes 0–1) was zero. The cut flag cleared
+20–150 ms after the rising edge. The first positive flow sample followed
+the same edge by 70–230 ms (median 145 ms). Five of those events are in
+the November 12 drive. A rising b6.5 during a cut thus predicts a return
+to fuelling in these captures. The other 128 cuts ended without this
+edge, and b6.5 also changes outside fuel cut. Its full ECU meaning is open.
+
+**Oxygen-sensor response after injection stops.** The fast polling on
+November 12 resolves both sensors in six decelerations. Use the first
+zero `360` flow sample after at least one second of fuelling as time zero,
+require at least three seconds of zero flow with the engine turning at onset,
+and take episodes where both sensors cross their thresholds during the cut.
+The last pre-cut front sample must be below lambda 1.10 and less than
+0.5 s old, and the rear at least 0.40 V and less than 1.8 s old.
+The first front reading at lambda 1.20 or above (PID `34`) arrived a
+median 0.42 s after zero flow. The first rear reading at or below 0.10 V
+(PID `15`) arrived a median 1.20 s after zero flow. In five of the six,
+the rear still read above threshold after the front had already crossed.
+The sixth pair's sampling intervals overlap. These times include exhaust
+travel, sensor response, and polling cadence. The slower rear polling on
+the earlier drives leaves the order unresolved by this test.
 
 ## Next recording
 
