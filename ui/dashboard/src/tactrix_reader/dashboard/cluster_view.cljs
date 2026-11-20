@@ -1,9 +1,13 @@
 (ns tactrix-reader.dashboard.cluster-view
   "The Virtual Cluster tab: the latest values drawn as the car's instrument
   cluster shows them, with a tachometer, a speedometer, fuel and coolant
-  gauges, the gear, and the warning lamps. Unlike the dashboard's tiles,
-  which come from the catalog, the cluster is a fixed set of values, named
-  in `cluster/gauges` and here."
+  gauges, the gear, and the warning lamps. It is drawn in one of
+  `cluster/styles`: classic, with dials and needles; modern, with rings
+  that fill around the value in figures and bars for the small gauges; or
+  track, a racing display with the revs as a strip across the top, over the
+  gear between the revs and the speed in figures. All show the same values. Unlike the dashboard's tiles, which come from the
+  catalog, the cluster is a fixed set of values, named in `cluster/gauges`
+  and here."
   (:require [clojure.string :as str]
             [re-frame.core :as rf]
             [tactrix-reader.dashboard.cluster :as cluster]
@@ -87,6 +91,68 @@
      [dial-face gauge]
      [dial-hand gauge unit-label]]))
 
+(def ^:private ring-radius
+  "The middle of a ring's band."
+  100)
+
+(defn- ring-face
+  "What does not move in the modern style's ring: the band the value fills,
+  its red zone, and the marks and numbers."
+  [{:keys [from to caption] :as gauge}]
+  (let [ticks (cluster/ticks gauge)]
+    [:g
+     [:circle.ring-rim {:cx 120 :cy 120 :r 118}]
+     [:path.ring-track {:d (cluster/arc dial-centre ring-radius from to)}]
+     [zone-arc gauge dial-centre ring-radius]
+     (into [:g]
+           (for [{:keys [angle major?] :as tick} ticks
+                 :when major?]
+             (line-between dial-centre 109 114 angle {:class (tick-class tick)})))
+     (into [:g]
+           (for [{:keys [angle label red?]} ticks
+                 :when label
+                 :let [[x y] (cluster/point dial-centre 81 angle)]]
+             [:text.number {:x x :y y :class (when red? "red")} label]))
+     (when caption
+       [:text.caption {:x 120 :y 207} caption])]))
+
+(defn- ring-gaps
+  "Cuts across the band at every mark, over the fill, so it reads as
+  segments."
+  [gauge]
+  (into [:g]
+        (for [{:keys [angle]} (cluster/ticks gauge)]
+          (line-between dial-centre 93 107 angle {:class "ring-gap"}))))
+
+(defn- ring-hand
+  "What moves: the band filled as far as the value, a bright mark at its
+  end, and the value in figures in the middle. The fill is one dash of the
+  whole band, drawn back by its offset, which CSS moves smoothly."
+  [{:keys [from to] :as gauge} unit-label]
+  (let [{:keys [value]} @(rf/subscribe [::subs/sample (:name gauge)])
+        value (cluster/gauge-value gauge value)
+        alert (some-> (cluster/alert gauge value) name)]
+    [:g
+     [:path.ring-fill {:class alert
+                       :d (cluster/arc dial-centre ring-radius from to)
+                       :path-length 1
+                       :style {:stroke-dashoffset (- 1 (cluster/fraction gauge value))}}]
+     [ring-gaps gauge]
+     [:line.ring-cursor {:class [alert (when-not value "resting")]
+                         :x1 120 :y1 5 :x2 120 :y2 28
+                         :style {:transform-origin "120px 120px"
+                                 :transform (rotate (cluster/angle gauge value))}}]
+     [:text.figure {:class alert :x 120 :y 134} (if value (str (js/Math.round value)) "—")]
+     [:text.unit {:x 120 :y 153} unit-label]]))
+
+(defn- ring
+  "A large round gauge in the modern style."
+  [id label unit-label]
+  (let [gauge (get cluster/gauges id)]
+    [:svg.ring {:viewBox "0 0 240 240" :role "img" :aria-label label}
+     [ring-face gauge]
+     [ring-hand gauge unit-label]]))
+
 (defn- shown
   "A tile and its latest value as the cluster shows them, in the chosen
   units: [tile value unit]."
@@ -135,6 +201,69 @@
       (if (some? value) (str (js/Math.round value)) "—")
       [:span.cluster-unit (tile-unit tile unit)]]
      [:div.cluster-label (:label tile)]]))
+
+(defn- bar-gauge
+  "A small gauge in the modern style: a bar that fills along its scale,
+  between the letters at its ends, under its value in figures. The bar
+  follows the PID's own value, and the figures the chosen units."
+  [id]
+  (let [gauge (get cluster/gauges id)
+        {raw :value} @(rf/subscribe [::subs/sample (:name gauge)])
+        [tile value unit] (shown @(rf/subscribe [::subs/tile :pid (:name gauge)]))
+        [bottom top] (map val (sort-by key (:marks gauge)))]
+    [:div.cluster-bar
+     [:div.cluster-bar-head
+      [:span.cluster-label (:label tile)]
+      [:span.cluster-bar-value
+       (if (some? value) (str (js/Math.round value)) "—")
+       [:span.cluster-unit (tile-unit tile unit)]]]
+     [:div.cluster-bar-scale
+      [:span.cluster-bar-end bottom]
+      [:div.cluster-bar-track {:role "img" :aria-label (:label tile)}
+       [:div.cluster-bar-fill {:class (some-> (cluster/alert gauge raw) name)
+                               :style {:width (str (* 100 (cluster/fraction gauge raw)) "%")}}]]
+      [:span.cluster-bar-end top]]]))
+
+(defn- percent [fraction]
+  (str (* 100 fraction) "%"))
+
+(defn- strip-scale
+  "The numbers under the strip, each under its place along the scale."
+  [gauge]
+  (into [:div.strip-scale {:aria-hidden true}]
+        (for [{:keys [value label red?]} (cluster/ticks gauge)
+              :when label]
+          [:span {:class (when red? "red")
+                  :style {:left (percent (cluster/fraction gauge value))}}
+           label])))
+
+(defn- strip
+  "A gauge in the track style: a strip that fills from left to right as far
+  as the value, green and then amber up to its red zone. The colours stay
+  where they are along the scale, and the fill uncovers them."
+  [id label]
+  (let [{:keys [red-from caption] :as gauge} (get cluster/gauges id)
+        {:keys [value]} @(rf/subscribe [::subs/sample (:name gauge)])
+        value (cluster/gauge-value gauge value)]
+    [:div.strip {:role "img" :aria-label label
+                 :style {"--red-from" (percent (cluster/fraction gauge red-from))}}
+     [:div.strip-track
+      [:div.strip-fill
+       {:style {:clip-path (str "inset(0 " (percent (- 1 (cluster/fraction gauge value))) " 0 0)")}}]]
+     [strip-scale gauge]
+     (when caption
+       [:div.strip-caption caption])]))
+
+(defn- reading
+  "A gauge's value in large figures over its unit, in the track style."
+  [id unit-label]
+  (let [gauge (get cluster/gauges id)
+        {:keys [value]} @(rf/subscribe [::subs/sample (:name gauge)])
+        value (cluster/gauge-value gauge value)]
+    [:div.track-reading
+     [:div.track-reading-value {:class (some-> (cluster/alert gauge value) name)}
+      (if value (str (js/Math.round value)) "—")]
+     [:div.cluster-label unit-label]]))
 
 (defn- gear
   "The gear, as its tile shows it: N in neutral and R in reverse."
@@ -201,43 +330,83 @@
            [:svg {:viewBox "0 0 24 24" :aria-hidden true}
             (get lamp-icons id)]])))
 
-(defn- unit-toggle
-  "A pair of buttons that picks one of a setting's `options`, each [unit
+(defn- toggle
+  "A row of buttons that picks one of a setting's `options`, each [option
   text]."
   [setting label options chosen]
   [:div.cluster-toggle {:role "group" :aria-label label}
-   (for [[unit text] options]
-     ^{:key unit}
-     [:button {:class (when (= unit chosen) "active")
-               :aria-pressed (= unit chosen)
-               :on-click #(rf/dispatch [::events/set-unit setting unit])}
+   (for [[option text] options]
+     ^{:key option}
+     [:button {:class (when (= option chosen) "active")
+               :aria-pressed (= option chosen)
+               :on-click #(rf/dispatch [::events/set-cluster-setting setting option])}
       text])])
 
+(defn- infos
+  "The lines of the display between the large gauges."
+  []
+  [:div.cluster-infos
+   [info :signal :outside-temp]
+   [info :pid :oil-temp]
+   [info :signal :fuel-economy]])
+
+(def ^:private parts
+  "What the classic and modern styles draw their large and small gauges
+  with."
+  {:classic {:large dial :small small-gauge :smalls :div.cluster-smalls}
+   :modern {:large ring :small bar-gauge :smalls :div.cluster-bars}})
+
+(defn- dials
+  "The classic and modern styles: a large gauge each side of the gear, the
+  small gauges, and the display's lines. `speed` is the speedometer's
+  gauge."
+  [{:keys [large small smalls]} speed]
+  [:div.cluster-dials
+   [:div.cluster-tach
+    [large :tach "Tachometer" "rpm"]]
+   [:div.cluster-centre
+    [gear]
+    [smalls
+     [small :coolant]
+     [small :fuel]]
+    [infos]]
+   [:div.cluster-speed
+    ;; Keyed, so a change of units draws a new face.
+    ^{:key speed}
+    [large speed "Speedometer" (:unit-label (get cluster/gauges speed))]]])
+
+(defn- track
+  "The track style: the revs as a strip across the top, the gear between
+  the revs and the speed in figures, and the rest below."
+  [speed]
+  [:div.track
+   [strip :tach "Tachometer"]
+   [:div.track-row
+    [reading :tach "rpm"]
+    [gear]
+    [reading speed (:unit-label (get cluster/gauges speed))]]
+   [:div.track-lower
+    [:div.cluster-bars
+     [bar-gauge :coolant]
+     [bar-gauge :fuel]]
+    [infos]]])
+
 (defn cluster-view []
-  (let [speed-unit @(rf/subscribe [::subs/speed-unit])
+  (let [style @(rf/subscribe [::subs/cluster-style])
+        speed-unit @(rf/subscribe [::subs/speed-unit])
         speed (get cluster/speed-units speed-unit)]
-    [:section.cluster {:aria-label "Virtual cluster"}
-     [:div.cluster-dials
-      [:div.cluster-tach
-       [dial :tach "Tachometer" "rpm"]]
-      [:div.cluster-centre
-       [gear]
-       [:div.cluster-smalls
-        [small-gauge :coolant]
-        [small-gauge :fuel]]
-       [:div.cluster-infos
-        [info :signal :outside-temp]
-        [info :pid :oil-temp]
-        [info :signal :fuel-economy]]]
-      [:div.cluster-speed
-       ;; Keyed, so a change of units draws a new face.
-       ^{:key speed}
-       [dial speed "Speedometer" (:unit-label (get cluster/gauges speed))]]]
+    [:section.cluster {:class (name style) :aria-label "Virtual cluster"}
+     ;; Keyed, so a change of style draws new gauges.
+     (if (= :track style)
+       ^{:key style} [track speed]
+       ^{:key style} [dials (get parts style) speed])
      [:div.cluster-foot
+      [:div.cluster-styles
+       [toggle :cluster-style "Cluster style" cluster/styles style]]
       [lamps]
       [:div.cluster-units
        ;; Speed in mph also puts the fuel economy in miles per gallon.
-       [unit-toggle :speed-unit "Speed and fuel economy units"
+       [toggle :speed-unit "Speed and fuel economy units"
         [[:km-per-hour "km/h"] [:miles-per-hour "mph"]] speed-unit]
-       [unit-toggle :temperature-unit "Temperature units"
+       [toggle :temperature-unit "Temperature units"
         [[:celsius "°C"] [:fahrenheit "°F"]] @(rf/subscribe [::subs/temperature-unit])]]]]))

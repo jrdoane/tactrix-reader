@@ -1,6 +1,7 @@
 (ns tactrix-reader.dashboard.cluster
   "The pure parts of the virtual cluster: the scale of each gauge, where its
-  needle points, the marks on its face, and which warning lamps are lit.
+  needle points or how far it has filled, the marks on its face, and which
+  warning lamps are lit.
   Angles are in degrees, clockwise from straight up, as a needle turns."
   (:require [clojure.string :as str]))
 
@@ -34,6 +35,12 @@
   "The speedometer's units, and the gauge for each."
   {:km-per-hour :speed
    :miles-per-hour :speed-mph})
+
+(def styles
+  "The ways the cluster can be drawn, each [id label], the default first:
+  dials with needles, rings that fill around the value in figures, or a
+  racing display, with the revs as a strip across the top over the gear."
+  [[:classic "Classic"] [:modern "Modern"] [:track "Track"]])
 
 (def ^:private mpg-litres-per-100-km
   "What divides by litres per 100 km to give miles per US gallon."
@@ -69,15 +76,28 @@
   (when (number? value)
     (cond-> value factor (* factor))))
 
+(defn fraction
+  "How far up the gauge's scale a value in its unit is, from 0 at the bottom
+  to 1 at the top. A value off either end of the scale stops at that end,
+  and no value rests at the bottom."
+  [{:keys [low high]} value]
+  (if (number? value)
+    (-> (/ (- value low) (- high low)) (max 0) (min 1))
+    0))
+
 (defn angle
-  "Where the needle points for a value in the gauge's unit. A value off
-  either end of the scale stops at that end, and no value rests at the
-  bottom."
-  [{:keys [low high from to]} value]
-  (let [fraction (if (number? value)
-                   (-> (/ (- value low) (- high low)) (max 0) (min 1))
-                   0)]
-    (+ from (* fraction (- to from)))))
+  "Where the needle points for a value in the gauge's unit."
+  [{:keys [from to] :as gauge} value]
+  (+ from (* (fraction gauge value) (- to from))))
+
+(defn alert
+  "`:red` for a value in the gauge's red zone and `:low` for one in its
+  amber zone, or nil."
+  [{:keys [red-from low-to]} value]
+  (when (number? value)
+    (cond
+      (and red-from (<= red-from value)) :red
+      (and low-to (<= value low-to)) :low)))
 
 (defn ticks
   "The marks on a gauge's face, from the bottom of its scale to the top:

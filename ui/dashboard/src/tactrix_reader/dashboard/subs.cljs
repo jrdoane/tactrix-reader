@@ -178,6 +178,11 @@
    (:temperature-unit db)))
 
 (rf/reg-sub
+ ::cluster-style
+ (fn [db _]
+   (:cluster-style db)))
+
+(rf/reg-sub
  ::cluster-units
  ;; The units the virtual cluster shows values in, for `cluster/convert`.
  :<- [::speed-unit]

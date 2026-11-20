@@ -580,7 +580,8 @@ table.fields { margin-top: 12px; border-collapse: collapse; font-size: 13px; }
 .clock { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
 
 /* The virtual cluster. It is dark in both themes, as the car's is, so it has
-   its own colours. */
+   its own colours. These are the classic style's, and the parts both
+   styles share; the modern style's follow. */
 .cluster {
   --face: #0b0d11;
   --ring: #3a414c;
@@ -689,6 +690,7 @@ table.fields { margin-top: 12px; border-collapse: collapse; font-size: 13px; }
 .lamp.on svg, .lamp.flashing svg { filter: drop-shadow(0 0 4px currentColor); }
 .lamp.flashing { animation: lamp-flash 1s steps(1) infinite; }
 @keyframes lamp-flash { 50% { opacity: 0.15; } }
+.cluster-styles { grid-column: 1; justify-self: start; }
 .cluster-units { grid-column: 3; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .cluster-toggle { display: flex; }
 .cluster-toggle button {
@@ -704,9 +706,175 @@ table.fields { margin-top: 12px; border-collapse: collapse; font-size: 13px; }
 .cluster-toggle button.active { color: var(--face); background: var(--ink); border-color: var(--ink); }
 @media (max-width: 560px) {
   .cluster-foot { grid-template-columns: 1fr; justify-items: center; }
-  .cluster-lamps, .cluster-units { grid-column: 1; justify-self: center; }
+  .cluster-styles, .cluster-lamps, .cluster-units { grid-column: 1; justify-self: center; }
 }
+
+/* The modern style: rings that fill as far as the value, around the value
+   in figures, and bars for the small gauges. */
+.cluster.modern {
+  --face: #070c14;
+  --band: #122131;
+  --ring: #1f3a52;
+  --ink: #eaf6ff;
+  --ink-dim: #7391aa;
+  --accent: #2fd8ff;
+  --red: #ff4d5e;
+  --amber: #ffb53d;
+  background:
+    radial-gradient(60% 70% at 50% 108%, rgba(47, 216, 255, 0.16) 0%, rgba(47, 216, 255, 0) 70%),
+    linear-gradient(180deg, #0b131e 0%, #070b12 100%);
+  border-color: #17304a;
+}
+.cluster .ring-rim { fill: var(--face); stroke: var(--ring); stroke-width: 1px; }
+.cluster .ring-track { fill: none; stroke: var(--band); stroke-width: 14px; }
+.cluster .ring .zone { stroke-width: 14px; opacity: 0.32; }
+/* One dash as long as the band, drawn back by its offset. It moves for
+   120 ms, as a needle does. */
+.cluster .ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 14px;
+  stroke-dasharray: 1 1;
+  filter: drop-shadow(0 0 5px var(--accent));
+  transition: stroke-dashoffset 120ms linear, stroke 200ms linear;
+}
+.cluster .ring-fill.red { stroke: var(--red); filter: drop-shadow(0 0 5px var(--red)); }
+.cluster .ring-gap { stroke: var(--face); stroke-width: 1.6px; }
+.cluster .ring-cursor {
+  stroke: #ffffff;
+  stroke-width: 2px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 3px var(--accent));
+  transition: transform 120ms linear;
+}
+.cluster .ring-cursor.red { filter: drop-shadow(0 0 3px var(--red)); }
+.cluster .ring-cursor.resting { opacity: 0.35; }
+.cluster .ring .tick.major { stroke: var(--ink-dim); stroke-width: 1.5px; }
+.cluster .ring .tick.major.red { stroke: var(--red); }
+.cluster .ring .number { fill: var(--ink-dim); font-size: 10px; font-weight: 500; }
+.cluster .ring .number.red { fill: var(--red); }
+.cluster .ring .figure { font-size: 46px; font-weight: 300; }
+.cluster .ring .figure.red { fill: var(--red); }
+.cluster .ring .unit { letter-spacing: 0.16em; text-transform: uppercase; }
+
+.cluster.modern .cluster-gear {
+  background: rgba(47, 216, 255, 0.05);
+  border-color: rgba(47, 216, 255, 0.45);
+  box-shadow: 0 0 22px -8px var(--accent), inset 0 0 22px -12px var(--accent);
+}
+.cluster.modern .cluster-gear-value { font-weight: 300; color: var(--accent); text-shadow: 0 0 14px rgba(47, 216, 255, 0.55); }
+.cluster.modern .cluster-infos { border-top-color: var(--ring); }
+.cluster.modern .cluster-info-value { font-weight: 500; }
+.cluster-bars { display: grid; gap: 14px; width: 100%; max-width: 340px; }
+.cluster-bar-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cluster-bar-value { font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cluster-bar-scale { display: grid; grid-template-columns: 12px minmax(0, 1fr) 12px; align-items: center; gap: 8px; margin-top: 5px; }
+.cluster-bar-end { color: var(--ink-dim); font-size: 11px; font-weight: 600; text-align: center; }
+/* Twenty segments, cut out of the track and its fill together. */
+.cluster-bar-track {
+  height: 10px;
+  background: var(--band);
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0, #000 calc(5% - 2px), transparent calc(5% - 2px), transparent 5%);
+  mask-image: repeating-linear-gradient(90deg, #000 0, #000 calc(5% - 2px), transparent calc(5% - 2px), transparent 5%);
+}
+.cluster-bar-fill { height: 100%; background: var(--accent); box-shadow: 0 0 8px var(--accent); transition: width 300ms linear; }
+.cluster-bar-fill.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.cluster-bar-fill.low { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+/* The track style: a racing display. The revs are a strip across the top
+   that grows taller towards its red zone, over the gear between the revs
+   and the speed in figures. */
+.cluster.track {
+  --face: #000000;
+  --band: #1d1d21;
+  --ring: #34343a;
+  --ink: #ffffff;
+  --ink-dim: #9a9aa2;
+  --accent: #ffd21f;
+  --red: #ff3b30;
+  --amber: #ffd21f;
+  --green: #35d96b;
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.022) 0, rgba(255, 255, 255, 0.022) 2px, transparent 2px, transparent 6px),
+    #0b0b0d;
+  border-color: #2a2a30;
+  border-radius: 14px;
+}
+.track { display: grid; gap: clamp(12px, 2vw, 26px); }
+/* Forty segments, cut out of the strip and its fill together. */
+.strip-track {
+  height: clamp(36px, 6.5vw, 76px);
+  background: var(--band);
+  clip-path: polygon(0 62%, 100% 0, 100% 100%, 0 100%);
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0, #000 calc(2.5% - 2px), transparent calc(2.5% - 2px), transparent 2.5%);
+  mask-image: repeating-linear-gradient(90deg, #000 0, #000 calc(2.5% - 2px), transparent calc(2.5% - 2px), transparent 2.5%);
+}
+/* The colours run the whole strip, and the fill is cut back to the value.
+   It moves for 120 ms, as a needle does. */
+.strip-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    var(--green) 0%, var(--green) 45%,
+    var(--amber) 68%, var(--amber) var(--red-from, 100%),
+    var(--red) var(--red-from, 100%), var(--red) 100%);
+  transition: clip-path 120ms linear;
+}
+.strip-scale { position: relative; height: 18px; margin: 6px 0 0; }
+.strip-scale span {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--ink-dim);
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.strip-scale span:first-child { transform: none; }
+.strip-scale span:last-child { transform: translateX(-100%); }
+.strip-scale span.red { color: var(--red); }
+.strip-caption { margin-top: 2px; text-align: center; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.04em; }
+.track-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: clamp(10px, 2vw, 28px); }
+.track-reading { text-align: center; min-width: 0; }
+.track-reading-value {
+  font-size: clamp(40px, 9vw, 108px);
+  font-style: italic;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.track-reading-value.red { color: var(--red); }
+.track-reading .cluster-label { margin-top: 4px; font-size: 13px; letter-spacing: 0.14em; }
+.cluster.track .cluster-gear {
+  min-width: clamp(96px, 17vw, 200px);
+  padding: 2px 18px 8px;
+  background: #000000;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+}
+.cluster.track .cluster-gear-value {
+  color: var(--accent);
+  font-size: clamp(64px, 13vw, 156px);
+  font-style: italic;
+  font-weight: 800;
+  line-height: 1;
+}
+.track-lower {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: clamp(14px, 3vw, 44px);
+  padding-top: clamp(10px, 1.6vw, 18px);
+  border-top: 1px solid var(--ring);
+}
+.cluster.track .cluster-bars, .cluster.track .cluster-infos { max-width: none; }
+.cluster.track .cluster-infos { padding-top: 0; border-top: none; gap: 8px; }
+.cluster.track .cluster-bar-fill { box-shadow: none; }
+@media (max-width: 560px) {
+  .track-lower { grid-template-columns: 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cluster .needle { transition: none; }
+  .cluster .needle, .cluster .ring-fill, .cluster .ring-cursor, .cluster-bar-fill, .strip-fill { transition: none; }
   .lamp.flashing { animation: none; }
 }

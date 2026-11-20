@@ -17,6 +17,32 @@
   (testing "a scale that does not start at 0"
     (is (= 0 (cluster/angle (:coolant cluster/gauges) 90)))))
 
+(deftest a-gauge-fills-as-far-as-its-value
+  (is (= 0 (cluster/fraction tach 0)))
+  (is (= 0.5 (cluster/fraction tach 4000)))
+  (is (= 1 (cluster/fraction tach 8000)))
+  (testing "off the scale, and no value"
+    (is (= 1 (cluster/fraction tach 9200)))
+    (is (= 0 (cluster/fraction tach -50)))
+    (is (= 0 (cluster/fraction tach nil))))
+  (testing "a scale that does not start at 0"
+    (is (= 0.5 (cluster/fraction (:coolant cluster/gauges) 90)))))
+
+(deftest a-value-in-a-zone-is-an-alert
+  (is (nil? (cluster/alert tach 6499)))
+  (is (= :red (cluster/alert tach 6500)))
+  (is (= :red (cluster/alert tach 9200)))
+  (testing "the amber zone at the bottom of the fuel gauge"
+    (is (= :low (cluster/alert (:fuel cluster/gauges) 12.5)))
+    (is (nil? (cluster/alert (:fuel cluster/gauges) 13))))
+  (testing "a gauge with no zone, and no value"
+    (is (nil? (cluster/alert (:speed cluster/gauges) 240)))
+    (is (nil? (cluster/alert tach nil)))))
+
+(deftest the-first-style-is-the-default
+  (is (= [:classic :modern :track] (map first cluster/styles)))
+  (is (every? string? (map second cluster/styles))))
+
 (deftest the-speedometer-reads-in-either-unit
   (let [mph (get cluster/gauges (:miles-per-hour cluster/speed-units))]
     (is (= 100 (cluster/gauge-value (:speed cluster/gauges) 100)))

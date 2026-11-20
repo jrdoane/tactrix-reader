@@ -58,6 +58,14 @@ it names is true: the gear shows R while reverse is on.
 does, dark in both themes:
 
 - A tachometer and a speedometer, each with its value in figures.
+- A style switch in the other corner, also remembered. Classic draws dials
+  with needles and two small gauges. Modern draws each large gauge as a
+  ring that fills as far as its value, around the value in large figures,
+  and the coolant and fuel as bars; a ring or bar turns red or amber in
+  the gauge's zone. Track is a racing display: the revs as a strip across
+  the top, green and then amber up to the red zone, over the gear between
+  the revs and the speed in large figures, with the bars and the rest
+  below. All three show the same values.
 - Two unit switches in the corner, remembered in the browser. km/h or mph
   sets the speedometer, and mph also puts the fuel economy in miles per US
   gallon, which stops at 99.9 as the fuel flow nears nothing. °C or °F sets
@@ -70,7 +78,8 @@ does, dark in both themes:
   lamp is dim while it is off or nothing has said, and its tooltip says
   which.
 
-A needle with no value rests, dimmed, at the bottom of its scale. The scales
+A needle with no value rests, dimmed, at the bottom of its scale, and a
+ring with none is empty. The scales
 are drawn to suit the car, not copied from its cluster: the tachometer's red
 zone starts at 6500 rpm, and the coolant gauge runs from 50 to 130 °C with
 its red zone from 115. Unlike the Dashboard's tiles, the cluster's values
@@ -146,8 +155,8 @@ Namespaces are under `tactrix-reader.dashboard`:
 | `format` | Units, number formats, a tile's value as text, and labels from the catalog |
 | `catalog` | Pure: turns the server's catalog into sections, groups, and tiles, and into the fields of each CAN ID |
 | `bus` | Pure: the latest frame per CAN ID, which bits have changed, the baseline, and which field a bit belongs to |
-| `cluster-view` | The Virtual Cluster tab: the dials, the small gauges, the gear, and the warning lamps |
-| `cluster` | Pure: each gauge's scale, where its needle points, the marks on its face, and which warning lamps are lit |
+| `cluster-view` | The Virtual Cluster tab in each style: the dials, rings, or strip, the small gauges or bars, the gear, and the warning lamps |
+| `cluster` | Pure: the styles, each gauge's scale, where its needle points and how far it has filled, the marks on its face, and which warning lamps are lit |
 | `series` | Pure: time-series logs from recordings or the stream, holding values on a grid, axes, binning, and sparklines |
 
 `catalog`, `bus`, `cluster`, and `series` are tested by `npm test`.

@@ -1,6 +1,7 @@
 (ns tactrix-reader.dashboard.events
   (:require [re-frame.core :as rf]
             [tactrix-reader.dashboard.bus :as bus]
+            [tactrix-reader.dashboard.cluster :as cluster]
             [tactrix-reader.dashboard.http]
             [tactrix-reader.dashboard.series :as series]
             [tactrix-reader.dashboard.stream]))
@@ -85,6 +86,8 @@
    :speed-unit :km-per-hour
    ;; The virtual cluster's temperatures: :celsius or :fahrenheit.
    :temperature-unit :celsius
+   ;; How the virtual cluster is drawn: one of `cluster/styles`.
+   :cluster-style :classic
    ;; Everything the stream has sent since the source last changed, as a
    ;; `series` log.
    :stream-log nil
@@ -156,16 +159,18 @@
      (js/localStorage.setItem collapsed-storage-key (js/JSON.stringify (clj->js (map name collapsed))))
      (catch :default _ nil))))
 
-(def ^:private unit-settings
-  "The virtual cluster's unit settings, by their key in the db: where each
-  is saved in the browser, and its options, the default first."
+(def ^:private cluster-settings
+  "The virtual cluster's settings, by their key in the db: where each is
+  saved in the browser, and its options, the default first."
   {:speed-unit {:storage-key "tactrix-reader.speed-unit"
                 :options [:km-per-hour :miles-per-hour]}
    :temperature-unit {:storage-key "tactrix-reader.temperature-unit"
-                      :options [:celsius :fahrenheit]}})
+                      :options [:celsius :fahrenheit]}
+   :cluster-style {:storage-key "tactrix-reader.cluster-style"
+                   :options (mapv first cluster/styles)}})
 
-(defn- stored-units
-  "Each unit setting as saved in this browser, or its default."
+(defn- stored-cluster-settings
+  "Each of the cluster's settings as saved in this browser, or its default."
   []
   (into {}
         (map (fn [[setting {:keys [storage-key options]}]]
@@ -173,13 +178,13 @@
                               ((set options) (keyword (js/localStorage.getItem storage-key)))
                               (catch :default _ nil))
                             (first options))]))
-        unit-settings))
+        cluster-settings))
 
 (rf/reg-fx
- ::store-unit
- (fn [[setting unit]]
+ ::store-cluster-setting
+ (fn [[setting option]]
    (try
-     (js/localStorage.setItem (get-in unit-settings [setting :storage-key]) (name unit))
+     (js/localStorage.setItem (get-in cluster-settings [setting :storage-key]) (name option))
      (catch :default _ nil))))
 
 (defn- hash-view
@@ -199,7 +204,7 @@
  ::initialize
  (fn [_ _]
    {:db (merge (assoc initial-db :view (hash-view) :collapsed (stored-collapsed))
-               (stored-units))
+               (stored-cluster-settings))
     :stream/connect "/stream"
     ::refresh-sparklines-every 1000
     :fx [[:dispatch [::load-catalog]]
@@ -246,11 +251,11 @@
       ::store-collapsed collapsed})))
 
 (rf/reg-event-fx
- ::set-unit
- ;; `setting` is :speed-unit or :temperature-unit.
- (fn [{:keys [db]} [_ setting unit]]
-   {:db (assoc db setting unit)
-    ::store-unit [setting unit]}))
+ ::set-cluster-setting
+ ;; `setting` is :speed-unit, :temperature-unit, or :cluster-style.
+ (fn [{:keys [db]} [_ setting option]]
+   {:db (assoc db setting option)
+    ::store-cluster-setting [setting option]}))
 
 (rf/reg-event-db
  ::toggle-details
