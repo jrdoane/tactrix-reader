@@ -1525,6 +1525,29 @@ Two things it adds about the engine's messages:
   no bit flashes at that rate in seven minutes of a BRZ's drive to work
   either, and `152` b7.4 goes with its high beams. The turn signals
   probably aren't on this bus.
+  2026-11-19: tested, and they aren't. `2026-11-19-211435` is 8.9 s parked
+  at idle (710-737 rpm) in which the stalk was bumped once to the left and
+  then once to the right, for three flashes each way. Of its 26 IDs, no
+  bit follows the stalk or the lamps: every bit that changes is a counter,
+  a parity bit, or part of a value that moves at idle, and `152` byte 7
+  is `0C` and `282` byte 5 is `00` throughout. The steering torque
+  (`371` bytes 2-3, `370` byte 4) is disturbed twice, at 0.7-1.6 s and
+  2.6-3.4 s, and is still from 3.6 s: probably the hand at the stalk.
+
+  One thing pulses, and it isn't settled what it is. The undamped fuel
+  sender (`282` bits 0-11) steps up 14 counts, from 340 to 354, for
+  0.3-0.5 s once every 1.0 s, nine times, from 0.47 s to the end. Pulses
+  like them are in `2026-11-12-153032` from 29.9 s to 38 s, parked before
+  pulling away (30 counts there, on 180, and steady before and after),
+  and from 822.9 s to 828.4 s after parking; neither starts when the
+  seatbelt bit changes. `2026-10-24-idle` and `2026-11-11-200210`, parked throughout, have
+  none. A lamp flashing could shift the cluster's reading of the sender
+  through a shared ground or supply, but nine pulses with no break in
+  their rhythm are not three flashes, a pause, and three more, so that
+  reading doesn't fit this test as described. Nothing is decoded from it.
+  A longer recording would settle it: ten seconds with nothing touched, a
+  bump to the left, ten seconds, a bump to the right, ten seconds, and
+  then the hazard lights for five.
 - **Daytime running lights, high beams, and wipers** (`152` byte 7): see
   [Lighting bits](#lighting-bits-in-152-byte-7); those readings are
   untested. The light switch's two positions have been tested.

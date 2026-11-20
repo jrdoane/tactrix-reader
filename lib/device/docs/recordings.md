@@ -297,3 +297,13 @@ measured lambda (PID `34`) among them, were each sampled about every
 and marked "2026-11-18" through that page. The
 [2026-11-17 review](can-broadcast.md#drivetrain-and-exhaust-review-2026-11-17)
 used it for its oxygen-sensor timing.
+
+### `2026-11-19-211435`
+
+8.9 seconds parked at a warm idle (710-737 rpm), recorded from the
+dashboard with the note "left blinker then right blinker": 11,338 frames
+on 26 IDs and 1,775 PID samples, every request answered. The stalk was
+bumped once each way, for three flashes each. No bit follows either; the
+fuel sender pulses once a second throughout, which doesn't match six
+flashes. See the blinkers under
+[Still unexplained or untested](can-broadcast.md#still-unexplained-or-untested).
